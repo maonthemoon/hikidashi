@@ -29,7 +29,7 @@ ZIPの中は, `Hikidashi.exe`, ローマ字で日本語の名前を探すため�
 
 ### gitを使う場合
 
-cloneして, `bin\Hikidashi.exe`を起動するだけで使えます(最新のリリースと同じexeです. ビルドは要りません).
+cloneして, `bin\Hikidashi.exe`を起動するだけで使えます(最新のリリースと同じexeで, 隣に辞書もあります. ビルドは要りません).
 
 ```bat
 cd %USERPROFILE%
@@ -115,7 +115,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 - **リリース**: `v`で始まるタグ(例: `v0.1.0`)をpushすると, GitHub ActionsがビルドとテストをしてZIPを作り, Releasesに置きます. あわせて, `bin/Hikidashi.exe`をそのexeに差し替えます. `bin/Hikidashi.exe`は手で更新しません.
 - **マニュアル**: `docs/index.html`(1つのHTML). exeに埋め込み, トレイの`Manual`で開きます. 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
 - **アイコン**: `uv run tools/make-icon.py`で`assets/hikidashi.ico`を作り直します.
-- **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, ZIPに別のファイルとして同梱します(Actionsが[skk-dev/dict](https://github.com/skk-dev/dict)から取ってくる). exeの隣に辞書がなければ(gitで入れた場合など), 初めて起動したときにネットから取ってきます.
+- **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, 別のファイルとして`bin/`に置き, ZIPにも入れます. 新しくするときは`./tools/update-dict.sh`で[skk-dev/dict](https://github.com/skk-dev/dict)から取ってきてcommitします. exeの隣に辞書がなければ, 初めて起動したときにネットから取ってきます.
 
 ## ライセンス
 

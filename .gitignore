@@ -1,6 +1,8 @@
-# bin/にはリリースした版のHikidashi.exeだけを置く(Actionsが差し替える). 手元のビルドはout/(dev/があればdev/bin/)
+# bin/にはリリースした版のHikidashi.exe(Actionsが差し替える)と辞書(tools/update-dict.sh)だけを置く. 手元のビルドはout/(dev/があればdev/bin/)
 /bin/*
 !/bin/Hikidashi.exe
+!/bin/SKK-JISYO.L
+!/bin/SKK-JISYO.L-COPYING.txt
 /out/
 /target/
 __pycache__/
