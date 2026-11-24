@@ -45,6 +45,10 @@ ACCENT = (0xD9, 0x77, 0x57)
 ACCENT_I = (0xB8, 0x5A, 0x39)
 WIDTH, INPUT_H, PAD_X, ROW_H, LIST_PAD, ICON = 680, 60, 20, 52, 6, 28
 INPUT_FONT, NAME_FONT, SUB_FONT, TAG_FONT = 20, 15, 13, 13
+STATUS_H, COMPOSE_BAND, COMPOSE_TOP, COMPOSE_BOTTOM = 30, 38, 14, 12
+# compose.rs: 本文は入力欄と同じ大きさ, 見出しは倍率, コードは0.875倍
+HEADING = [1.802, 1.602, 1.424]
+MONO = 0.875
 
 # 架空の色
 SKY = (0x6A, 0x9B, 0xCC)
@@ -171,6 +175,12 @@ def draw_icon(d: ImageDraw.ImageDraw, fonts: Fonts, kind: str, x: float, y: floa
     elif kind == "folder":
         d.rounded_rectangle(box(x + 2, y + 6, 11, 6), radius=s(2), fill=(0xD9, 0xB0, 0x6C))
         d.rounded_rectangle(box(x + 2, y + 9, 24, 16), radius=s(3), fill=SAND)
+    elif kind == "calc":
+        d.rounded_rectangle(box(x + 4, y + 2, 20, 24), radius=s(4), outline=TEXT2, width=s(1.6))
+        d.rectangle(box(x + 8, y + 6, 12, 5), fill=TEXT2)
+        for r in range(2):
+            for c in range(3):
+                d.rectangle(box(x + 8 + c * 4.6, y + 14 + r * 5, 2.6, 2.6), fill=TEXT2)
     elif kind == "chat":
         d.rounded_rectangle(box(x + 2, y + 4, 24, 17), radius=s(6), outline=TEXT2, width=s(1.6))
         d.polygon([(s(x + 8), s(y + 20)), (s(x + 8), s(y + 26)), (s(x + 14), s(y + 20))], fill=TEXT2)
@@ -234,7 +244,86 @@ def draw_launcher(img: Image.Image, fonts: Fonts, text: str, rows: list[dict], g
         y += ROW_H
 
 
-def draw_browser(img: Image.Image, fonts: Fonts, question: str):
+def draw_compose(img: Image.Image, fonts: Fonts, lines: list[str], caret: bool):
+    """長い質問を書く窓(paint.rsのpaint_compose, compose.rs). Markdownの印は隠して整えて見せる."""
+    body = INPUT_FONT
+    # 行の高さ
+    def lh(ln):
+        if ln.startswith("## "):
+            return body * HEADING[1] * 1.25 + 10
+        return body * 1.55
+    content_h = sum(lh(ln) for ln in lines) if lines else body * 1.55
+    h = COMPOSE_BAND + COMPOSE_TOP + max(96, content_h) + COMPOSE_BOTTOM + STATUS_H
+    rect = (LX, LY, WIDTH, h)
+    shadow(img, rect, 8, alpha=90, blur=22, dy=10)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(box(*rect), radius=s(8), fill=BG, outline=BORDER, width=SS)
+    # 上の帯: ChatGPTの印とキーの案内
+    d.rounded_rectangle(box(LX + 1, LY + 1, WIDTH - 2, COMPOSE_BAND - 1), radius=s(7), fill=BG_SUBTLE)
+    d.rectangle(box(LX + 1, LY + 10, WIDTH - 2, COMPOSE_BAND - 10), fill=BG_SUBTLE)
+    d.line([(s(LX), s(LY + COMPOSE_BAND)), (s(LX + WIDTH), s(LY + COMPOSE_BAND))], fill=BORDER_FAINT, width=SS)
+    tf = fonts.get(TAG_FONT)
+    cw = text_w(tf, "ChatGPT") + 16
+    d.rounded_rectangle(box(LX + PAD_X, LY + 7, cw, 24), radius=s(6), fill=BG_MUTED)
+    d.text((s(LX + PAD_X + cw / 2), s(LY + 19)), "ChatGPT", font=tf, fill=TEXT, anchor="mm")
+    d.text((s(LX + WIDTH - PAD_X), s(LY + 19)), "Enter  Send     Shift+Enter  New line     Esc  Back",
+           font=fonts.get(SUB_FONT), fill=TEXT3, anchor="rm")
+    # 本文
+    y = LY + COMPOSE_BAND + COMPOSE_TOP
+    x0 = LX + PAD_X
+    end = (x0, y + body * 0.78)
+    for ln in lines:
+        h1 = lh(ln)
+        cy = y + h1 / 2 + (2 if ln.startswith("## ") else 0)
+        x = x0
+        if ln.startswith("## "):
+            f = fonts.get(body * HEADING[1], "Bold")
+            d.text((s(x), s(cy)), ln[3:], font=f, fill=TEXT, anchor="lm")
+            x += text_w(f, ln[3:])
+        else:
+            if ln.startswith("- "):
+                d.ellipse(box(x + 6, cy - 3, 6, 6), fill=TEXT3)
+                x += 24
+                ln = ln[2:]
+            # **太字** と `コード`
+            parts, i, mode = [], 0, "n"
+            buf = ""
+            while i < len(ln):
+                if ln.startswith("**", i):
+                    parts.append((mode, buf)); buf = ""; mode = "b" if mode != "b" else "n"; i += 2
+                elif ln[i] == "`":
+                    parts.append((mode, buf)); buf = ""; mode = "c" if mode != "c" else "n"; i += 1
+                else:
+                    buf += ln[i]; i += 1
+            parts.append((mode, buf))
+            for m, t in parts:
+                if not t:
+                    continue
+                if m == "c":
+                    f = fonts.get(body * MONO)
+                    tw = text_w(f, t)
+                    d.rounded_rectangle(box(x, cy - body * 0.6, tw + 8, body * 1.2), radius=s(4), fill=BG_MUTED)
+                    d.text((s(x + 4), s(cy)), t, font=f, fill=TEXT2, anchor="lm")
+                    x += tw + 8
+                else:
+                    f = fonts.get(body, "Bold" if m == "b" else "Regular")
+                    d.text((s(x), s(cy)), t, font=f, fill=TEXT, anchor="lm")
+                    x += text_w(f, t)
+        end = (x, cy)
+        y += h1
+    if caret:
+        d.line([(s(end[0] + 1), s(end[1] - 12)), (s(end[0] + 1), s(end[1] + 12))], fill=TEXT, width=SS)
+    # 下の帯
+    top = LY + h - STATUS_H
+    d.rounded_rectangle(box(LX + 1, top, WIDTH - 2, STATUS_H - 1), radius=s(7), fill=BG_SUBTLE)
+    d.rectangle(box(LX + 1, top, WIDTH - 2, STATUS_H - 10), fill=BG_SUBTLE)
+    sf = fonts.get(SUB_FONT)
+    n = sum(len(ln.replace("**", "").replace("`", "").removeprefix("## ").removeprefix("- ")) for ln in lines) + max(0, len(lines) - 1)
+    d.text((s(LX + PAD_X), s(top + STATUS_H / 2)), "Ctrl+↑  Earlier questions", font=sf, fill=TEXT3, anchor="lm")
+    d.text((s(LX + WIDTH - PAD_X), s(top + STATUS_H / 2)), f"{n} chars", font=sf, fill=TEXT3, anchor="rm")
+
+
+def draw_browser(img: Image.Image, fonts: Fonts, question: str, answer_code: str):
     """ChatGPTに送ったあとの, ブラウザーの窓(架空)."""
     rect = (150, 60, 580, 360)
     shadow(img, rect, 10, alpha=80, blur=20, dy=10)
@@ -249,8 +338,9 @@ def draw_browser(img: Image.Image, fonts: Fonts, question: str):
     d.text((s(x + w - 24 - bw + 14), s(y + 77)), question, font=f, fill=TEXT, anchor="lm")
     for i, ln in enumerate([0.86, 0.74, 0.8, 0.5]):
         d.rounded_rectangle(box(x + 28, y + 122 + i * 24, (w - 56) * ln, 8), radius=s(4), fill=(0xEC, 0xEA, 0xE3))
-    d.rounded_rectangle(box(x + 28, y + 236, w - 56, 26), radius=s(6), fill=(0xF4, 0xF2, 0xEC))
-    d.text((s(x + 40), s(y + 249)), "git branch -m new-name", font=fonts.get(11), fill=TEXT2, anchor="lm")
+    if answer_code:
+        d.rounded_rectangle(box(x + 28, y + 236, w - 56, 26), radius=s(6), fill=(0xF4, 0xF2, 0xEC))
+        d.text((s(x + 40), s(y + 249)), answer_code, font=fonts.get(11), fill=TEXT2, anchor="lm")
 
 
 def draw_keycap(img: Image.Image, fonts: Fonts, label: str, pressed: bool):
@@ -315,6 +405,34 @@ SCENES = [
         text="how to rename a git branch",
         rows=[dict(icon="chat", name="how to rename a git branch", sub="No results · Ctrl+Alt+Enter for Google", tag="ChatGPT")],
         result="browser",
+        answer="git branch -m new-name",
+    ),
+    dict(
+        cap=(5, "Shift+Enterで長い質問を書く. Markdownは整えて見せる"),
+        text="LNAの選び方を相談したい",
+        compose=[
+            "## LNAの選び方を相談したい",
+            "2.4GHz帯で使う**LNA**を探しています.",
+            "- NFは1dB以下",
+            "- 電源は`3.3V`",
+        ],
+        rows=[dict(icon="chat", name="LNAの選び方を相談したい", sub="No results · Ctrl+Alt+Enter for Google", tag="ChatGPT")],
+        result="browser",
+        answer="",
+    ),
+    dict(
+        cap=(6, "16進数・2進数, dBm・VSWRなどの計算. Enterでコピー"),
+        calc=[
+            ("0x1F", [dict(icon="calc", name="31", sub="dec", tag="copy"),
+                      dict(icon="calc", name="0001 1111", sub="bin", tag="copy")]),
+            ("10dBm", [dict(icon="calc", name="10 mW", sub="Power", tag="copy"),
+                       dict(icon="calc", name="1 V", sub="Peak voltage at 50 Ω · Vrms 707.1 mV · Vpp 2 V", tag="copy")]),
+            ("vswr 1.5", [dict(icon="calc", name="13.98 dB", sub="Return loss", tag="copy"),
+                          dict(icon="calc", name="0.200", sub="|Γ| reflection coefficient", tag="copy"),
+                          dict(icon="calc", name="4.00 %", sub="Reflected power", tag="copy")]),
+        ],
+        text="", rows=[],
+        result=None,
     ),
 ]
 
@@ -323,7 +441,7 @@ def storyboard():
     """(状態, 表示する時間ms)を順に返す."""
     out = []
     for k, sc in enumerate(SCENES):
-        base = dict(show=False, text="", rows=[], glow=0.0, caret=False, key=None, cap=sc["cap"], result=None, scene=k)
+        base = dict(show=False, text="", rows=[], glow=0.0, caret=False, key=None, cap=sc["cap"], result=None, scene=k, compose=None)
 
         def st(**kw):
             d = dict(base)
@@ -334,6 +452,33 @@ def storyboard():
         out.append((st(key="Alt+Space"), 350))
         out.append((st(key="Alt+Space!"), 200))
         out.append((st(show=True, caret=True), 500))
+        if sc.get("calc"):
+            for n, (t, rows) in enumerate(sc["calc"]):
+                for i in range(1, len(t) + 1):
+                    out.append((st(show=True, text=t[:i], rows=rows if i == len(t) else [], glow=1.0, caret=True), 110))
+                out.append((st(show=True, text=t, rows=rows, caret=True), 1500))
+                if n + 1 < len(sc["calc"]):
+                    out.append((st(show=True, caret=True, key="Ctrl+A"), 250))
+            out.append((st(show=True, text=t, rows=rows, caret=True, key="Enter"), 350))
+            out.append((st(show=True, text=t, rows=rows, caret=True, key="Enter!"), 200))
+            out.append((st(), 1200))
+            continue
+        if sc.get("compose"):
+            t = sc["text"]
+            for i in range(2, len(t) + 1, 2):
+                out.append((st(show=True, text=t[:i], rows=sc["rows"] if i >= len(t) - 1 else [], glow=1.0, caret=True), 110))
+            out.append((st(show=True, text=t, rows=sc["rows"], caret=True), 700))
+            lines = sc["compose"]
+            out.append((st(show=True, text=t, rows=sc["rows"], caret=True, key="Shift+Enter"), 350))
+            out.append((st(show=True, text=t, rows=sc["rows"], caret=True, key="Shift+Enter!"), 200))
+            out.append((st(compose=lines[:1], caret=True), 700))
+            for n in range(2, len(lines) + 1):
+                out.append((st(compose=lines[:n], caret=True), 750))
+            out.append((st(compose=lines, caret=True), 1500))
+            out.append((st(compose=lines, caret=True, key="Enter"), 350))
+            out.append((st(compose=lines, caret=True, key="Enter!"), 200))
+            out.append((st(result="browser"), 2000))
+            continue
         if sc.get("paste"):
             out.append((st(show=True, caret=True, key="Ctrl+V"), 350))
             out.append((st(show=True, caret=True, key="Ctrl+V!"), 200))
@@ -359,7 +504,10 @@ def render(fonts: Fonts, desktop: Image.Image, state) -> Image.Image:
     img = Image.new("RGBA", (s(W), s(H + CAP)), BG + (255,))
     screen = desktop.copy()
     if state["result"] == "browser":
-        draw_browser(screen, fonts, SCENES[3]["text"])
+        sc = SCENES[state["scene"]]
+        draw_browser(screen, fonts, sc["text"], sc.get("answer", ""))
+    if state["compose"] is not None:
+        draw_compose(screen, fonts, state["compose"], state["caret"])
     if state["show"]:
         draw_launcher(screen, fonts, state["text"], state["rows"], state["glow"], state["caret"])
     if state["key"]:
@@ -398,12 +546,18 @@ def main():
     durations = [ms for _, ms in board]
 
     # 全コマで同じパレットを使う(コマごとに色がちらつかないように)
-    picks = [i for i, (st, _) in enumerate(board) if st["rows"] and not st["key"] and st["glow"] == 0.0]
-    picks += [i for i, (st, _) in enumerate(board) if st["result"]][:1]
+    # 場面ごとに止まるコマ(行が出ている, 書く窓, ブラウザー)から選ぶ
+    picks = [i for i, (st, ms) in enumerate(board) if ms >= 1400]
     sheet = Image.new("RGB", (W, (H + CAP) * len(picks)))
     for k, idx in enumerate(picks):
         sheet.paste(frames[idx], (0, (H + CAP) * k))
-    palette = sheet.quantize(colors=255, method=Image.Quantize.MEDIANCUT)
+    # 壁紙のぼかしに色を取られて窓やアイコンの色が点々にならないよう, 決まった色は必ず入れる
+    fixed = [BG, BG_SUBTLE, BG_MUTED, TEXT, TEXT2, TEXT3, BORDER, ACCENT, ACCENT_I, SKY, OLIVE, CLAY, SAND, FIG,
+             WIN, (255, 255, 255), (0x9A, 0x98, 0x90), (0xA3, 0x9A, 0xB8), (0xD9, 0xB0, 0x6C), (0xE6, 0xE3, 0xDB),
+             (0xEC, 0xEA, 0xE3), (0xF4, 0xF2, 0xEC), (0xFB, 0xFA, 0xF7), (0xE2, 0xDF, 0xD6)]
+    base = sheet.quantize(colors=256 - len(fixed), method=Image.Quantize.MEDIANCUT).getpalette()[: (256 - len(fixed)) * 3]
+    palette = Image.new("P", (1, 1))
+    palette.putpalette(base + [v for c in fixed for v in c])
     pframes = [f.quantize(palette=palette, dither=Image.Dither.FLOYDSTEINBERG) for f in frames]
     gif = out / "demo.gif"
     pframes[0].save(gif, save_all=True, append_images=pframes[1:], duration=durations, loop=0, optimize=True)
