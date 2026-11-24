@@ -56,7 +56,7 @@ const ID_SELHK_CHANGE: i32 = 106;
 const ID_SELHK_CLEAR: i32 = 107;
 const ID_RECENT: i32 = 230;
 const ID_CLIPHIST: i32 = 231;
-const ID_PFX: i32 = 110; // 110〜118
+const ID_PFX: i32 = 110; // 110〜119
 const ID_KEYS: i32 = 120; // 120〜124
 const ID_ROOTS: i32 = 200;
 const ID_ROOTS_ADD: i32 = 201;
@@ -116,7 +116,7 @@ const E_ERROR: i32 = 14;
 const E_VALUE_LABEL: i32 = 15;
 
 const SECTIONS: [&str; 8] = ["General", "Search", "Box and WSL", "Apps", "Tab menu", "Web", "Aliases", "Commands"];
-const PREFIX_LABELS: [&str; 9] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT", "Clipboard"];
+const PREFIX_LABELS: [&str; 10] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT", "Clipboard", "Calc"];
 /// 言語(K24). どちらの言語でも同じ文字で出す
 const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows / Windowsに合わせる"), ("ja", "日本語"), ("en", "English")];
 /// ランチャーの窓と書く窓の色(K39). 設定画面とトレイのメニューはライトのまま
@@ -897,7 +897,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         rows.push(row_gap(14, vec![it(m.sub("Prefixes"), W::Fill, 24)]));
         rows.push(row(vec![it(m.hint("Type a prefix and a space to search only one kind, for example \"f report\"."), W::Fill, 22)]));
         let p = &c.prefix;
-        let vals = [&p.app, &p.file, &p.bookmark, &p.kill, &p.wsl, &p.boxdrive, &p.google, &p.chatgpt, &p.clipboard];
+        let vals = [&p.app, &p.file, &p.bookmark, &p.kill, &p.wsl, &p.boxdrive, &p.google, &p.chatgpt, &p.clipboard, &p.calc];
         let mut items = vec![];
         for (i, (label, v)) in PREFIX_LABELS.iter().zip(vals).enumerate() {
             if i > 0 && i % 3 == 0 {
@@ -1211,6 +1211,7 @@ impl Settings {
         c.prefix.google = t(ID_PFX + 6);
         c.prefix.chatgpt = t(ID_PFX + 7);
         c.prefix.clipboard = t(ID_PFX + 8);
+        c.prefix.calc = t(ID_PFX + 9);
         c.search.recent = checked(item(h, ID_RECENT));
         c.search.clipboard_history = checked(item(h, ID_CLIPHIST));
         c.ui.language = selected_key(item(h, ID_LANG), &LANGS);

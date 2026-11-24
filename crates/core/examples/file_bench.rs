@@ -7,7 +7,7 @@ fn main() {
     let words = ["report", "会議資料", "proposal", "budget", "定例", "design", "spec", "テスト", "image", "data", "schematic", "layout", "測定結果", "memo", "plan"];
     let exts = ["docx", "xlsx", "pptx", "pdf", "txt", "png", "csv", "rs"];
     let mut t = FileTable::new('\\');
-    let root = t.push(None, r"C:\Users\me", true);
+    let root = t.push(None, r"C:\Users\me", true, 0);
     let mut dirs = vec![root];
     let mut seed: u64 = 1;
     let mut rnd = || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; seed };
@@ -15,11 +15,11 @@ fn main() {
     for i in 0..500_000u32 {
         let p = dirs[(rnd() as usize) % dirs.len()];
         if i % 20 == 0 {
-            let id = t.push(Some(p), &format!("{}_{}", words[(rnd() % 15) as usize], i), true);
+            let id = t.push(Some(p), &format!("{}_{}", words[(rnd() % 15) as usize], i), true, 0);
             dirs.push(id);
         } else {
             let n = format!("{}_{}_{}.{}", words[(rnd() % 15) as usize], words[(rnd() % 15) as usize], i, exts[(rnd() % 8) as usize]);
-            t.push(Some(p), &n, false);
+            t.push(Some(p), &n, false, 0);
         }
     }
     t.shrink();

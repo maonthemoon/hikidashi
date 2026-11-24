@@ -1,6 +1,6 @@
 //! ファイルの検索を別スレッドで行う. 新しい入力が来たら古い検索をやめる(世代番号. J1).
 
-use hikidashi_core::files::{FileHit, FileTable};
+use hikidashi_core::files::{parse_filters, FileHit, FileTable};
 use hikidashi_core::migemo::Dict;
 use hikidashi_core::search::Prepared;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -76,13 +76,16 @@ fn worker(rx: Receiver<Job>, result: Arc<Mutex<Option<Done>>>, cancel_slot: Arc<
         }
         let cancel = cancel_slot.lock().unwrap().clone();
         let t0 = Instant::now();
-        let p = Prepared::new(&job.text, dict.get());
+        // `ext:pdf`などの絞り込みを取り出し, 残りの語で探す
+        let (rest, filters) = parse_filters(&job.text);
+        let p = Prepared::new(&rest, dict.get());
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs().min(u32::MAX as u64) as u32);
         let mut hits = Vec::new();
         for (i, t) in job.tables.iter().enumerate() {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
-            for h in t.search_opt(&p, PER_TABLE, &cancel, job.dirs_only) {
+            for h in t.search_opt(&p, PER_TABLE, &cancel, job.dirs_only, &filters, now) {
                 hits.push((i, h));
             }
         }

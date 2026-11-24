@@ -4,7 +4,7 @@
 use crate::calc;
 use crate::catalog::{Catalog, Hit, Item, Kind};
 use crate::config::Config;
-use crate::files::{FileHit, FileTable};
+use crate::files::{parse_filters, FileHit, FileTable};
 use crate::learn::Learn;
 use crate::pathlike::{self, Pasted};
 use crate::search::Prepared;
@@ -33,6 +33,8 @@ pub enum Mode {
     ChatGpt,
     /// クリップボードの履歴(`cb `). 行は画面の側が`clip::rows`で作る
     Clipboard,
+    /// 計算(`= 0x1F`, `= 10dBm`, `= (12+3)*4`). 計算の行はこのときだけ出す(2026-11-25)
+    Calc,
 }
 
 impl Mode {
@@ -49,6 +51,7 @@ impl Mode {
             Mode::Google => "google",
             Mode::ChatGpt => "ChatGPT",
             Mode::Clipboard => "clipboard",
+            Mode::Calc => "calc",
         }
     }
 }
@@ -418,6 +421,33 @@ pub fn url_encode(s: &str) -> String {
     out
 }
 
+/// 計算のモードの使い方の例(入力が空のときと, 答えが出ないときに出す)
+const CALC_EXAMPLES: [(&str, &str); 6] = [
+    ("0x1F", "Hex to decimal and binary"),
+    ("(12+3)*4", "Calculator: + - * / ^ ( ) %"),
+    ("10dBm", "dBm to watts and volts"),
+    ("vswr 1.5", "VSWR to return loss and reflection"),
+    ("10nH 2.4G", "Capacitance that resonates with 10 nH at 2.4 GHz"),
+    ("50+j50@2G", "Impedance to admittance and equivalent circuits"),
+];
+
+fn calc_hint_rows() -> Vec<Row> {
+    CALC_EXAMPLES
+        .iter()
+        .map(|(ex, note)| Row {
+            name: ex.to_string(),
+            sub: format!("Example · {note}"),
+            tag: "copy",
+            positions: vec![],
+            action: Action::Copy(ex.to_string()),
+            learn_key: None,
+            warn: false,
+            icon: Icon::Calc,
+            score: 0,
+        })
+        .collect()
+}
+
 fn calc_rows(c: &calc::Calc) -> Vec<Row> {
     c.rows
         .iter()
@@ -546,6 +576,10 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
     let prefixes = ctx.config.prefixes();
     let (mode, text) = parse(input, &prefixes);
     let text_trim = text.trim();
+    // 計算の行は計算のモードのときだけ. 入力が空のときと答えが出ないときは, 使い方の例を出す
+    if mode == Mode::Calc {
+        return (mode, calc::evaluate(text_trim).map(|c| calc_rows(&c)).unwrap_or_else(calc_hint_rows));
+    }
     if text_trim.is_empty() {
         return (mode, vec![]);
     }
@@ -573,20 +607,22 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
     }
     let mut rows: Vec<Row> = Vec::new();
     let mut head: Vec<Row> = Vec::new();
-    if mode == Mode::All {
+    // `ext:pdf`などの絞り込みがあるときはファイルだけを出す(アプリなどにはかけられない)
+    let filtered = matches!(mode, Mode::All | Mode::File | Mode::Box | Mode::Wsl) && !parse_filters(text_trim).1.is_empty();
+    if mode == Mode::All && !filtered {
         if let Some(r) = command_with_arg(text_trim, ctx.config) {
             head.push(r);
         }
     }
-    let calc = if mode == Mode::All { calc::evaluate(text_trim) } else { None };
 
     let sources: &[Source] = match mode {
+        _ if filtered => &[],
         Mode::All => &[Source::Apps, Source::Bookmarks, Source::Settings, Source::System, Source::Commands, Source::Folders],
         Mode::App => &[Source::Apps],
         Mode::Bookmark => &[Source::Bookmarks],
         Mode::Kill => &[Source::Processes],
         Mode::File => &[Source::Folders],
-        Mode::Wsl | Mode::Box | Mode::Google | Mode::ChatGpt | Mode::Clipboard => &[],
+        Mode::Wsl | Mode::Box | Mode::Google | Mode::ChatGpt | Mode::Clipboard | Mode::Calc => &[],
     };
     for &s in sources {
         let cat = ctx.sources.get(s);
@@ -631,21 +667,9 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
     rows.retain(|r| r.learn_key.as_ref().map_or(true, |k| seen.insert(k.clone())));
 
     let mut out = head;
-    match &calc {
-        Some(c) => {
-            // 計算の行は, 見えている8行の最後の方に置く(2026-11-24. `x29`のようにファイル名とぶつかるため).
-            // 一致したものが少なければそのすぐ下, 多ければ8行目まで. 残りは計算の行の後ろ(スクロールで見る)
-            let cr = calc_rows(c);
-            let room = VISIBLE_ROWS.saturating_sub(out.len() + cr.len()).min(rows.len());
-            let rest = rows.split_off(room);
-            out.extend(rows);
-            out.extend(cr);
-            out.extend(rest);
-        }
-        None => out.extend(rows),
-    }
+    out.extend(rows);
     out.truncate(MAX_ROWS);
-    if out.is_empty() && mode == Mode::All {
+    if out.is_empty() && mode == Mode::All && !filtered {
         out.push(chatgpt_row(text_trim, ctx.config));
     }
     (mode, out)
@@ -701,11 +725,11 @@ mod tests {
         ];
         apply_aliases(&mut apps, &cfg.alias);
         let mut table = FileTable::new('\\');
-        let root = table.push(None, r"C:\Users\me", true);
-        let docs = table.push(Some(root), "Documents", true);
-        table.push(Some(docs), "proposal.docx", false);
-        table.push(Some(docs), "2024_budget.xlsx", false);
-        table.push(Some(docs), "定例会議.xlsx", false);
+        let root = table.push(None, r"C:\Users\me", true, 0);
+        let docs = table.push(Some(root), "Documents", true, 0);
+        table.push(Some(docs), "proposal.docx", false, 0);
+        table.push(Some(docs), "2024_budget.xlsx", false, 0);
+        table.push(Some(docs), "定例会議.xlsx", false, 0);
         let mut kill = Item::new(Kind::Process, "chrome.exe ×20", "No window", "chrome.exe");
         kill.data = 1;
         World {
@@ -733,9 +757,10 @@ mod tests {
             env: &FakeEnv,
         };
         let (_, text) = parse(input, &w.cfg.prefixes());
-        let prep = Prepared::new(text, None);
+        let (rest, filters) = crate::files::parse_filters(text.trim());
+        let prep = Prepared::new(&rest, None);
         let cancel = AtomicBool::new(false);
-        let hits: Vec<(usize, FileHit)> = w.table.search(&prep, 50, &cancel).into_iter().map(|h| (0, h)).collect();
+        let hits: Vec<(usize, FileHit)> = w.table.search_opt(&prep, 50, &cancel, false, &filters, 0).into_iter().map(|h| (0, h)).collect();
         build(input, &ctx, &prep, &hits)
     }
 
@@ -875,30 +900,38 @@ mod tests {
     #[test]
     fn numbers_and_calc() {
         let w = world();
+        // ふだんの検索には計算の行を出さない
         let (_, rows) = run(&w, "2024");
         assert_eq!(rows[0].name, "2024_budget.xlsx");
-        assert_eq!(rows.last().unwrap().tag, "copy");
-        // 一致するものがなければ, 計算が1行目
+        assert!(rows.iter().all(|r| r.tag != "copy"));
         let (_, rows) = run(&w, "0x1F");
-        assert_eq!(names(&rows[..2]), vec!["31", "0001 1111"]);
-        let (_, rows) = run(&w, "10nH@2.4GHz");
-        assert_eq!(rows[0].name, "150.8 Ω");
+        assert!(rows.iter().all(|r| r.tag != "copy"));
+        let (_, rows) = run(&w, "(12+3)*4");
+        assert!(rows.iter().all(|r| r.tag != "copy"));
     }
 
     #[test]
-    fn calc_goes_below_matches() {
-        let mut w = world();
-        // `x29`はdBの計算にもなるが, ファイル名に一致したものを先に出す
-        let root = 0;
-        for i in 0..12 {
-            w.table.push(Some(root), &format!("x29_dev_{i:02}"), true);
-        }
-        let (_, rows) = run(&w, "x29");
-        let calc_at: Vec<usize> = rows.iter().enumerate().filter(|(_, r)| r.tag == "copy").map(|(i, _)| i).collect();
-        assert_eq!(calc_at, vec![6, 7], "{:?}", names(&rows));
-        assert!(rows[0].name.starts_with("x29_dev"));
-        assert!(rows.len() > VISIBLE_ROWS);
-        assert!(rows[8].name.starts_with("x29_dev"));
+    fn calc_mode() {
+        let w = world();
+        let (m, rows) = run(&w, "= 0x1F");
+        assert_eq!(m, Mode::Calc);
+        assert_eq!(Mode::Calc.label(), "calc");
+        assert_eq!(names(&rows), vec!["31", "0001 1111"]);
+        let (_, rows) = run(&w, "= 10nH@2.4GHz");
+        assert_eq!(names(&rows), vec!["150.8 Ω"]);
+        assert_eq!(rows[0].action, Action::Copy("150.8 Ω".into()));
+        let (_, rows) = run(&w, "= (12+3)*4");
+        assert_eq!(names(&rows), vec!["60"]);
+        // 1文字から. アプリやファイルは出さない(`doc`はファイルに一致するが出ない)
+        let (_, rows) = run(&w, "= 5");
+        assert_eq!(names(&rows), vec!["0x5", "0101"]);
+        let (_, rows) = run(&w, "= doc");
+        assert!(rows.iter().all(|r| r.sub.starts_with("Example")), "{:?}", names(&rows));
+        assert!(rows.len() >= 5);
+        // 空のときも例
+        let (_, rows) = run(&w, "= ");
+        assert!(rows.iter().all(|r| r.sub.starts_with("Example")));
+        assert_eq!(rows[0].name, "0x1F");
     }
 
     #[test]
@@ -949,11 +982,11 @@ mod tests {
         let mut w = world();
         // `lock`を名前に含むファイルがたくさんあっても, Lockの操作が1行目
         let mut table = FileTable::new('\\');
-        let root = table.push(None, r"C:\Users\me", true);
+        let root = table.push(None, r"C:\Users\me", true, 0);
         for i in 0..30 {
-            table.push(Some(root), &format!("lock{i}.txt"), false);
+            table.push(Some(root), &format!("lock{i}.txt"), false, 0);
         }
-        table.push(Some(root), "lock", false);
+        table.push(Some(root), "lock", false, 0);
         w.table = table;
         let (_, rows) = run(&w, "lock");
         assert_eq!(rows[0].name, "Lock");
@@ -965,12 +998,26 @@ mod tests {
     }
 
     #[test]
+    fn filters_show_only_files() {
+        let w = world();
+        // 絞り込みだけでも出る. アプリや計算は混ぜない
+        let (_, rows) = run(&w, "ext:xlsx");
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r.tag == "file"));
+        let (_, rows) = run(&w, "budget ext:xlsx");
+        assert_eq!(names(&rows), vec!["2024_budget.xlsx"]);
+        // 値のない`ext:`は普通の語
+        let (_, rows) = run(&w, "ext:");
+        assert!(rows.iter().all(|r| r.tag != "file"));
+    }
+
+    #[test]
     fn keeps_more_than_visible_rows() {
         let mut w = world();
         let mut table = FileTable::new('\\');
-        let root = table.push(None, r"C:\Users\me", true);
+        let root = table.push(None, r"C:\Users\me", true, 0);
         for i in 0..80 {
-            table.push(Some(root), &format!("report{i}.txt"), false);
+            table.push(Some(root), &format!("report{i}.txt"), false, 0);
         }
         w.table = table;
         let (_, rows) = run(&w, "report");
