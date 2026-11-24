@@ -2475,6 +2475,7 @@ fn relocate() -> bool {
         storage::log("could not copy the exe; running from the original place");
         return false;
     }
+    dict::copy_bundled(&exe);
     let args: Vec<String> = std::env::args().skip(1).collect();
     std::process::Command::new(&target).args(args).arg("--updated").spawn().is_ok()
 }

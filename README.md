@@ -23,7 +23,7 @@
 3. ホットキーを聞かれたら, 使いたいキー(例: `Alt+Space`)を押します. 次に, Windowsと一緒に起動するかを聞かれます.
 4. ホットキーを押して, 名前の一部を打ち, `Enter`で開きます.
 
-ZIPの中は, `Hikidashi.exe`, `LICENSE.txt`, `THIRD-PARTY-NOTICES.txt`, `Manual.html`です. インストーラーも管理者権限も要りません.
+ZIPの中は, `Hikidashi.exe`, ローマ字で日本語の名前を探すための辞書`SKK-JISYO.L`とそのライセンス, `LICENSE.txt`, `THIRD-PARTY-NOTICES.txt`, `Manual.html`です. インストーラーも管理者権限も要りません.
 
 - 「スマート アプリ コントロールが安全でない可能性のあるアプリをブロックしました」と出たら, Windowsセキュリティ →「アプリとブラウザーコントロール」→「スマートアプリコントロールの設定」で「オフ」にします. 署名のないexeは個別に許可できません.
 
@@ -115,7 +115,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 - **リリース**: `v`で始まるタグ(例: `v0.1.0`)をpushすると, GitHub ActionsがビルドとテストをしてZIPを作り, Releasesに置きます. あわせて, `bin/Hikidashi.exe`をそのexeに差し替えます. `bin/Hikidashi.exe`は手で更新しません.
 - **マニュアル**: `docs/index.html`(1つのHTML). exeに埋め込み, トレイの`Manual`で開きます. 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
 - **アイコン**: `uv run tools/make-icon.py`で`assets/hikidashi.ico`を作り直します.
-- **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L, GPL)はexeに入れず, 初めて起動したときに取ってきます.
+- **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, ZIPに別のファイルとして同梱します(Actionsが[skk-dev/dict](https://github.com/skk-dev/dict)から取ってくる). exeの隣に辞書がなければ(gitで入れた場合など), 初めて起動したときにネットから取ってきます.
 
 ## ライセンス
 

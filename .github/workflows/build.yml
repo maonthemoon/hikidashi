@@ -51,6 +51,18 @@ jobs:
           cp LICENSE "dist/$name/LICENSE.txt"
           cp THIRD-PARTY-NOTICES.txt "dist/$name/"
           cp docs/index.html "dist/$name/Manual.html"
+          # 辞書(GPL)はexeとは別のファイルとして同梱する(K35). GPLの本文を添える
+          curl -fsSL https://raw.githubusercontent.com/skk-dev/dict/master/SKK-JISYO.L -o "dist/$name/SKK-JISYO.L"
+          head -c 100 "dist/$name/SKK-JISYO.L" | grep -q "SKK\|coding" || { echo "SKK-JISYO.L looks wrong"; exit 1; }
+          [ "$(stat -c %s "dist/$name/SKK-JISYO.L")" -gt 1000000 ] || { echo "SKK-JISYO.L is too small"; exit 1; }
+          {
+            echo "SKK-JISYO.L is from https://github.com/skk-dev/dict and is licensed under the"
+            echo "GNU General Public License version 2 or later (see the top of SKK-JISYO.L)."
+            echo "It is a separate file; Hikidashi.exe reads it at run time and is under the MIT License."
+            echo "The full text of the GNU General Public License version 2 follows."
+            echo
+            curl -fsSL https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+          } > "dist/$name/SKK-JISYO.L-COPYING.txt"
           (cd dist && zip -r "$name.zip" "$name")
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "zip=dist/$name.zip" >> "$GITHUB_OUTPUT"

@@ -1,5 +1,6 @@
 //! ローマ字で日本語を探す辞書(SKK-JISYO.L. GPL)を用意する(K5, K31).
-//! exeには入れない. `%LOCALAPPDATA%\Hikidashi\SKK-JISYO.L`を読み, なければ初めに取ってくる.
+//! exeには入れない(GPLのため). ZIPにはexeとは別のファイルとして同梱し(K35), 起動したときにexeと一緒に
+//! `%LOCALAPPDATA%\Hikidashi\SKK-JISYO.L`へ写す. そこを読み, なければexeの隣, それもなければネットから取ってくる.
 //! 取ってくる間と取れなかったときは, ローマ字→ひらがな・カタカナだけで探す(辞書なしでも動く).
 
 use super::indexer::{post_to, Shared, STATUS_DICT, WM_APP_INDEX};
@@ -23,6 +24,20 @@ pub fn path() -> PathBuf {
     storage::install_dir().join(FILE_NAME)
 }
 
+/// exeの隣に同梱した辞書があれば, 写す先(`%LOCALAPPDATA%\Hikidashi`)へ写す. 大きさが同じなら写さない
+pub fn copy_bundled(exe: &std::path::Path) {
+    let Some(src) = exe.parent().map(|d| d.join(FILE_NAME)) else { return };
+    let Ok(meta) = std::fs::metadata(&src) else { return };
+    let dst = path();
+    if std::fs::metadata(&dst).map(|m| m.len() == meta.len()).unwrap_or(false) {
+        return;
+    }
+    match std::fs::read(&src) {
+        Ok(bytes) => save(&dst, &bytes),
+        Err(e) => storage::log(&format!("dictionary: could not read {} ({e})", src.display())),
+    }
+}
+
 /// 裏で辞書を読む. なければ取ってきて保存する. 済んだら窓に知らせる(漢字でも探し直す)
 pub fn start(hwnd: HWND, shared: Arc<Shared>, dict: Arc<OnceLock<Dict>>) {
     let h = hwnd.0 as isize;
@@ -36,13 +51,16 @@ pub fn start(hwnd: HWND, shared: Arc<Shared>, dict: Arc<OnceLock<Dict>>) {
 
 fn prepare(shared: &Shared) -> Option<Dict> {
     let p = path();
-    if let Ok(bytes) = std::fs::read(&p) {
+    // 写した先, exeの隣(写せずに元の場所で動いているとき)の順に読む
+    let beside = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(FILE_NAME)));
+    for cand in std::iter::once(p.clone()).chain(beside.filter(|b| *b != p)) {
+        let Ok(bytes) = std::fs::read(&cand) else { continue };
         match load(&bytes) {
             Ok(d) => {
-                storage::log(&format!("dictionary: {} entries from {}", d.len(), p.display()));
+                storage::log(&format!("dictionary: {} entries from {}", d.len(), cand.display()));
                 return Some(d);
             }
-            Err(e) => storage::log(&format!("dictionary: {} could not be used ({e}); downloading it again", p.display())),
+            Err(e) => storage::log(&format!("dictionary: {} could not be used ({e})", cand.display())),
         }
     }
     shared.set_status(STATUS_DICT, "Downloading the dictionary for Japanese names…".into());

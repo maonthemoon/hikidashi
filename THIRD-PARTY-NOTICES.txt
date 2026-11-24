@@ -531,10 +531,11 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ========================================================================
-SKK-JISYO.L (not included; downloaded on first run)  https://github.com/skk-dev/dict
+SKK-JISYO.L (a separate file in the ZIP, not inside the exe)  https://github.com/skk-dev/dict
 ========================================================================
 
-Hikidashi does not contain this dictionary. On first run it downloads SKK-JISYO.L
-from the repository above and saves it in %LOCALAPPDATA%\Hikidashi. The dictionary
-is under the GNU General Public License version 2 or later; its copyright holders
-and license are written at the top of the file.
+The ZIP contains SKK-JISYO.L from the repository above as a separate file, with
+SKK-JISYO.L-COPYING.txt. Hikidashi.exe does not contain it; it reads the file at run
+time (and downloads it from the repository above if the file is missing). The
+dictionary is under the GNU General Public License version 2 or later; its copyright
+holders and license are written at the top of the file.

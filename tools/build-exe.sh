@@ -15,4 +15,8 @@ RUSTFLAGS="--remap-path-prefix=$HOME=/home --remap-path-prefix=$HOME/.cargo/regi
 if [ -d dev/.git ]; then OUT=dev/bin; else OUT=out; fi
 mkdir -p "$OUT"
 cp target/x86_64-pc-windows-gnu/release/hikidashi.exe "$OUT/Hikidashi.exe"
+# 辞書はexeとは別のファイルとして隣に置く(ZIPと同じ形. K35). 開発用の文書にUTF-8版があれば使う
+if [ -f dev/dict/SKK-JISYO.L.utf8 ]; then
+  cmp -s dev/dict/SKK-JISYO.L.utf8 "$OUT/SKK-JISYO.L" || cp dev/dict/SKK-JISYO.L.utf8 "$OUT/SKK-JISYO.L"
+fi
 ls -l "$OUT/Hikidashi.exe"
