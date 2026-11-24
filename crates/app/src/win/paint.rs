@@ -253,6 +253,7 @@ fn icon_of(row: &Row) -> (Option<String>, char) {
         Icon::Google => (None, glyph::GLOBE),
         Icon::Web => (None, glyph::LINK),
         Icon::Favicon(_) => (None, glyph::BOOKMARK),
+        Icon::Clip => (None, glyph::COPY),
     }
 }
 
@@ -335,7 +336,7 @@ pub fn paint(app: &mut App) {
             let rows: Vec<Row> = app.rows[top..top + vis].to_vec();
             let list_top = y;
             for (i, row) in rows.iter().enumerate() {
-                draw_row(mem, app, row, top + i == app.sel, pad, y, w);
+                draw_row(mem, app, row, top + i == app.sel && !app.nothing_selected(), pad, y, w);
                 y += s(ROW_H, d);
             }
             // 9行目からあるときは, 右端に細いスクロールの印を描く(C2)

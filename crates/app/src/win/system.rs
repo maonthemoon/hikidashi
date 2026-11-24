@@ -16,6 +16,8 @@ use windows::Win32::UI::WindowsAndMessaging::{LoadIconW, HICON, IDI_APPLICATION}
 
 pub const WM_APP_TRAY: u32 = 0x8000 + 1;
 pub const HOTKEY_ID: i32 = 1;
+/// 選んだ文字で開くホットキー
+pub const HOTKEY_SELECTION_ID: i32 = 2;
 const MOD_NOREPEAT: u32 = 0x4000;
 
 pub fn app_icon() -> HICON {
@@ -102,18 +104,26 @@ pub fn reg_string(subkey: &str, name: &str) -> Option<String> {
 
 /// ホットキーを登録する. 結果はログに書く(会社PCで保存のあとホットキーが効かなくなった件の調べ)
 pub fn register_hotkey(hwnd: HWND, h: Hotkey) -> bool {
-    let r = unsafe { RegisterHotKey(Some(hwnd), HOTKEY_ID, HOT_KEY_MODIFIERS(h.mods | MOD_NOREPEAT), h.vk) };
+    register_hotkey_id(hwnd, HOTKEY_ID, h)
+}
+
+pub fn register_hotkey_id(hwnd: HWND, id: i32, h: Hotkey) -> bool {
+    let r = unsafe { RegisterHotKey(Some(hwnd), id, HOT_KEY_MODIFIERS(h.mods | MOD_NOREPEAT), h.vk) };
     match &r {
-        Ok(()) => super::storage::log(&format!("hotkey registered: {}", h.format())),
-        Err(e) => super::storage::log(&format!("hotkey failed: {} ({})", h.format(), e.message())),
+        Ok(()) => super::storage::log(&format!("hotkey {id} registered: {}", h.format())),
+        Err(e) => super::storage::log(&format!("hotkey {id} failed: {} ({})", h.format(), e.message())),
     }
     r.is_ok()
 }
 
 pub fn unregister_hotkey(hwnd: HWND) {
-    super::storage::log("hotkey unregistered");
+    unregister_hotkey_id(hwnd, HOTKEY_ID);
+}
+
+pub fn unregister_hotkey_id(hwnd: HWND, id: i32) {
+    super::storage::log(&format!("hotkey {id} unregistered"));
     unsafe {
-        let _ = UnregisterHotKey(Some(hwnd), HOTKEY_ID);
+        let _ = UnregisterHotKey(Some(hwnd), id);
     }
 }
 

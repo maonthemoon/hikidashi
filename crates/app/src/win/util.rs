@@ -56,3 +56,13 @@ pub fn loword(v: usize) -> u16 {
 pub fn hiword(v: usize) -> u16 {
     ((v >> 16) & 0xFFFF) as u16
 }
+
+/// 現地時間とUTCの差(秒. 夏時間も含む)
+pub fn tz_offset_secs() -> i64 {
+    use windows::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
+    let mut tz = TIME_ZONE_INFORMATION::default();
+    // 返り値: 1=標準時間, 2=夏時間. `Bias`は(UTC - 現地)の分
+    let r = unsafe { GetTimeZoneInformation(&mut tz) };
+    let bias = tz.Bias + if r == 2 { tz.DaylightBias } else { tz.StandardBias };
+    -(bias as i64) * 60
+}

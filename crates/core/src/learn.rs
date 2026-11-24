@@ -85,6 +85,13 @@ impl Learn {
         b
     }
 
+    /// 最後に使った時刻の新しい順に, 項目の鍵を`n`件(同じ時刻なら使った回数の多い順)
+    pub fn recent(&self, n: usize) -> Vec<(String, u64)> {
+        let mut v: Vec<(&String, &Usage)> = self.usage.iter().collect();
+        v.sort_by(|a, b| b.1.last.cmp(&a.1.last).then(b.1.count.cmp(&a.1.count)).then_with(|| a.0.cmp(b.0)));
+        v.into_iter().take(n).map(|(k, u)| (k.clone(), u.last)).collect()
+    }
+
     /// 保存用の文字列. 1行に1件, タブ区切り. `q\t入力\t鍵1\t鍵2…`, `u\t鍵\t回数\t時刻`
     pub fn to_text(&self) -> String {
         let mut out = String::from("# Hikidashi learn v1\n");
@@ -218,6 +225,18 @@ mod tests {
             l.record("", "app:y", 0);
         }
         assert!(l.boost("q", "app:y", 60 * 86_400) < l.boost("q", "app:y", 0));
+    }
+
+    #[test]
+    fn recent_is_newest_first() {
+        let mut l = Learn::default();
+        l.record("", "app:a", 10);
+        l.record("x", "app:b", 30);
+        l.record("", "app:c", 20);
+        l.record("", "app:a", 25);
+        let r = l.recent(2);
+        assert_eq!(r, vec![("app:b".to_string(), 30), ("app:a".to_string(), 25)]);
+        assert_eq!(l.recent(10).len(), 3);
     }
 
     #[test]

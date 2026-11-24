@@ -95,7 +95,14 @@ const PAIRS: &[(&str, &str)] = &[
     ("Folders", "フォルダー"),
     ("Bookmarks", "ブックマーク"),
     ("Kill", "kill"),
+    ("Clipboard", "クリップボード"),
     // 全般
+    ("Selection hotkey", "選択ホットキー"),
+    ("Clear", "なし"),
+    ("Show recent items when the box is empty", "入力欄が空のとき, 最近開いたものを出す"),
+    ("Clipboard history", "クリップボードの履歴"),
+    ("Remember what you copy (text and files, in memory only). Type the Clipboard prefix (cb) and a space to see it.", "コピーしたもの(文字とファイル)を覚えます(メモリの中だけ). 接頭辞(cb)と空白を打つと見られます."),
+    ("Selection hotkey must look like \"Ctrl+Alt+Space\" (with Ctrl, Alt, Shift or Win).", "選択ホットキーは「Ctrl+Alt+Space」のように書いてください(Ctrl, Alt, Shift, Winのどれかと一緒に)."),
     ("Hotkey", "ホットキー"),
     ("Theme", "テーマ"),
     ("Same as the app mode of Windows", "Windowsのアプリのモードに合わせる"),
@@ -149,6 +156,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("(usual way)", "(いつもの渡し方)"),
     // Tabのメニュー
     ("Choose what the Tab menu shows for apps, files and folders. Things you can do with a key (Enter, Alt+Enter, Ctrl+Shift+Enter) can be left out.", "Tabのメニューに出すものを, アプリ, ファイル, フォルダーごとに選びます. キー(Enter, Alt+Enter, Ctrl+Shift+Enter)でできることは外してかまいません."),
+    ("Copy file", "ファイルをコピー(Copy file)"),
     ("Open new window", "新しく起動する(Open new window)"),
     ("Open in … (Open with)", "〜で開く(Open in …)"),
     ("Open the folder it is in", "場所を開く(Open folder)"),

@@ -2,6 +2,7 @@
 
 mod actions;
 mod apps;
+mod clipboard;
 mod compose;
 mod diag;
 mod dict;
@@ -10,7 +11,9 @@ mod i18n;
 mod indexer;
 mod net;
 mod paint;
+mod scripts;
 mod searcher;
+mod selection;
 mod settings;
 mod storage;
 mod system;
@@ -19,6 +22,9 @@ mod util;
 mod winlist;
 
 use hikidashi_core::builtin::{self, SysAction};
+use hikidashi_core::clip::{ClipHistory, ClipKind};
+use hikidashi_core::scripts::{self as cscripts, RunOutcome, Script};
+use hikidashi_core::selection::{self as csel, Picked};
 use hikidashi_core::catalog::{Catalog, Item, Kind};
 use hikidashi_core::compose::{Browse, Drafts};
 use hikidashi_core::markdown::{self, NewLine};
@@ -42,6 +48,7 @@ use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARA
 use windows::Win32::Graphics::Dwm::DwmSetWindowAttribute;
 use windows::Win32::Graphics::Gdi::{InvalidateRect, MonitorFromPoint, MonitorFromWindow, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST, HBRUSH};
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::DataExchange::{AddClipboardFormatListener, RemoveClipboardFormatListener, COPYDATASTRUCT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Controls::RichEdit::{EN_REQUESTRESIZE, EN_SELCHANGE, REQRESIZE};
@@ -62,6 +69,8 @@ const TIMER_QUICK: usize = 3;
 const WM_APP_COMPOSE: u32 = 0x8000 + 5;
 /// ブックマークのアイコンを読み終えた
 const WM_APP_FAVICONS: u32 = 0x8000 + 7;
+/// `--query`で動いているものに文字を渡す`WM_COPYDATA`の目印
+const QUERY_MAGIC: usize = 0x4B51_0001;
 /// ファイルの結果を待つ時間. これより遅ければ先にほかの結果を出す
 const QUICK_MS: u32 = 60;
 
@@ -88,7 +97,12 @@ pub enum MenuAct {
     OpenWith(hikidashi_core::config::OpenWith),
     Admin,
     NewInstance,
+    /// ファイルそのものをクリップボードへ(Explorerでコピーしたのと同じ形)
+    CopyFile,
     CopyText(String),
+    /// クリップボードの履歴の1件をクリップボードに入れるだけ
+    ClipCopy(u64),
+    ClipDelete(u64),
     Kill,
     ChatGpt,
     Google,
@@ -173,6 +187,27 @@ pub struct App {
     recalled: String,
     /// 書く窓の中身の高さ(EN_REQUESTRESIZE)
     compose_h: i32,
+    /// 選んだ文字で開くホットキー(設定の`[hotkeys] selection`)と, 登録できているか
+    sel_hotkey: Option<Hotkey>,
+    sel_registered: bool,
+    /// ホットキーの登録で, 選んだ文字で開くホットキーを変えているところ
+    capture_sel: bool,
+    /// クリップボードの履歴(メモリだけ)
+    clips: ClipHistory,
+    clip_listening: bool,
+    /// この通し番号のクリップボードの更新は履歴に残さない(選んだ文字の取り込みで一時的に変えたもの)
+    clip_ignore: Option<u32>,
+    /// スクリプトのフォルダー
+    scripts: Vec<Script>,
+    scripts_sig: Vec<(String, Option<SystemTime>)>,
+    lists: scripts::Lists,
+    /// `run`のスクリプトの仕事の番号と結果. 結果の行を出している間はtrue
+    script_job: u64,
+    script_view: bool,
+    /// 空の入力の「最近のもの」を出している(↓かクリックで選ぶまで, 何も選ばれていない形)
+    recent_view: bool,
+    script_all: String,
+    script_result: Arc<std::sync::Mutex<Option<(u64, RunOutcome)>>>,
     /// 整える頼みが来ている(文字が変わった, カーソルが動いた)
     restyle_text: bool,
     restyle_sel: bool,
@@ -228,6 +263,19 @@ impl Env for WinEnv<'_> {
         }
         Some(pathlike::wsl_to_unc(p, self.distro, self.home.as_deref()))
     }
+    fn resolve_path(&self, lower: &str) -> Option<(String, bool)> {
+        // 共有フォルダーやWSLは, 届かないと待たされるので最近のものには出さない
+        if lower.starts_with("\\\\") {
+            return None;
+        }
+        let m = std::fs::metadata(lower).ok()?;
+        // 学習の鍵は小文字なので, 実際の綴りに直す(GetLongPathNameWは各部分を実際の名前にする)
+        let w = WStr::new(lower);
+        let mut buf = vec![0u16; 1024];
+        let n = unsafe { windows::Win32::Storage::FileSystem::GetLongPathNameW(w.pcwstr(), Some(&mut buf)) } as usize;
+        let full = if n > 0 && n < buf.len() { from_wide(&buf[..n]) } else { lower.to_string() };
+        Some((full, m.is_dir()))
+    }
     fn list_dir(&self, dir: &str) -> Vec<(String, bool)> {
         let _d = diag::doing(format!("list folder {dir}"));
         let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
@@ -239,6 +287,11 @@ impl Env for WinEnv<'_> {
             })
             .collect()
     }
+}
+
+/// `cb `の一覧(履歴を, 打った語で絞って新しい順に). ファイルが今もあるかも見る(共有フォルダーは見に行かない)
+fn clip_rows(h: &ClipHistory, query: &str) -> Vec<Row> {
+    hikidashi_core::clip::rows(h, query, util::now_secs(), util::tz_offset_secs(), |p| p.starts_with("\\\\") || Path::new(p).exists())
 }
 
 fn scale(v: i32, dpi: u32) -> i32 {
@@ -257,6 +310,7 @@ impl App {
             Mode::Box => &p.boxdrive,
             Mode::Google => &p.google,
             Mode::ChatGpt => &p.chatgpt,
+            Mode::Clipboard => &p.clipboard,
             Mode::All => "",
         }
     }
@@ -296,7 +350,8 @@ impl App {
         t[indexer::SLOT_WSL].as_ref().filter(|t| !t.is_empty()).map(|t| t.name(0).to_string())
     }
 
-    fn build_rows(&self, input: &str, hits: &[(usize, hikidashi_core::files::FileHit)], tables: &[Arc<FileTable>]) -> (Mode, Vec<Row>) {
+    /// 一覧を作る材料(`Ctx`)を作って`f`に渡す
+    fn with_ctx<R>(&self, tables: &[Arc<FileTable>], f: impl FnOnce(&Ctx) -> R) -> R {
         let distro = self.wsl_distro();
         let home = self.wsl_root().and_then(|r| pathlike::to_wsl(&r));
         let box_lookup = self.shared.box_lookup.lock().unwrap().clone();
@@ -318,9 +373,20 @@ impl App {
             now: util::now_secs(),
             env: &env,
         };
+        f(&ctx)
+    }
+
+    fn build_rows(&self, input: &str, hits: &[(usize, hikidashi_core::files::FileHit)], tables: &[Arc<FileTable>]) -> (Mode, Vec<Row>) {
         let (_, text) = router::parse(input, &self.config.prefixes());
         let prep = Prepared::new(text.trim(), self.dict.get());
-        router::build(input, &ctx, &prep, hits)
+        let (mode, mut rows) = self.with_ctx(tables, |ctx| router::build(input, ctx, &prep, hits));
+        // 引数を取るスクリプト(`ff 語`)の行は一番上に出す
+        if mode == Mode::All {
+            if let Some(r) = cscripts::arg_row(&self.scripts, text) {
+                rows.insert(0, r);
+            }
+        }
+        (mode, rows)
     }
 
     /// 入力が変わったら一覧を作り直す. ファイルの検索は別スレッドに頼み, 速いものを先に出す(J1)
@@ -330,6 +396,8 @@ impl App {
         self.user_moved = false;
         self.menu = None;
         self.confirm = None;
+        self.script_view = false;
+        self.recent_view = false;
         let input = self.input();
         let text = self.edit_text();
         if text.trim() == ":stats" {
@@ -338,6 +406,13 @@ impl App {
             self.top = 0;
             self.pending = None;
             self.layout();
+            return;
+        }
+        // 履歴, 最近のもの, スクリプトの一覧は, ファイルの検索を使わず, すぐ出す
+        if let Some(rows) = self.special_rows(&text) {
+            self.searcher.cancel();
+            self.pending = None;
+            self.set_rows(rows, vec![]);
             return;
         }
         if self.mode == Mode::Kill && !self.processes_fresh {
@@ -376,6 +451,34 @@ impl App {
         self.searcher.cancel();
         self.pending = None;
         self.set_rows(quick, vec![]);
+    }
+
+    /// ふつうの検索ではない一覧: クリップボードの履歴(`cb `), 空の入力の最近のもの, `list`のスクリプト(`wiki `). なければNone
+    fn special_rows(&mut self, text: &str) -> Option<Vec<Row>> {
+        if self.mode == Mode::Clipboard {
+            return Some(clip_rows(&self.clips, text));
+        }
+        if self.mode != Mode::All {
+            return None;
+        }
+        if text.trim().is_empty() {
+            if !self.config.search.recent {
+                return None;
+            }
+            self.recent_view = true;
+            return Some(self.with_ctx(&[], |ctx| hikidashi_core::recent::rows(ctx)));
+        }
+        let (i, rest) = cscripts::list_target(&self.scripts, text)?;
+        let rest = rest.to_string();
+        let s = self.scripts.get(i)?.clone();
+        scripts::ensure_list(&self.lists, &s, self.hwnd);
+        let g = self.lists.lock().unwrap();
+        let st = g.get(&s.path)?;
+        Some(match (&st.cache, &st.error) {
+            (Some(c), _) => c.rows(&rest, self.dict.get()),
+            (None, Some(e)) => vec![cscripts::error_row(e)],
+            (None, None) => vec![cscripts::loading_row()],
+        })
     }
 
     /// 新しい行にする. 選んでいた項目がまだあれば選んだままにする
@@ -539,6 +642,11 @@ impl App {
 
     /// 窓を出す(A2: マウスカーソルがあるモニターの中央やや上)
     fn show(&mut self) {
+        self.show_inner(true);
+    }
+
+    /// `select_all`なら前回の入力を全選択で残す(A3). 選んだ文字や`--query`の文字を入れて出すときは, カーソルを末尾に置く
+    fn show_inner(&mut self, select_all: bool) {
         let _d = diag::doing("show the window");
         let t0 = self.stats.hotkey_at.take().unwrap_or_else(Instant::now);
         unsafe {
@@ -563,6 +671,7 @@ impl App {
         self.windows = Catalog::new(winlist::window_items(&wins));
         self.processes_fresh = false;
         self.reload_bookmarks();
+        self.check_scripts();
         // サイトのアイコンは, ブラウザーで開くと増えるので30分ごとに読み直す
         if self.favicons_at.is_none_or(|t| t.elapsed().as_secs() > 30 * 60) {
             self.load_favicons();
@@ -588,14 +697,17 @@ impl App {
             let _ = ShowWindow(self.hwnd, SW_SHOW);
             let _ = SetForegroundWindow(self.hwnd);
             let _ = SetFocus(Some(self.edit));
-            // 前回の入力を全選択で残す(A3)
-            SendMessageW(self.edit, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+            if select_all {
+                // 前回の入力を全選択で残す(A3)
+                SendMessageW(self.edit, EM_SETSEL, Some(WPARAM(0)), Some(LPARAM(-1)));
+            }
         }
         system::ime_off(self.edit);
         self.stats.last_show_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
 
     fn hide(&mut self) {
+        self.script_view = false;
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_HIDE);
             let _ = KillTimer(Some(self.hwnd), TIMER_QUICK);
@@ -715,8 +827,10 @@ impl App {
         self.config_error = err.map(|e| e.0);
         self.config = cfg.clone();
         *self.shared.config.lock().unwrap() = cfg;
-        self.commands = Catalog::new(router::command_items(&self.config));
+        self.rebuild_commands();
         self.apply_apps();
+        self.sync_clip_listener();
+        self.apply_selection_hotkey();
         self.bookmarks_mtime.clear();
         self.reload_bookmarks();
         if files_changed {
@@ -728,7 +842,7 @@ impl App {
         if self.visible() {
             if self.composing() {
                 self.compose_sync();
-            } else {
+            } else if !self.script_view {
                 self.refresh();
             }
         }
@@ -948,6 +1062,7 @@ impl App {
         }
         let pressed = self.press_row.take();
         if hit.is_some() && hit == pressed {
+            self.user_moved = true;
             if let Some(i) = hit {
                 self.select(i);
             }
@@ -955,7 +1070,22 @@ impl App {
         }
     }
 
+    /// 最近のものを出していて, まだ何も選んでいない
+    pub fn nothing_selected(&self) -> bool {
+        self.recent_view && !self.user_moved && self.menu.is_none()
+    }
+
     fn move_sel(&mut self, delta: i32) {
+        // 何も選ばれていない形からの最初の↓は1行目を選ぶ
+        if self.nothing_selected() && !self.rows.is_empty() {
+            self.sel = if delta > 0 { 0 } else { self.rows.len() - 1 };
+            self.user_moved = true;
+            self.ensure_visible();
+            unsafe {
+                let _ = InvalidateRect(Some(self.hwnd), None, false);
+            }
+            return;
+        }
         if let Some(m) = &mut self.menu {
             let n = m.items.len() as i32;
             if n > 0 {
@@ -1493,19 +1623,30 @@ impl App {
     fn restore_clipboard(&mut self, r: actions::ClipRestore) {
         if actions::clipboard_text(self.hwnd).as_deref() == Some(r.ours.as_str()) {
             let _ = actions::copy_text(self.hwnd, &r.prev);
+            // 元に戻しただけなので, 履歴の先頭に出し直さない
+            self.clip_ignore = Some(clipboard::sequence());
         }
     }
 
     // ---- ホットキーの登録(A1) ----
 
-    fn start_capture(&mut self) {
+    /// ホットキーを登録しなおす. `selection`なら選んだ文字で開くホットキー, でなければメインのホットキー
+    fn start_capture(&mut self, selection: bool) {
         system::unregister_hotkey(self.hwnd);
+        if self.sel_registered {
+            system::unregister_hotkey_id(self.hwnd, system::HOTKEY_SELECTION_ID);
+            self.sel_registered = false;
+        }
+        self.capture_sel = selection;
         self.capture = true;
         self.mode = Mode::All;
         self.set_edit_text("");
         self.rows.clear();
         self.top = 0;
-        self.message = Some(("Press the hotkey you want to use, for example Alt+Space".into(), false));
+        self.message = Some((
+            if selection { "Press the hotkey that opens Hikidashi with the selected text, for example Ctrl+Alt+Space" } else { "Press the hotkey you want to use, for example Alt+Space" }.into(),
+            false,
+        ));
         if !self.visible() {
             self.show();
         }
@@ -1523,6 +1664,8 @@ impl App {
         if let Some(h) = self.hotkey {
             system::register_hotkey(self.hwnd, h);
         }
+        self.capture_sel = false;
+        self.apply_selection_hotkey();
         unsafe {
             SendMessageW(self.edit, EM_SETCUEBANNER, Some(WPARAM(1)), Some(LPARAM(w!("Search apps, files, bookmarks, or paste a path").0 as isize)));
         }
@@ -1534,8 +1677,9 @@ impl App {
             return true;
         }
         if vk == VK_ESCAPE.0 && !(ctrl || shift || alt || win) {
+            let was_sel = self.capture_sel;
             self.end_capture(false);
-            if self.hotkey.is_none() {
+            if self.hotkey.is_none() && !was_sel {
                 self.message = Some(("No hotkey yet. Use the tray icon to set one.".into(), false));
             }
             self.layout();
@@ -1560,8 +1704,13 @@ impl App {
             self.layout();
             return true;
         }
+        if self.capture_sel {
+            return self.capture_selection_key(h);
+        }
         if system::register_hotkey(self.hwnd, h) {
             self.hotkey = Some(h);
+            self.capture = false;
+            self.apply_selection_hotkey();
             self.state.hotkey = Some(h.format());
             storage::save_state(&self.state);
             self.capture = false;
@@ -1755,6 +1904,10 @@ impl App {
         }
         let admin = action == Some(KeyAction::Admin);
         self.wait_pending();
+        // 最近のものは, ↓かクリックで選ぶまで開かない
+        if self.nothing_selected() {
+            return;
+        }
         let Some(row) = self.rows.get(self.sel).cloned() else { return };
         self.run_row(&row, admin);
     }
@@ -1762,6 +1915,21 @@ impl App {
     fn run_row(&mut self, row: &Row, admin: bool) {
         let cfg = self.config.clone();
         let hwnd = self.hwnd;
+        match &row.action {
+            // 履歴の1件: 貼る
+            Action::Clip(id) => {
+                self.paste_clip(*id);
+                return;
+            }
+            // スクリプト: 窓は閉じずに動かして, 出力を行にする
+            Action::ScriptRun { script, arg } => {
+                self.start_script(*script, arg.clone());
+                return;
+            }
+            // `Running…`などの, 何もしない行
+            Action::Copy(s) if s.is_empty() => return,
+            _ => {}
+        }
         let r: Result<(), String> = match &row.action {
             Action::Item { source, index } => {
                 let Some(it) = self.item(*source, *index) else { return };
@@ -1815,6 +1983,10 @@ impl App {
                         return;
                     }
                     Kind::Command => {
+                        if it.args == "script" {
+                            self.start_script(it.data as usize, String::new());
+                            return;
+                        }
                         if it.args == "url" {
                             actions::open_url(&it.target.replace("{q}", ""), &cfg)
                         } else {
@@ -1851,7 +2023,8 @@ impl App {
                 }
             }
             Action::BoxUrl { url, .. } => actions::open_url(url, &cfg),
-            Action::Copy(s) => actions::copy_text(hwnd, s),
+            Action::Copy(s) | Action::ScriptLine(s) => actions::copy_text(hwnd, s),
+            Action::Clip(_) | Action::ScriptRun { .. } => Ok(()),
             Action::ChatGpt(q) => actions::ask_chatgpt(hwnd, q, &cfg),
             Action::Google(q) => actions::google(q, &cfg),
             Action::OpenUrl(u) => actions::open_url(u, &cfg),
@@ -1880,6 +2053,9 @@ impl App {
 
     fn open_menu(&mut self) {
         self.wait_pending();
+        if self.nothing_selected() {
+            return;
+        }
         let Some(row) = self.rows.get(self.sel).cloned() else { return };
         use icons::glyph as g;
         let mi = |label: &str, glyph: char, act: MenuAct| MenuItem { label: label.into(), glyph, act };
@@ -1887,14 +2063,18 @@ impl App {
         let path = self.row_path(&row);
         match &row.action {
             Action::File { .. } | Action::Path(_) | Action::BoxUrl { local: Some(_), .. } => {
-                if let Action::BoxUrl { url, .. } = &row.action {
-                    items.push(mi("Open in browser", g::GLOBE, MenuAct::Open));
-                    items.push(mi("Copy URL", g::COPY, MenuAct::CopyText(url.clone())));
-                }
                 let is_dir = self.row_is_dir(&row);
                 // 出すものは設定の`[menu]`で種類ごとに選ぶ(K24). Copy WSL pathはWSLが入っているときだけ
                 let kind = if is_dir { "folder" } else { "file" };
                 let on = |item: &str| self.config.menu.has(kind, item) && config::menu_item_fits(kind, item);
+                // ファイルそのものをコピー(Explorerでコピーしたのと同じ形). 先頭に出す
+                if on("copy_file") && path.is_some() {
+                    items.push(mi("Copy file", g::COPY, MenuAct::CopyFile));
+                }
+                if let Action::BoxUrl { url, .. } = &row.action {
+                    items.push(mi("Open in browser", g::GLOBE, MenuAct::Open));
+                    items.push(mi("Copy URL", g::COPY, MenuAct::CopyText(url.clone())));
+                }
                 if on("explorer") {
                     items.push(mi("Open in Explorer", g::FOLDER, MenuAct::Explorer));
                 }
@@ -1964,7 +2144,20 @@ impl App {
                 items.push(mi("Search Google", g::GLOBE, MenuAct::Google));
                 items.push(mi("Copy text", g::COPY, MenuAct::CopyText(q.clone())));
             }
-            Action::Copy(s) => items.push(mi("Copy", g::COPY, MenuAct::CopyText(s.clone()))),
+            Action::Copy(s) => {
+                if !s.is_empty() {
+                    items.push(mi("Copy", g::COPY, MenuAct::CopyText(s.clone())));
+                }
+            }
+            Action::ScriptLine(l) => {
+                items.push(mi("Copy line", g::COPY, MenuAct::CopyText(l.clone())));
+                items.push(mi("Copy all", g::COPY, MenuAct::CopyText(self.script_all.clone())));
+            }
+            Action::Clip(id) => {
+                items.push(mi("Copy", g::COPY, MenuAct::ClipCopy(*id)));
+                items.push(mi("Delete from history", g::KILL, MenuAct::ClipDelete(*id)));
+            }
+            Action::ScriptRun { .. } => {}
             Action::BoxUrl { url, .. } => {
                 items.push(mi("Open in browser", g::GLOBE, MenuAct::Open));
                 items.push(mi("Copy URL", g::COPY, MenuAct::CopyText(url.clone())));
@@ -1986,6 +2179,12 @@ impl App {
         let _d = diag::doing("Tab menu: run");
         let cfg = self.config.clone();
         let hwnd = self.hwnd;
+        // 履歴から消すだけは, 窓を閉じずに一覧を作り直す
+        if let MenuAct::ClipDelete(id) = act {
+            self.clips.remove(*id);
+            self.refresh();
+            return;
+        }
         let path = self.row_path(row);
         let item = match &row.action {
             Action::Item { source, index } => self.item(*source, *index),
@@ -2030,6 +2229,15 @@ impl App {
                 _ => Ok(()),
             },
             MenuAct::CopyText(s) => actions::copy_text(hwnd, s),
+            MenuAct::CopyFile => match &path {
+                Some(p) => clipboard::set_files(hwnd, std::slice::from_ref(p)),
+                None => Ok(()),
+            },
+            MenuAct::ClipCopy(id) => match self.clips.get(*id).cloned() {
+                Some(e) => clipboard::set_kind(hwnd, &e.kind),
+                None => Ok(()),
+            },
+            MenuAct::ClipDelete(_) => Ok(()),
             MenuAct::Kill => {
                 let r = match &item {
                     Some(it) => actions::kill(&it.target.split(',').filter_map(|p| p.parse().ok()).collect::<Vec<u32>>()),
@@ -2102,7 +2310,7 @@ impl App {
             let _ = DestroyMenu(m);
             match cmd.0 {
                 1 => self.show(),
-                2 => self.start_capture(),
+                2 => self.start_capture(false),
                 3 => system::set_autostart(!system::autostart_enabled(), &self.exe_path),
                 4 => {
                     self.rebuild_wait = Some(self.shared.user_scans.load(std::sync::atomic::Ordering::Relaxed));
@@ -2116,6 +2324,258 @@ impl App {
                     PostQuitMessage(0);
                 }
                 _ => {}
+            }
+        }
+    }
+}
+
+impl App {
+    // ---- 選んだ文字で開く, --query ----
+
+    /// 選んだ文字で開くホットキーを登録しなおす(設定を読み直したとき, 登録の画面を終えたとき). 設定の書き間違いは`config_error`に出す
+    fn apply_selection_hotkey(&mut self) {
+        if self.sel_registered {
+            system::unregister_hotkey_id(self.hwnd, system::HOTKEY_SELECTION_ID);
+            self.sel_registered = false;
+        }
+        self.sel_hotkey = None;
+        let text = self.config.hotkeys.selection.trim().to_string();
+        if text.is_empty() || self.capture {
+            return;
+        }
+        let Some(h) = Hotkey::parse(&text).filter(|h| h.is_usable()) else {
+            self.config_error.get_or_insert(format!("config.toml: selection hotkey \"{text}\" is not a hotkey. Write it like Ctrl+Alt+Space"));
+            return;
+        };
+        if self.hotkey == Some(h) {
+            self.config_error.get_or_insert(format!("config.toml: selection hotkey {} is the same as the hotkey. Change one of them", h.format()));
+            return;
+        }
+        if system::register_hotkey_id(self.hwnd, system::HOTKEY_SELECTION_ID, h) {
+            self.sel_registered = true;
+            self.sel_hotkey = Some(h);
+        } else {
+            self.config_error.get_or_insert(format!("Selection hotkey {} is used by another app. Change it in Settings", h.format()));
+        }
+    }
+
+    /// ホットキーの登録の画面で, 選んだ文字で開くホットキーが押された
+    fn capture_selection_key(&mut self, h: Hotkey) -> bool {
+        if self.hotkey == Some(h) {
+            self.message = Some((format!("{} is already the hotkey that opens Hikidashi. Try another key.", h.format()), true));
+            self.layout();
+            return true;
+        }
+        // 先に使えるか試す(登録の画面の間は, 自分のホットキーはどちらも外してある)
+        if !system::register_hotkey_id(self.hwnd, system::HOTKEY_SELECTION_ID, h) {
+            self.message = Some((format!("{} is used by another app. Try another key.", h.format()), true));
+            self.layout();
+            return true;
+        }
+        system::unregister_hotkey_id(self.hwnd, system::HOTKEY_SELECTION_ID);
+        self.set_selection_hotkey(Some(h));
+        self.message = Some((format!("Selection hotkey set: {}", h.format()), false));
+        self.layout();
+        true
+    }
+
+    /// 選んだ文字で開くホットキーを設定ファイルに書いて, 登録しなおす. `None`なら使わない
+    fn set_selection_hotkey(&mut self, h: Option<Hotkey>) {
+        let text = h.map(|h| h.format()).unwrap_or_default();
+        // 今のファイルを読み直して, ホットキーだけ変えて書く. 書き間違いのあるファイルは, 初期値で置き換えないよう書かない
+        let (mut cfg, err) = storage::load_config();
+        if let Some(e) = err {
+            self.fail(format!("Fix config.toml first: {}", e.0));
+            return;
+        }
+        cfg.hotkeys.selection = text.clone();
+        if let Err(e) = storage::write_config(&config::to_toml(&cfg)) {
+            self.fail(format!("Cannot save config.toml: {e}"));
+            return;
+        }
+        self.config.hotkeys.selection = text.clone();
+        settings::set_selection_hotkey(&text);
+        if self.capture {
+            self.end_capture(true);
+        } else {
+            self.apply_selection_hotkey();
+        }
+    }
+
+    /// 選んだ文字で開くホットキー(2つ目)が押された. 前面のアプリの選択を読んで, その文字で窓を出す
+    fn on_selection_hotkey(&mut self) {
+        if self.capture || self.visible() {
+            return;
+        }
+        self.stats.hotkey_at = Some(Instant::now());
+        let _d = diag::doing("selection: copy the selected text");
+        let (text, ignore) = selection::capture(self.hwnd);
+        if ignore.is_some() {
+            self.clip_ignore = ignore;
+        }
+        let picked = text.map(|t| csel::classify(&t)).unwrap_or(Picked::Empty);
+        let what = match &picked {
+            Picked::Empty => "no text",
+            Picked::Line(_) => "one line",
+            Picked::Multi(_) => "several lines",
+        };
+        storage::log(&format!("selection hotkey: {what}"));
+        self.show_with(picked);
+    }
+
+    /// `--query`で別のHikidashiから渡された文字
+    fn on_query(&mut self, text: &str) {
+        if self.capture {
+            return;
+        }
+        self.show_with(csel::classify(text));
+    }
+
+    /// 文字を入れて窓を出す. 1行なら入力欄(カーソルは末尾), 2行以上なら長い質問を書く窓, 空なら空の窓
+    fn show_with(&mut self, picked: Picked) {
+        self.mode = Mode::All;
+        match picked {
+            Picked::Multi(t) if self.compose.is_some() => {
+                self.keep_old_draft();
+                self.enter_compose(t, None);
+                self.show_inner(false);
+            }
+            // 書く窓を作れなかったときは, 1行にして入力欄に入れる
+            Picked::Multi(t) => {
+                let one = t.split(['\r', '\n']).map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
+                self.show_text(&one);
+            }
+            Picked::Line(t) => self.show_text(&t),
+            Picked::Empty => self.show_text(""),
+        }
+    }
+
+    fn show_text(&mut self, t: &str) {
+        if self.composing() && !t.is_empty() {
+            self.leave_compose();
+        }
+        if !self.composing() {
+            self.set_edit_text(t);
+        }
+        self.show_inner(false);
+    }
+
+    // ---- クリップボードの履歴 ----
+
+    /// 設定に合わせて, クリップボードの変化の監視を入れ切りする. 切ったら記録も消す
+    fn sync_clip_listener(&mut self) {
+        let on = self.config.search.clipboard_history;
+        if on && !self.clip_listening {
+            self.clip_listening = unsafe { AddClipboardFormatListener(self.hwnd) }.is_ok();
+            if !self.clip_listening {
+                storage::log("clipboard history: could not listen to the clipboard");
+            }
+        } else if !on && self.clip_listening {
+            unsafe {
+                let _ = RemoveClipboardFormatListener(self.hwnd);
+            }
+            self.clip_listening = false;
+        }
+        if !on {
+            self.clips.clear();
+        }
+    }
+
+    /// クリップボードが変わった(`WM_CLIPBOARDUPDATE`)
+    fn on_clipboard_update(&mut self) {
+        if !self.config.search.clipboard_history {
+            return;
+        }
+        // 選んだ文字の取り込みで一時的に変えたもの(と, 戻したもの)は残さない
+        if self.clip_ignore == Some(clipboard::sequence()) {
+            return;
+        }
+        let _d = diag::doing("clipboard history: read");
+        if let Some(k) = clipboard::read_for_history(self.hwnd) {
+            self.clips.add(k, util::now_secs());
+        }
+    }
+
+    /// 履歴の1件を貼る: 窓を閉じ, クリップボードに入れ, 前のアプリが前面に戻ってからShift+Insertを送る
+    fn paste_clip(&mut self, id: u64) {
+        let Some(e) = self.clips.get(id).cloned() else { return };
+        // 消えたファイルは何もしない
+        if let ClipKind::Files(f) = &e.kind {
+            if f.iter().any(|p| !p.starts_with("\\\\") && !Path::new(p).exists()) {
+                return;
+            }
+        }
+        if let Err(msg) = clipboard::set_kind(self.hwnd, &e.kind) {
+            self.fail(msg);
+            return;
+        }
+        self.finish(None);
+        selection::paste_when_back(self.hwnd.0 as isize);
+    }
+
+    // ---- スクリプトのフォルダー ----
+
+    /// 自作コマンドの一覧(設定の`[[command]]`と, `run`のスクリプト)を作り直す
+    fn rebuild_commands(&mut self) {
+        let mut items = router::command_items(&self.config);
+        items.extend(cscripts::run_items(&self.scripts));
+        self.commands = Catalog::new(items);
+    }
+
+    /// フォルダーの中身が変わっていたら読み直す(窓を出すたびに見る)
+    fn check_scripts(&mut self) {
+        let sig = scripts::signature();
+        if sig == self.scripts_sig {
+            return;
+        }
+        self.scripts_sig = sig;
+        self.scripts = scripts::load();
+        storage::log(&format!("scripts: {} loaded", self.scripts.len()));
+        let paths: Vec<String> = self.scripts.iter().map(|s| s.path.clone()).collect();
+        self.lists.lock().unwrap().retain(|k, _| paths.contains(k));
+        self.rebuild_commands();
+    }
+
+    /// `run`のスクリプトを裏で動かす. 窓は閉じず, 実行中は`Running…`の行を出す
+    fn start_script(&mut self, index: usize, arg: String) {
+        let Some(s) = self.scripts.get(index).cloned() else { return };
+        self.script_job += 1;
+        let job = self.script_job;
+        self.script_view = true;
+        self.script_all.clear();
+        self.menu = None;
+        self.rows = vec![cscripts::running_row(&s.title)];
+        self.sel = 0;
+        self.top = 0;
+        self.layout();
+        let (slot, h) = (self.script_result.clone(), self.hwnd.0 as isize);
+        let _ = std::thread::Builder::new().name("script-run".into()).spawn(move || {
+            let o = scripts::run(&s, &arg);
+            *slot.lock().unwrap() = Some((job, o));
+            unsafe {
+                let _ = PostMessageW(Some(HWND(h as *mut _)), scripts::WM_APP_SCRIPT, WPARAM(0), LPARAM(0));
+            }
+        });
+    }
+
+    /// スクリプトが終わった. まだその結果を待っていれば, 出力を行にして出す
+    fn on_script_done(&mut self) {
+        let Some((job, o)) = self.script_result.lock().unwrap().take() else { return };
+        if job != self.script_job || !self.script_view || !self.visible() {
+            return;
+        }
+        let title = self.rows.first().map(|r| r.sub.clone()).unwrap_or_default();
+        let (rows, all) = cscripts::outcome_rows(&title, &o);
+        self.script_all = all;
+        self.set_rows(rows, vec![]);
+    }
+
+    /// `list`のスクリプトの結果がそろった. その一覧を見ているなら出し直す
+    fn on_script_list(&mut self) {
+        if self.visible() && !self.composing() && !self.script_view && self.menu.is_none() && self.mode == Mode::All {
+            let text = self.edit_text();
+            if cscripts::list_target(&self.scripts, &text).is_some() {
+                self.refresh();
             }
         }
     }
@@ -2172,7 +2632,35 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                 if wparam.0 as i32 == system::HOTKEY_ID {
                     app.stats.hotkey_at = Some(Instant::now());
                     app.toggle();
+                } else if wparam.0 as i32 == system::HOTKEY_SELECTION_ID {
+                    app.on_selection_hotkey();
                 }
+                Some(LRESULT(0))
+            }
+            WM_CLIPBOARDUPDATE => {
+                app.on_clipboard_update();
+                Some(LRESULT(0))
+            }
+            WM_COPYDATA => {
+                // `Hikidashi.exe --query "文字"`から. 文字(UTF-16)を入れて窓を出す
+                let cds = lparam.0 as *const COPYDATASTRUCT;
+                if cds.is_null() {
+                    return None;
+                }
+                let (magic, len, ptr) = unsafe { ((*cds).dwData, (*cds).cbData as usize, (*cds).lpData as *const u16) };
+                if magic != QUERY_MAGIC || ptr.is_null() {
+                    return None;
+                }
+                let text = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(ptr, len / 2) });
+                app.on_query(&text);
+                Some(LRESULT(1))
+            }
+            scripts::WM_APP_SCRIPT => {
+                app.on_script_done();
+                Some(LRESULT(0))
+            }
+            scripts::WM_APP_SCRIPT_LIST => {
+                app.on_script_list();
                 Some(LRESULT(0))
             }
             WM_ACTIVATE => {
@@ -2296,7 +2784,7 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                 // アプリのアイコンは先に裏で読んでおく(K29)
                 let paths: Vec<String> = app.apps.items.iter().map(|it| it.target.clone()).collect();
                 app.icons.prefetch(paths.iter().map(String::as_str));
-                if app.visible() {
+                if app.visible() && !app.script_view {
                     app.refresh();
                 }
                 Some(LRESULT(0))
@@ -2512,10 +3000,30 @@ fn relocate() -> bool {
     std::process::Command::new(&target).args(args).arg("--updated").spawn().is_ok()
 }
 
+/// 動いているHikidashiの窓に`--query`の文字を`WM_COPYDATA`で送る. 送れたらtrue
+fn send_query(text: &str) -> bool {
+    unsafe {
+        let Ok(h) = FindWindowW(CLASS, PCWSTR::null()) else { return false };
+        // 動いている方が前に出られるようにする
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+        let data = util::wide(text);
+        let cds = COPYDATASTRUCT { dwData: QUERY_MAGIC, cbData: (data.len() * 2) as u32, lpData: data.as_ptr() as *mut _ };
+        // 窓が出るまで待つ(相手が忙しければ待たされる)ので, 返ってきたら届いたとみなす
+        SendMessageW(h, WM_COPYDATA, Some(WPARAM(0)), Some(LPARAM(&cds as *const _ as isize))).0 != 0
+    }
+}
+
 pub fn run() {
     std::panic::set_hook(Box::new(|info| {
         storage::log(&format!("panic: {info}"));
     }));
+    // `--query 文字`: 動いていればその窓に渡して終わる(置き換えのための入れ替えもしない). 動いていなければ, ふつうに起動して, その文字で窓を出す
+    let query = csel::query_arg(std::env::args().skip(1));
+    if let Some(q) = &query {
+        if send_query(q) {
+            return;
+        }
+    }
     if relocate() {
         return;
     }
@@ -2538,6 +3046,11 @@ pub fn run() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     if !first {
+        if let Some(q) = &query {
+            if send_query(q) {
+                return;
+            }
+        }
         unsafe {
             if let Ok(h) = FindWindowW(CLASS, PCWSTR::null()) {
                 // 動いている方が前に出られるようにする
@@ -2640,6 +3153,20 @@ pub fn run() {
         searcher,
         dict,
         commands: Catalog::new(router::command_items(&config)),
+        sel_hotkey: None,
+        sel_registered: false,
+        capture_sel: false,
+        clips: ClipHistory::default(),
+        clip_listening: false,
+        clip_ignore: None,
+        scripts: vec![],
+        scripts_sig: vec![],
+        lists: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        script_job: 0,
+        script_view: false,
+        recent_view: false,
+        script_all: String::new(),
+        script_result: Arc::new(std::sync::Mutex::new(None)),
         folders: Catalog::new(builtin::folder_items(
             &builtin::FOLDER_VARS
                 .iter()
@@ -2702,21 +3229,25 @@ pub fn run() {
         diag::start(hwnd);
         app.icons.start(hwnd);
         app.reload_bookmarks();
+        app.sync_clip_listener();
         match app.hotkey {
             Some(h) if system::register_hotkey(hwnd, h) => {
                 if updated {
                     app.message = Some(("Hikidashi was updated".into(), false));
                 }
-                if !autostart {
+                app.apply_selection_hotkey();
+                if let Some(q) = &query {
+                    app.on_query(q);
+                } else if !autostart {
                     app.show();
                 }
             }
             Some(h) => {
-                app.start_capture();
+                app.start_capture(false);
                 app.message = Some((format!("{} is used by another app. Press another hotkey.", h.format()), true));
                 app.layout();
             }
-            None => app.start_capture(),
+            None => app.start_capture(false),
         }
     });
     let mut msg = MSG::default();
