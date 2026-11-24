@@ -65,8 +65,8 @@ const WM_APP_FAVICONS: u32 = 0x8000 + 7;
 /// ファイルの結果を待つ時間. これより遅ければ先にほかの結果を出す
 const QUICK_MS: u32 = 60;
 
-/// マニュアル(`docs/index.html`). トレイの`Manual`で書き出して開く(K14).
-static MANUAL_HTML: &[u8] = include_bytes!("../../../../docs/index.html");
+/// マニュアル(`docs/manual.html`). トレイの`Manual`で書き出して開く(K14).
+static MANUAL_HTML: &[u8] = include_bytes!("../../../../docs/manual.html");
 
 /// Tabのメニューの1行
 #[derive(Clone)]

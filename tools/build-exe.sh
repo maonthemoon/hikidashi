@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
 "$CARGO" test -q
 # マニュアルはexeに埋め込む(K14). 元のファイルの方が新しければ作り直す
-if [ -f dev/docs/manual-src/index.html ] && [ dev/docs/manual-src/index.html -nt docs/index.html ]; then
+if [ -f dev/docs/manual-src/index.html ] && [ dev/docs/manual-src/index.html -nt docs/manual.html ]; then
   ./tools/build-manual.sh
 fi
 # exeの中のエラー文に手元のパス(ユーザー名を含む)が残らないよう置き換える. 後に書いたものが優先される

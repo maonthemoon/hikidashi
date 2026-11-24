@@ -1,0 +1,1448 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>マニュアル | Hikidashi</title>
+  <meta name="description" content="Hikidashi(引き出し)の使い方. アプリ, ファイル, ブックマーク, 窓, プロセスを1つの入力欄から探して開くWindows用のランチャー.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Sans+Mono:wght@400;700&display=swap">
+  <style>
+
+
+:root {
+  color-scheme: light dark;
+
+  /* ---------- プリミティブ: 暖色グレー（slate） ---------- */
+  --gray-000: #ffffff;
+  --gray-050: #faf9f5;
+  --gray-100: #f5f4ed;
+  --gray-150: #f0eee6;
+  --gray-200: #e8e6dc;
+  --gray-250: #dedcd1;
+  --gray-300: #d1cfc5;
+  --gray-350: #c2c0b6;
+  --gray-400: #b0aea5;
+  --gray-450: #9c9a92;
+  --gray-500: #87867f;
+  --gray-550: #73726c;
+  --gray-600: #5e5d59;
+  --gray-650: #4d4c48;
+  --gray-700: #3d3d3a;
+  --gray-750: #30302e;
+  --gray-800: #262624;
+  --gray-850: #1f1e1d;
+  --gray-900: #1a1918;
+  --gray-950: #141413;
+  --gray-1000: #0f0f0e;
+
+  /* ---------- プリミティブ: ブランド系アクセント ---------- */
+  --clay: #d97757;
+  --clay-interactive: #c6613f;     
+  --clay-button: #b85a39;          /* 白文字で4.61（AA）を満たすボタン用に補正 */
+  --clay-deep: #a9472a;         /* 白背景上の小さい文字用（AA確保のため追加） */
+  --clay-light: #d4a27f;        
+  --oat: #e3dacc;
+  --olive: #788c5d;
+  --sky: #6a9bcc;
+  --fig: #c46686;
+  --cactus: #bcd1ca;
+  --heather: #cbcadb;
+  --coral: #ebcece;
+  --periwinkle: #cde2fb;
+  --periwinkle-deep: #184f95;
+  --focus: #2c84db;
+  --error: #bf4d43;
+
+  /* ---------- セマンティック: 色（ライト） ---------- */
+  --bg: var(--gray-050);              /* ページ背景 ivory light */
+  --bg-subtle: var(--gray-150);       /* セクション帯・サイドバー */
+  --bg-muted: var(--gray-200);        /* ホバー・トラック */
+  --bg-oat: var(--oat);
+  --bg-inverse: var(--gray-950);
+  --surface: var(--gray-000);         /* カード */
+  --surface-raised: var(--gray-000);
+  --code-bg: var(--gray-150);
+
+  --text: var(--gray-950);
+  --text-secondary: var(--gray-700);
+  --text-tertiary: var(--gray-600);
+  --text-inverse: var(--gray-050);
+  --text-on-accent: var(--gray-000);
+
+  --border: var(--gray-300);
+  --border-faint: var(--gray-200);
+  --border-strong: var(--gray-950);
+
+  --accent: var(--clay);              /* 装飾・アイコン・大きい面 */
+  --accent-interactive: var(--clay-button); /* ボタン背景 */
+  --accent-text: var(--clay-deep);    /* 本文中のアクセント文字 */
+  --link: var(--gray-950);
+  --link-underline: var(--clay);
+
+  
+  --docs-primary: var(--text);        /* 現在地・タブ下線・リンク下線・eyebrow */
+  --text-body: var(--text-secondary); /* ドキュメント本文 */
+  --line: color-mix(in srgb, var(--text) 10%, transparent); /* カード・コードブロックの枠 */
+  --nav-text: var(--text-secondary);  /* サイドバーのリンク */
+  --nav-hover-bg: color-mix(in srgb, var(--text) 5%, transparent);
+  --nav-active-bg: color-mix(in srgb, var(--docs-primary) 10%, transparent); /* サイドバーの現在ページ */
+  --nav-active-text: var(--docs-primary);
+  --toc-text: var(--text-tertiary);   /* 目次: h2 */
+  --toc-sub-text: var(--gray-550);    /* 目次: h3 */
+  --toc-active: var(--docs-primary);  /* 目次の現在位置 */
+  --code-inline-bg: color-mix(in srgb, var(--text) 5%, transparent);
+  --faux-bold: -0.2px 0 0 currentColor, 0.2px 0 0 currentColor; /* 太さを変えずに強調(幅が変わらない) */
+
+  --success: var(--olive);
+  --info: var(--sky);
+  --warning: #c08532;
+  --danger: var(--error);
+
+  /* チャート用カテゴリ色（この順で使う） */
+  --chart-1: var(--clay);
+  --chart-2: var(--sky);
+  --chart-3: var(--olive);
+  --chart-4: var(--fig);
+  --chart-5: var(--gray-500);
+  --chart-grid: var(--gray-300);
+
+  /* ---------- 書体（DADS） ---------- */
+  --font-sans: "Noto Sans JP", system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  --font-mono: "Noto Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  
+  --font-serif: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --font-heading: var(--font-serif);
+  --weight-heading: 700;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  
+  --fs-display-1: 42px;
+  --fs-display-2: 36px;
+  --fs-h1: 32px;   /* headline-1 */
+  --fs-h2: 28px;   /* headline-3（和文の詰まりを避け1段控えめ） */
+  --fs-h3: 23px;   /* headline-4 */
+  --fs-h4: 20px;   /* headline-5 */
+  --fs-h5: 17px;   /* headline-6 */
+  --fs-lead: 20px; /* body-large-2 */
+  --fs-body-lg: 19px; /* body-1 */
+  --fs-body: 17px;    /* body-2（和文本文の基準） */
+  --fs-body-sm: 16px; /* DADS 最小基準 */
+  --fs-caption: 14px; /* caption（DADS例外サイズ・最小） */
+  --fs-mono: 15px;
+  
+  --fs-docs-title: 30px;  /* h1. 768px以上で36px */
+  --fs-docs-h2: 24px;
+  --fs-docs-h3: 20px;
+  --fs-docs-desc: 18px;   /* h1直下の説明文 */
+  --fs-nav: 14px;         /* サイドバー・目次・タブ・パンくず(DADSの例外サイズ) */
+
+  /* ---------- 行間・字間（DADS） ---------- */
+  --lh-display: 1.3;
+  --lh-heading: 1.4;
+  --lh-heading-sm: 1.5;
+  --lh-body: 1.75;
+  --lh-ui: 1.5;
+  --lh-dense: 1.3;
+  --lh-oneline: 1;
+  --lh-code: 1.6;
+  --ls-display: 0;
+  --ls-heading: 0.01em;
+  --ls-body: 0.02em;
+
+  /* ---------- 余白 ---------- */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-48: 48px;
+  --space-64: 64px;
+  --space-80: 80px;
+  --space-96: 96px;
+  --space-128: 128px;
+
+  --gap-xs: 12px;
+  --gap-sm: 16px;
+  --gap-md: 24px;
+  --gap-lg: 32px;
+  --gap-xl: 48px;
+
+  --page-margin: 16px;
+  --gutter: 24px;
+  --section-lg: 64px;
+  --section-sm: 32px;
+  --card-pad-sm: 16px;
+  --card-pad-md: 24px;
+  --card-pad-lg: 48px;
+
+  /* ---------- レイアウト幅 ---------- */
+  --container-max: 1400px;
+  --content-max: 1200px;
+  --reading-max: 720px;   /* 和文は 1行 35〜40字 程度が上限 */
+  --text-col-max: 640px;
+  --sidebar-w: 288px;   /* 右32pxの余白込み. リンクの箱は256px */
+  --toc-w: 304px;       /* 左40pxの余白込み. 目次本体は264px */
+  --docs-max: 1440px;
+  --header-h: 64px;     /* ドキュメントの2段ヘッダーでは112px(components.cssで切替) */
+  --tabs-h: 48px;
+  --cell-min: 150px;    
+
+  /* ---------- 形状 ---------- */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 1000px;
+  --border-w: 1px;
+  --border-w-md: 1.5px;
+
+  /* 影は原則使わない。浮かせる必要がある要素（メニュー・ダイアログ）のみ */
+  --shadow-pop: 0 1px 2px rgb(20 20 19 / 0.06), 0 8px 24px rgb(20 20 19 / 0.08);
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur: 160ms;
+}
+
+/* ---------- 任意: ゴシック見出し（<html data-heading="sans">。DADS に完全準拠させたい場合） ---------- */
+:root[data-heading="sans"] {
+  --font-heading: var(--font-sans);
+  --weight-heading: 700;
+}
+
+
+@media (min-width: 768px) {
+  :root {
+    --fs-display-1: 58px;
+    --fs-display-2: 48px;
+    --fs-h1: 44px;
+    --fs-h2: 32px;
+    --fs-h3: 23px;
+    --fs-h4: 20px;
+    --page-margin: 32px;
+    --gutter: 32px;
+    --section-lg: 80px;
+    --section-sm: 40px;
+    --card-pad-sm: 24px;
+    --card-pad-md: 32px;
+    --card-pad-lg: 64px;
+    --radius-sm: 12px;
+    --radius-md: 16px;
+    --radius-lg: 24px;
+    --fs-docs-title: 36px;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --fs-display-1: 72px;
+    --fs-display-2: 56px;
+    --fs-h1: 52px;
+    --fs-h2: 36px;
+    --fs-h3: 28px;
+    --fs-h4: 22px;
+    --fs-h5: 19px;
+    --fs-lead: 23px;
+    --fs-body-lg: 20px;
+    --page-margin: 64px;
+    --section-lg: 96px;
+    --section-sm: 48px;
+  }
+}
+
+/* ---------- ダークモード ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: var(--gray-950);
+    --bg-subtle: var(--gray-850);
+    --bg-muted: var(--gray-750);
+    --bg-oat: #2b2722;
+    --bg-inverse: var(--gray-050);
+    --surface: var(--gray-850);
+    --surface-raised: var(--gray-800);
+    --code-bg: var(--gray-900);
+    --text: var(--gray-050);
+    --text-secondary: var(--gray-300);
+    --text-tertiary: var(--gray-400);
+    --text-inverse: var(--gray-950);
+    --border: var(--gray-700);
+    --border-faint: var(--gray-800);
+    --border-strong: var(--gray-050);
+    --accent-text: #e8956f;
+    --link: var(--gray-050);
+    --docs-primary: var(--clay-light);
+    --text-body: var(--gray-400);
+    --nav-text: var(--gray-450);
+    --toc-text: var(--gray-450);
+    --toc-sub-text: var(--gray-450);
+    --chart-grid: var(--gray-700);
+    --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.4);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: var(--gray-950);
+  --bg-subtle: var(--gray-850);
+  --bg-muted: var(--gray-750);
+  --bg-oat: #2b2722;
+  --bg-inverse: var(--gray-050);
+  --surface: var(--gray-850);
+  --surface-raised: var(--gray-800);
+  --code-bg: var(--gray-900);
+  --text: var(--gray-050);
+  --text-secondary: var(--gray-300);
+  --text-tertiary: var(--gray-400);
+  --text-inverse: var(--gray-950);
+  --border: var(--gray-700);
+  --border-faint: var(--gray-800);
+  --border-strong: var(--gray-050);
+  --accent-text: #e8956f;
+  --link: var(--gray-050);
+    --docs-primary: var(--clay-light);
+    --text-body: var(--gray-400);
+    --nav-text: var(--gray-450);
+    --toc-text: var(--gray-450);
+    --toc-sub-text: var(--gray-450);
+  --chart-grid: var(--gray-700);
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+
+
+
+/* ---------- ベース ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: calc(var(--header-h) + 16px); }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-weight: var(--weight-regular);
+  line-height: var(--lh-body);
+  letter-spacing: var(--ls-body);
+  font-feature-settings: "palt" 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  
+  overflow-wrap: break-word;
+  line-break: strict;
+}
+/* 短い日本語(見出し・カード・表)は文節で折る(Chrome/Edge. 他のブラウザは通常の折り返し). lang="ja"が必要 */
+h1, h2, h3, h4, h5, h6, .display-1, .display-2, .card, th, td { word-break: auto-phrase; }
+img, svg, video { max-width: 100%; height: auto; display: block; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+::selection { background: color-mix(in srgb, var(--clay) 30%, transparent); }
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: var(--weight-heading);
+  color: var(--text);
+  margin: 0;
+  text-wrap: balance;
+}
+h1 { font-size: var(--fs-h1); line-height: var(--lh-heading); letter-spacing: var(--ls-display); }
+h2 { font-size: var(--fs-h2); line-height: var(--lh-heading); letter-spacing: var(--ls-heading); }
+h3 { font-size: var(--fs-h3); line-height: var(--lh-heading-sm); letter-spacing: var(--ls-heading); }
+h4 { font-size: var(--fs-h4); line-height: var(--lh-heading-sm); letter-spacing: var(--ls-body); }
+h5, h6 { font-size: var(--fs-h5); line-height: var(--lh-heading-sm); letter-spacing: var(--ls-body); }
+p { margin: 0; text-wrap: pretty; }
+
+a { color: var(--link); text-decoration: underline; text-decoration-color: var(--link-underline); text-decoration-thickness: 1px; text-underline-offset: 0.25em; transition: text-decoration-color var(--dur) var(--ease); }
+a:hover { text-decoration-color: currentColor; }
+
+/* パス・コマンドは記号の位置でも折らない(word-break: normal). 狭い箱からはみ出すときだけ折る(overflow-wrap: break-word) */
+code, kbd, samp, pre { font-family: var(--font-mono); font-size: 0.9em; letter-spacing: 0; overflow-wrap: break-word; word-break: normal; }
+pre { overflow-wrap: normal; }
+:not(pre) > code { background: var(--code-bg); border: 1px solid var(--border-faint); border-radius: var(--radius-xs); padding: 0.1em 0.35em; }
+pre {
+  margin: 0; background: var(--code-bg); border: 1px solid var(--border-faint); border-radius: var(--radius-sm);
+  padding: var(--space-16) var(--space-24); overflow-x: auto; font-size: var(--fs-mono); line-height: var(--lh-code);
+}
+kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--radius-xs); padding: 0.05em 0.4em; background: var(--surface); }
+hr { border: 0; border-top: 1px solid var(--border); margin: var(--space-48) 0; }
+small, .caption { font-size: var(--fs-caption); line-height: var(--lh-ui); color: var(--text-tertiary); }
+
+/* ---------- タイポグラフィ ユーティリティ ---------- */
+.display-1 { font-family: var(--font-heading); font-size: var(--fs-display-1); line-height: var(--lh-display); font-weight: var(--weight-heading); letter-spacing: var(--ls-display); }
+.display-2 { font-family: var(--font-heading); font-size: var(--fs-display-2); line-height: var(--lh-display); font-weight: var(--weight-heading); letter-spacing: var(--ls-display); }
+.lead { font-size: var(--fs-lead); line-height: 1.7; color: var(--text-secondary); }
+.eyebrow { font-size: var(--fs-caption); font-weight: var(--weight-medium); letter-spacing: 0.06em; color: var(--text-tertiary); }
+.muted { color: var(--text-tertiary); }
+.serif { font-family: var(--font-serif); font-weight: var(--weight-medium); }
+.mono { font-family: var(--font-mono); letter-spacing: 0; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- レイアウト ---------- */
+.container { width: 100%; max-width: var(--container-max); margin-inline: auto; padding-inline: var(--page-margin); }
+.container--narrow { max-width: calc(var(--reading-max) + 2 * var(--page-margin)); }
+.section { padding-block: var(--section-lg); }
+.section--sm { padding-block: var(--section-sm); }
+.section--subtle { background: var(--bg-subtle); }
+.section--oat { background: var(--bg-oat); }
+.section--inverse { background: var(--bg-inverse); color: var(--text-inverse); }
+.section--inverse :is(h1,h2,h3,h4,p) { color: inherit; }
+.stack { --stack: var(--space-16); }
+.stack > * + * { margin-top: var(--stack); }
+.cluster { display: flex; flex-wrap: wrap; gap: var(--gap, var(--space-12)); align-items: center; }
+.grid { display: grid; gap: var(--gutter); grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--min, 280px)), 1fr)); }
+.split { display: grid; gap: var(--gap-xl); align-items: center; }
+@media (min-width: 1024px) { .split { grid-template-columns: 1fr 1fr; } }
+.split-2-1 { display: grid; gap: var(--gutter); }
+@media (min-width: 1024px) { .split-2-1 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); } }
+
+/* 読み物本文（docs / report） */
+.prose { max-width: var(--reading-max); }
+.prose > * + * { margin-top: 1.25em; }
+.prose > :is(h2) { margin-top: var(--space-64); }
+.prose > :is(h3) { margin-top: var(--space-48); }
+.prose > :is(h4) { margin-top: var(--space-32); }
+.prose > :is(h2,h3,h4) + * { margin-top: 0.75em; }
+.prose :is(ul, ol) { padding-left: 1.5em; }
+.prose li + li { margin-top: 0.4em; }
+.prose li::marker { color: var(--text-tertiary); }
+.prose blockquote { margin-inline: 0; padding: var(--space-4) 0 var(--space-4) var(--space-24); border-left: 2px solid var(--accent); color: var(--text-secondary); }
+.prose figure { margin-inline: 0; }
+.prose figcaption { margin-top: var(--space-8); font-size: var(--fs-caption); color: var(--text-tertiary); }
+
+/* ---------- ヘッダー / フッター ---------- */
+.site-header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-faint); }
+.site-header__inner { height: var(--header-h); display: flex; align-items: center; gap: var(--space-32); }
+.brand { display: inline-flex; align-items: center; gap: var(--space-8); font-weight: var(--weight-bold); font-size: 18px; color: var(--text); text-decoration: none; letter-spacing: 0.01em; }
+.brand__mark { width: 22px; height: 22px; color: var(--accent); }
+.site-nav { display: flex; gap: var(--space-24); margin-left: auto; align-items: center; }
+.site-nav a:not(.btn) { color: var(--text-secondary); text-decoration: none; font-size: var(--fs-body-sm); }
+.site-nav a:not(.btn):hover, .site-nav a[aria-current="page"] { color: var(--text); }
+@media (max-width: 767px) { .site-nav .hide-sm { display: none; } }
+.site-footer { background: var(--bg-subtle); padding-block: var(--space-64); color: var(--text-secondary); font-size: var(--fs-body-sm); }
+.site-footer a { color: inherit; text-decoration: none; }
+.site-footer a:hover { color: var(--text); text-decoration: underline; }
+.footer-grid { display: grid; gap: var(--gap-lg); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.footer-grid h4 { font-size: var(--fs-caption); font-weight: var(--weight-medium); color: var(--text-tertiary); margin-bottom: var(--space-12); }
+.footer-grid ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-8); }
+
+/* ---------- ボタン ---------- */
+.btn {
+  --btn-bg: var(--text); --btn-fg: var(--bg); --btn-bd: var(--text);
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-8);
+  min-height: 44px; padding: 0 var(--space-24);
+  font: inherit; font-size: var(--fs-body-sm); font-weight: var(--weight-medium); line-height: var(--lh-oneline); letter-spacing: var(--ls-body);
+  color: var(--btn-fg); background: var(--btn-bg); border: var(--border-w) solid var(--btn-bd); border-radius: var(--radius-sm);
+  text-decoration: none; cursor: pointer; white-space: nowrap;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.btn:hover { --btn-bg: var(--gray-700); --btn-bd: var(--gray-700); }
+.btn--accent { --btn-bg: var(--accent-interactive); --btn-bd: var(--accent-interactive); --btn-fg: var(--text-on-accent); }
+.btn--accent:hover { --btn-bg: var(--clay-deep); --btn-bd: var(--clay-deep); }
+.btn--secondary { --btn-bg: transparent; --btn-fg: var(--text); --btn-bd: var(--border); }
+.btn--secondary:hover { --btn-bg: var(--bg-muted); --btn-bd: var(--border); }
+.btn--ghost { --btn-bg: transparent; --btn-fg: var(--text); --btn-bd: transparent; padding-inline: var(--space-12); }
+.btn--ghost:hover { --btn-bg: var(--bg-muted); --btn-bd: transparent; }
+.btn--sm { min-height: 36px; padding-inline: var(--space-16); font-size: var(--fs-caption); }
+.btn--lg { min-height: 52px; padding-inline: var(--space-32); font-size: var(--fs-body); }
+.btn--pill { border-radius: var(--radius-pill); }
+.btn .arrow { transition: transform var(--dur) var(--ease); }
+.btn:hover .arrow { transform: translateX(3px); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn:not([class*="btn--"]):hover { --btn-bg: var(--gray-300); --btn-bd: var(--gray-300); } }
+:root[data-theme="dark"] .btn:not([class*="btn--"]):hover { --btn-bg: var(--gray-300); --btn-bd: var(--gray-300); }
+
+/* テキストリンク（矢印付き） */
+.link-arrow { display: inline-flex; gap: var(--space-8); align-items: center; font-weight: var(--weight-medium); text-decoration: none; color: var(--text); }
+.link-arrow::after { content: "→"; transition: transform var(--dur) var(--ease); }
+.link-arrow:hover::after { transform: translateX(3px); }
+
+/* ---------- カード ---------- */
+.card { background: var(--surface); border: 1px solid var(--border-faint); border-radius: var(--radius-md); padding: var(--card-pad-md); display: flex; flex-direction: column; gap: var(--space-12); }
+.card > .badge { align-self: flex-start; }
+.card--subtle { background: var(--bg-subtle); border-color: transparent; }
+.card--oat { background: var(--bg-oat); border-color: transparent; }
+.card--link { color: inherit; text-decoration: none; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
+.card--link:hover { border-color: var(--border); background: var(--surface-raised); }
+.card__icon { width: 40px; height: 40px; border-radius: var(--radius-sm); display: grid; place-items: center; background: var(--bg-subtle); color: var(--accent); }
+.card__title { font-family: var(--font-heading); font-size: var(--fs-h4); font-weight: var(--weight-heading); line-height: var(--lh-heading-sm); }
+.card__body { color: var(--text-secondary); font-size: var(--fs-body-sm); }
+.card__footer { margin-top: auto; padding-top: var(--space-8); }
+
+
+.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; display: flex; flex-wrap: wrap; gap: var(--gap-sm); }
+/* flexの子は中身(単語・<code>)の幅より縮まないので, 入らなければ折り返す. gridの固定幅だと途中で折れる */
+.steps > li { counter-increment: step; flex: 1 1 var(--min, 200px); }
+.steps > .card { padding: var(--card-pad-sm); }
+/* .prose内に置いたとき: ul/olの左paddingとli同士のmargin-topを打ち消し, 前の要素との間隔は.proseに合わせる */
+.prose > .steps { padding-left: 0; }
+.prose > * + .steps { margin-top: 1.25em; }
+.steps > li + li, .docs-main .prose .steps > li + li { margin-top: 0; }
+.steps > li::before { content: counter(step); align-self: flex-start; display: inline-grid; place-items: center; min-width: 1.75em; height: 1.75em; padding-inline: var(--space-4); border-radius: var(--radius-pill); background: var(--bg-muted); color: var(--text-secondary); font-size: var(--fs-caption); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; line-height: 1; }
+
+/* ---------- バッジ / タグ ---------- */
+.badge { white-space: nowrap; display: inline-flex; align-items: center; gap: var(--space-4); padding: 0.3em 0.75em; border-radius: var(--radius-pill); font-size: var(--fs-caption); font-weight: var(--weight-medium); line-height: var(--lh-oneline); background: var(--bg-muted); color: var(--text-secondary); }
+.badge--accent { background: color-mix(in srgb, var(--clay) 16%, var(--bg)); color: var(--accent-text); }
+.badge--success { background: color-mix(in srgb, var(--olive) 18%, var(--bg)); color: color-mix(in srgb, var(--olive) 70%, var(--text)); }
+.badge--info { background: color-mix(in srgb, var(--sky) 18%, var(--bg)); color: color-mix(in srgb, var(--sky) 55%, var(--text)); }
+.badge--danger { background: color-mix(in srgb, var(--error) 14%, var(--bg)); color: color-mix(in srgb, var(--error) 80%, var(--text)); }
+
+/* ---------- コールアウト ---------- */
+.callout { display: grid; grid-template-columns: auto 1fr; gap: var(--space-12); padding: var(--space-16) var(--space-24); border-radius: var(--radius-sm); background: var(--bg-subtle); border: 1px solid var(--border-faint); font-size: var(--fs-body-sm); }
+.callout__icon { color: var(--text-tertiary); line-height: var(--lh-body); }
+.callout > div > * + * { margin-top: var(--space-8); }
+.callout--note { border-left: 3px solid var(--sky); }
+.callout--tip { border-left: 3px solid var(--olive); }
+.callout--warning { border-left: 3px solid var(--warning); }
+.callout--danger { border-left: 3px solid var(--error); }
+.callout--accent { border-left: 3px solid var(--accent); }
+
+/* ---------- コードブロック（見出し付き） ---------- */
+.codeblock { border: 1px solid var(--border-faint); border-radius: var(--radius-sm); overflow: hidden; background: var(--code-bg); }
+.codeblock__bar { display: flex; justify-content: space-between; align-items: center; padding: var(--space-8) var(--space-16); border-bottom: 1px solid var(--border-faint); font-size: var(--fs-caption); color: var(--text-tertiary); }
+.codeblock pre { border: 0; border-radius: 0; }
+.copy-btn { font: inherit; font-size: var(--fs-caption); color: var(--text-tertiary); background: none; border: 0; cursor: pointer; padding: var(--space-4) var(--space-8); border-radius: var(--radius-xs); }
+.copy-btn:hover { background: var(--bg-muted); color: var(--text); }
+
+/* ---------- テーブル ---------- */
+.table-wrap > table { min-width: 520px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border-faint); border-radius: var(--radius-sm); }
+table { width: 100%; border-collapse: collapse; font-size: var(--fs-body-sm); line-height: var(--lh-ui); }
+
+td:not(.num) { min-width: var(--cell-min); }
+th, td { padding: var(--space-12) var(--space-16); text-align: left; border-bottom: 1px solid var(--border-faint); vertical-align: top; }
+th { font-weight: var(--weight-medium); color: var(--text-tertiary); background: var(--bg-subtle); font-size: var(--fs-caption); white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: color-mix(in srgb, var(--bg-muted) 40%, transparent); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table--dense :is(th, td) { padding: var(--space-8) var(--space-12); line-height: var(--lh-dense); }
+
+/* ---------- フォーム ---------- */
+.field { display: grid; gap: var(--space-8); }
+.label { font-size: var(--fs-body-sm); font-weight: var(--weight-medium); }
+.hint { font-size: var(--fs-caption); color: var(--text-tertiary); }
+.input, .select, .textarea {
+  width: 100%; min-height: 44px; padding: var(--space-8) var(--space-12);
+  font: inherit; font-size: var(--fs-body-sm); color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); transition: border-color var(--dur) var(--ease);
+}
+.textarea { min-height: 120px; resize: vertical; line-height: var(--lh-body); }
+.input:hover, .select:hover, .textarea:hover { border-color: var(--gray-500); }
+.input:focus, .select:focus, .textarea:focus { outline: 2px solid var(--focus); outline-offset: 0; border-color: var(--focus); }
+.check { display: inline-flex; gap: var(--space-8); align-items: center; font-size: var(--fs-body-sm); }
+.check input { accent-color: var(--accent-interactive); width: 18px; height: 18px; }
+
+/* ---------- タブ / セグメント ---------- */
+.tabs { display: flex; gap: var(--space-4); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.tab { font: inherit; font-size: var(--fs-body-sm); padding: var(--space-12) var(--space-16); background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--text-tertiary); cursor: pointer; white-space: nowrap; }
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); font-weight: var(--weight-medium); }
+
+
+:root:has(.site-header--docs) { --header-h: calc(var(--space-64) + var(--tabs-h)); }
+
+/* ヘッダー(2段) */
+.site-header--docs { border-bottom: 1px solid var(--border-faint); }
+.docs-header__inner { max-width: var(--docs-max); margin-inline: auto; padding-inline: var(--page-margin); }
+@media (min-width: 1024px) { .docs-header__inner { padding-inline: var(--space-48); } }
+.docs-header__bar { height: var(--space-64); display: flex; align-items: center; gap: var(--space-16); border-bottom: 1px solid var(--border-faint); }
+.docs-header__bar .site-nav { margin-left: 0; gap: var(--space-24); }
+.docs-header__bar .site-nav a:not(.btn) { font-size: var(--fs-nav); font-weight: var(--weight-medium); }
+.docs-search { flex: 0 1 240px; margin-inline: auto; display: flex; align-items: center; gap: var(--space-8); height: 36px; padding-inline: var(--space-12); border: 1px solid color-mix(in srgb, var(--text) 15%, transparent); border-radius: var(--radius-sm); background: var(--bg); color: var(--text-tertiary); cursor: text; }
+.docs-search:focus-within { outline: 2px solid var(--focus); outline-offset: 0; }
+.docs-search svg { width: 16px; height: 16px; flex: none; }
+.docs-search input { flex: 1; min-width: 0; border: 0; padding: 0; background: none; font: inherit; font-size: var(--fs-nav); color: var(--text); outline: none; }
+.docs-search input::placeholder { color: var(--text-tertiary); }
+.docs-search kbd { border: 0; background: none; padding: 0; font-family: var(--font-sans); font-size: var(--fs-nav); color: var(--text-tertiary); }
+@media (max-width: 767px) { .docs-search { display: none; } .docs-header__bar .site-nav { margin-left: auto; } }
+/* 全文検索(任意. search.js が使う): 検索欄の下に結果を出し, 移動先のページで語に印を付ける */
+.docs-search--full { position: relative; flex-basis: 320px; }
+.search-panel { position: absolute; top: calc(100% + var(--space-4)); left: 0; z-index: 60; width: min(560px, calc(100vw - 2 * var(--space-16))); max-height: min(70vh, 560px); overflow-y: auto; padding: var(--space-4); background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-pop); cursor: default; }
+.search-hit-item { display: block; padding: var(--space-8) var(--space-12); border-radius: var(--radius-sm); color: var(--text); text-decoration: none; }
+.search-hit-item[aria-selected="true"], .search-hit-item:hover { background: var(--bg-subtle); }
+.search-hit-item__where { display: block; font-size: var(--fs-nav); font-weight: var(--weight-semibold); }
+.search-hit-item__where span { color: var(--text-tertiary); font-weight: var(--weight-regular); }
+.search-hit-item__text { display: block; margin-top: var(--space-2); font-size: var(--fs-nav); line-height: 1.6; color: var(--text-secondary); overflow-wrap: break-word; }
+.search-panel mark, mark.search-hit { background: color-mix(in srgb, var(--clay) 28%, transparent); color: inherit; border-radius: var(--radius-xs); padding-inline: var(--space-2); }
+.search-panel__empty, .search-panel__count { margin: 0; padding: var(--space-8) var(--space-12); font-size: var(--fs-nav); color: var(--text-tertiary); }
+@media print { .search-panel { display: none !important; } }
+/* タブ: 文字14px/500. 現在地は文字色+1.5pxの下線(ライトはほぼ黒, ダークはクレイ) */
+.docs-tabs { height: var(--tabs-h); display: flex; gap: var(--space-24); overflow-x: auto; scrollbar-width: none; }
+.docs-tabs a { position: relative; display: flex; align-items: center; white-space: nowrap; font-size: var(--fs-nav); font-weight: var(--weight-medium); line-height: var(--lh-ui); color: var(--text-tertiary); text-decoration: none; }
+.docs-tabs a:hover { color: var(--text); }
+.docs-tabs a[aria-current="page"] { color: var(--text); text-shadow: var(--faux-bold); }
+.docs-tabs a[aria-current="page"]::after { content: ""; position: absolute; inset: auto 0 0; height: var(--border-w-md); background: var(--docs-primary); }
+/* 1023px以下: タブの代わりにメニューボタン+パンくず(現在地)の段を出す */
+.docs-mobilebar { height: var(--tabs-h); display: none; align-items: center; gap: var(--space-12); font-size: var(--fs-nav); color: var(--text-tertiary); }
+.docs-mobilebar__crumb { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.docs-mobilebar__crumb strong { color: var(--text); font-weight: var(--weight-semibold); }
+.docs-menu-btn { flex: none; display: grid; place-items: center; width: 36px; height: 36px; margin-left: calc(-1 * var(--space-8)); border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-tertiary); cursor: pointer; }
+.docs-menu-btn:hover { background: var(--nav-hover-bg); color: var(--text); }
+.docs-menu-btn svg { width: 18px; height: 18px; }
+@media (max-width: 1023px) { .docs-tabs { display: none; } .docs-mobilebar { display: flex; } }
+
+/* 3カラム */
+.docs-layout { display: grid; grid-template-columns: minmax(0, 1fr); max-width: var(--docs-max); margin-inline: auto; }
+@media (min-width: 1024px) { .docs-layout { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); padding-inline: var(--space-32); } }
+@media (min-width: 1280px) { .docs-layout { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--toc-w); } }
+
+/* 左ナビ: 区切り線なし. 独立してスクロールし, スクロールバーは出さない */
+.docs-sidebar { padding: var(--space-32) var(--space-32) var(--space-48) 0; scrollbar-width: none; }
+.docs-sidebar::-webkit-scrollbar { display: none; }
+@media (min-width: 1024px) { .docs-sidebar { position: sticky; top: var(--header-h); align-self: start; height: calc(100dvh - var(--header-h)); overflow-y: auto; } }
+@media (max-width: 1023px) {
+  /* ドロワー: ヘッダーの下から左に出す */
+  .docs-sidebar { position: fixed; z-index: 45; top: var(--header-h); bottom: 0; left: 0; width: min(320px, 85vw); overflow-y: auto; padding: var(--space-24) var(--space-16) var(--space-48); background: var(--bg); border-right: 1px solid var(--border-faint); transform: translateX(-100%); visibility: hidden; transition: transform var(--dur) var(--ease), visibility var(--dur); }
+  :root[data-nav-open] .docs-sidebar { transform: none; visibility: visible; }
+  :root[data-nav-open] body { overflow: hidden; }
+  .docs-backdrop { position: fixed; z-index: 44; inset: var(--header-h) 0 0; background: color-mix(in srgb, var(--gray-950) 30%, transparent); display: none; }
+  :root[data-nav-open] .docs-backdrop { display: block; }
+}
+@media (min-width: 1024px) { .docs-backdrop { display: none; } }
+.nav-group + .nav-group { margin-top: var(--space-32); }
+.nav-group__title { padding-left: var(--space-16); margin-bottom: 10px; font-size: var(--fs-nav); font-weight: var(--weight-semibold); line-height: 1.7; color: var(--text); }
+.nav-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+/* リンク: 14px, 行の高さ36px, 角丸12px. 現在ページは10%の地色+文字色(ライトはほぼ黒, ダークはクレイ). 太さは変えない */
+.nav-list a, .nav-sub > summary { display: flex; align-items: flex-start; gap: var(--space-12); padding: 6px var(--space-12) 6px var(--space-16); border-radius: var(--radius-sm); color: var(--nav-text); text-decoration: none; font-size: var(--fs-nav); line-height: 1.7; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+.nav-list a:hover, .nav-sub > summary:hover { background: var(--nav-hover-bg); color: var(--text); }
+.nav-list a[aria-current="page"] { background: var(--nav-active-bg); color: var(--nav-active-text); text-shadow: var(--faux-bold); }
+/* 外部リンク(↗)・子ページを開くグループ(›)の印は右端に寄せる */
+.nav-ext { flex: none; width: 10px; height: 10px; margin: 0.5em 0 0 auto; color: var(--text-tertiary); opacity: 0.7; }
+.nav-sub > summary { list-style: none; cursor: pointer; }
+.nav-sub > summary::-webkit-details-marker { display: none; }
+.nav-sub > summary::after { content: ""; flex: none; width: 6px; height: 6px; margin: 0.6em 4px 0 auto; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); opacity: 0.6; transition: transform var(--dur) var(--ease); }
+.nav-sub[open] > summary::after { transform: rotate(45deg); }
+.nav-sub > .nav-list { margin-top: 1px; padding-left: var(--space-12); }
+.nav-list li[hidden], .nav-group[hidden] { display: none; }
+
+/* 本文 */
+.docs-main { min-width: 0; padding: calc(var(--space-32) + var(--space-8)) var(--page-margin) var(--space-96); }
+@media (min-width: 1024px) { .docs-main { padding-inline: var(--space-48); } }
+.docs-main > * { max-width: var(--reading-max); }
+.docs-page-header { margin-bottom: var(--space-32); }
+.docs-eyebrow { margin-bottom: 10px; font-size: var(--fs-nav); font-weight: var(--weight-semibold); line-height: var(--lh-ui); letter-spacing: 0.02em; color: var(--docs-primary); }
+.docs-main h1 { font-size: var(--fs-docs-title); line-height: 1.3; }
+.docs-desc { margin-top: var(--space-8); font-size: var(--fs-docs-desc); line-height: 1.6; color: var(--text-body); }
+.docs-main .prose { font-size: var(--fs-body-sm); line-height: var(--lh-body); color: var(--text-body); }
+.docs-main .prose :is(strong, b) { color: var(--text); font-weight: var(--weight-semibold); }
+.docs-main .prose > * + * { margin-top: 1.25em; }
+.docs-main .prose > h2 { margin-top: 1.5em; font-size: var(--fs-docs-h2); line-height: var(--lh-heading); }
+.docs-main .prose > h3 { margin-top: 1.6em; font-size: var(--fs-docs-h3); line-height: var(--lh-heading-sm); }
+.docs-main .prose > h2 + * { margin-top: 0.75em; }
+.docs-main .prose > h3 + * { margin-top: 0.7em; }
+.docs-main .prose li + li { margin-top: var(--space-8); }
+.docs-main .prose li::marker { color: var(--border); }
+/* 見出しの左にアンカー(#)をホバーで出す. theme.jsが付ける */
+.docs-main :is(h2, h3)[id] { position: relative; scroll-margin-top: calc(var(--header-h) + var(--space-32) + var(--space-8)); }
+.heading-anchor { position: absolute; right: 100%; top: 0; padding-right: 0.3em; font-family: var(--font-sans); font-weight: var(--weight-regular); color: var(--text-tertiary); text-decoration: none; opacity: 0; transition: opacity var(--dur) var(--ease); }
+:is(h2, h3):hover > .heading-anchor, .heading-anchor:focus-visible { opacity: 1; }
+/* リンク: 太字(600)+下線. 下線はライトでほぼ黒, ダークでクレイ */
+.docs-main .prose a:not([class]) { color: var(--text); font-weight: var(--weight-semibold); text-decoration-color: var(--docs-primary); text-underline-offset: 0.3em; }
+.docs-main .prose a:not([class]):hover { text-decoration-thickness: 2px; }
+/* インラインコード: 枠なし, 薄い地色 */
+.docs-main :not(pre) > code { border: 0; border-radius: 6px; padding: 0.125em 0.5em; background: var(--code-inline-bg); color: var(--text); font-size: 0.875em; font-weight: var(--weight-medium); }
+/* コードブロック: 地色はカードと同じ, 枠は文字色10%, 角丸16px. コピーは右上 */
+.docs-main .codeblock { position: relative; background: var(--surface); border-color: var(--line); border-radius: var(--radius-md); }
+.docs-main .codeblock pre { background: none; padding: calc(var(--space-12) + var(--space-2)) var(--space-16); font-size: var(--fs-nav); line-height: 1.7; }
+.docs-main .codeblock__bar { border-bottom-color: var(--line); padding-block: var(--space-4); }
+.codeblock > .copy-btn { position: absolute; top: var(--space-8); right: var(--space-8); background: var(--surface); }
+.codeblock > .copy-btn ~ pre { padding-right: 6em; }
+/* 表: 外枠・見出しの地色なし. 左端を本文にそろえ, 行の区切り線だけ */
+.docs-main .table-wrap { border: 0; border-radius: 0; }
+.docs-main table { font-size: var(--fs-nav); line-height: 1.6; color: var(--text-body); }
+.docs-main th { padding: 0 var(--space-8) var(--space-8) 0; background: none; color: var(--text); font-size: inherit; font-weight: var(--weight-semibold); vertical-align: bottom; white-space: normal; border-bottom-color: var(--border); }
+.docs-main td { padding: var(--space-8) var(--space-8) var(--space-8) 0; vertical-align: baseline; }
+.docs-main tbody tr:last-child td { border-bottom: 1px solid var(--border-faint); }
+.docs-main tbody tr:hover td { background: none; }
+/* コールアウト: 種類の色で薄い地色+1pxの枠, 角丸16px, 文字14px */
+.docs-main .callout { --c: var(--gray-500); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); background: color-mix(in srgb, var(--c) 9%, var(--bg)); border-radius: var(--radius-md); padding: var(--space-16) calc(var(--space-16) + var(--space-4)); font-size: var(--fs-nav); line-height: 1.6; color: color-mix(in srgb, var(--c) 45%, var(--text)); }
+.docs-main .callout--note { --c: var(--sky); }
+.docs-main .callout--tip { --c: var(--olive); }
+.docs-main .callout--warning { --c: var(--warning); }
+.docs-main .callout--danger { --c: var(--error); }
+.docs-main .callout--accent { --c: var(--clay); }
+.docs-main .callout__icon { color: var(--c); font-size: var(--fs-body-sm); line-height: 1.4; }
+.docs-main .callout a { color: inherit; }
+/* カード: 角丸16px, 枠は文字色10%, タイトル16px */
+.docs-main .grid { gap: var(--space-16); }
+.docs-main .card { border-color: var(--line); border-radius: var(--radius-md); padding: calc(var(--space-16) + var(--space-4)) var(--space-24); gap: var(--space-8); }
+.docs-main .card--link:hover { border-color: color-mix(in srgb, var(--text) 25%, transparent); background: var(--surface); }
+.docs-main .card__icon { width: 24px; height: 24px; background: none; color: var(--accent); }
+.docs-main .card__title { font-size: var(--fs-body-sm); }
+.docs-main .card__body { color: var(--text-body); }
+
+/* 右目次: 線なし. 見出しは14px/400+アイコン. h2は500, h3は400で16px字下げ. 現在位置は文字色だけ変える */
+.docs-toc { display: none; }
+@media (min-width: 1280px) { .docs-toc { display: block; position: sticky; top: var(--header-h); align-self: start; max-height: calc(100dvh - var(--header-h)); overflow-y: auto; scrollbar-width: none; padding: calc(var(--space-32) + var(--space-8)) 0 var(--space-16) calc(var(--space-32) + var(--space-8)); font-size: var(--fs-nav); } }
+.toc__title { display: flex; align-items: center; gap: var(--space-8); margin: 0; font-size: var(--fs-nav); font-weight: var(--weight-regular); line-height: 1.7; color: var(--text-secondary); }
+.toc__icon { width: 12px; height: 12px; flex: none; }
+.toc ul { list-style: none; margin: 0; padding: 0; }
+.toc a { display: block; padding-block: var(--space-4); color: var(--toc-text); font-weight: var(--weight-medium); line-height: 1.7; text-decoration: none; transition: color var(--dur) var(--ease); }
+.toc :is(.toc__sub, ul ul) a { padding-left: var(--space-16); color: var(--toc-sub-text); font-weight: var(--weight-regular); }
+.toc a:hover { color: var(--text); }
+.toc a.is-active, .toc a[aria-current="true"] { color: var(--toc-active); }
+
+/* パンくず(ドキュメント以外の1カラムページ用) */
+.breadcrumb { display: flex; flex-wrap: wrap; gap: var(--space-8); font-size: var(--fs-caption); color: var(--text-tertiary); margin-bottom: var(--space-16); }
+.breadcrumb a { color: inherit; text-decoration: none; }
+
+/* 前後のページ: 枠なしの文字リンク14px/600+山括弧 */
+.pager { display: flex; align-items: center; gap: var(--space-24); margin-top: var(--space-48); max-width: var(--reading-max); font-size: var(--fs-nav); font-weight: var(--weight-semibold); line-height: var(--lh-ui); }
+.pager a { display: inline-flex; align-items: center; gap: var(--space-12); min-width: 0; color: var(--text-secondary); text-decoration: none; }
+.pager a:hover { color: var(--text); }
+.pager a[rel="prev"]::before, .pager a[rel="next"]::after { content: ""; flex: none; width: 5px; height: 5px; border: solid var(--text-tertiary); border-width: 0 1.5px 1.5px 0; }
+.pager a[rel="prev"]::before { transform: rotate(135deg); }
+.pager a[rel="next"]::after { transform: rotate(-45deg); }
+.pager a[rel="next"] { margin-left: auto; text-align: right; }
+.pager small { display: none; }
+
+/* ドキュメントのフッター: 地色は本文と同じ, 上に線 */
+.site-footer--docs { background: var(--bg); border-top: 1px solid var(--border-faint); padding-block: var(--space-48); font-size: var(--fs-nav); color: var(--text-tertiary); }
+.site-footer--docs .footer-grid h4 { font-size: var(--fs-nav); font-weight: var(--weight-semibold); color: var(--text); }
+
+/* ---------- ヒーロー ---------- */
+.hero { padding-block: var(--space-80) var(--section-lg); }
+@media (min-width: 1024px) { .hero { padding-block: var(--space-128) var(--space-96); } }
+.hero__title { max-width: 16em; }
+.hero__lead { margin-top: var(--space-24); max-width: 36em; }
+.hero__actions { margin-top: var(--space-32); }
+
+/* ---------- 統計・KPI ---------- */
+.stat { display: grid; gap: var(--space-4); }
+.stat__label { font-size: var(--fs-caption); color: var(--text-tertiary); }
+.stat__value { font-size: var(--fs-h2); font-weight: var(--weight-bold); line-height: 1.2; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.stat__delta { font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.stat__delta--up { color: color-mix(in srgb, var(--olive) 75%, var(--text)); }
+.stat__delta--down { color: var(--error); }
+
+/* バー（簡易メーター） */
+.meter { height: 8px; background: var(--bg-muted); border-radius: var(--radius-pill); overflow: hidden; }
+.meter > span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+
+/* ---------- ダッシュボード: サイドナビ ---------- */
+.app-layout { display: grid; min-height: 100dvh; grid-template-columns: 1fr; }
+@media (min-width: 1024px) { .app-layout { grid-template-columns: 240px minmax(0, 1fr); } }
+.app-nav { background: var(--bg-subtle); border-right: 1px solid var(--border-faint); padding: var(--space-24) var(--space-16); display: none; }
+@media (min-width: 1024px) { .app-nav { display: flex; flex-direction: column; gap: var(--space-24); position: sticky; top: 0; height: 100dvh; } }
+.app-main { padding: var(--space-32) var(--page-margin) var(--space-64); min-width: 0; }
+@media (min-width: 1024px) { .app-main { padding-inline: var(--space-48); } }
+.app-topbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: var(--space-16); margin-bottom: var(--space-32); }
+
+/* ---------- テーマ切替ボタン ---------- */
+.theme-toggle { font: inherit; background: none; border: 1px solid var(--border); color: var(--text-secondary); border-radius: var(--radius-pill); width: 36px; height: 36px; display: grid; place-items: center; cursor: pointer; }
+.theme-toggle:hover { color: var(--text); background: var(--bg-muted); }
+
+/* ---------- アクセシビリティ ---------- */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip-link { position: absolute; left: var(--space-16); top: -100px; background: var(--text); color: var(--bg); padding: var(--space-8) var(--space-16); border-radius: var(--radius-sm); z-index: 100; }
+.skip-link:focus { top: var(--space-16); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+@media print { .site-header, .docs-sidebar, .docs-toc, .docs-backdrop, .app-nav, .theme-toggle { display: none !important; } body { background: #fff; color: #000; } }
+
+</style>
+  <script>
+/* テーマ切替 + コードコピー + 目次の現在位置ハイライト + ドキュメントのナビ(依存なし) */
+(() => {
+  const root = document.documentElement;
+  try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("theme"); if (t === "light" || t === "dark") root.dataset.theme = t; } catch (_) {}
+
+  // ?heading=sans で見出しをゴシックに（比較用）
+  try { const h = new URLSearchParams(location.search).get("heading"); if (h === "sans" || h === "serif") root.dataset.heading = h; } catch (_) {}
+
+  const current = () => root.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const label = (btn) => { btn.setAttribute("aria-label", current() === "dark" ? "ライトモードに切替" : "ダークモードに切替"); btn.textContent = current() === "dark" ? "☀" : "☾"; };
+
+  // 独自にスクロールする箱(左ナビ・右目次)の中で, 要素が見える位置までだけスクロールする(ページ自体は動かさない)
+  const keepVisible = (box, el) => {
+    if (!box || !el || box.scrollHeight <= box.clientHeight) return;
+    const b = box.getBoundingClientRect(), r = el.getBoundingClientRect(), m = 48;
+    if (r.top < b.top + m) box.scrollTop -= b.top + m - r.top;
+    else if (r.bottom > b.bottom - m) box.scrollTop += r.bottom - (b.bottom - m);
+  };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    // ドキュメント: 左ナビのドロワー(1023px以下)
+    const navBtns = document.querySelectorAll("[data-nav-toggle]");
+    const setNav = (open) => {
+      if (open) root.dataset.navOpen = ""; else delete root.dataset.navOpen;
+      navBtns.forEach((b) => { b.setAttribute("aria-expanded", String(open)); b.setAttribute("aria-label", open ? "ナビゲーションを閉じる" : "ナビゲーションを開く"); });
+    };
+    navBtns.forEach((b) => b.addEventListener("click", () => setNav(!("navOpen" in root.dataset))));
+    document.querySelectorAll(".docs-backdrop, .docs-sidebar a").forEach((el) => el.addEventListener("click", () => setNav(false)));
+    addEventListener("keydown", (e) => { if (e.key === "Escape" && "navOpen" in root.dataset) setNav(false); });
+    matchMedia("(min-width: 1024px)").addEventListener("change", (e) => { if (e.matches) setNav(false); });
+
+    // ドキュメント: 左ナビの現在ページを見える位置に
+    const sidebar = document.querySelector(".docs-sidebar");
+    keepVisible(sidebar, sidebar && sidebar.querySelector('[aria-current="page"]'));
+
+    // ドキュメント: ヘッダーの検索欄で左ナビを絞り込む(⌘K / Ctrl+Kで移動, Escで解除)
+    const filter = document.querySelector("[data-nav-filter]");
+    if (filter && sidebar) {
+      const items = [...sidebar.querySelectorAll(".nav-list > li")];
+      const apply = () => {
+        const q = filter.value.trim().toLowerCase();
+        items.forEach((li) => { li.hidden = !!q && !li.textContent.toLowerCase().includes(q); });
+        sidebar.querySelectorAll(".nav-sub").forEach((d) => { if (q && !d.closest("li").hidden) d.open = true; });
+        sidebar.querySelectorAll(".nav-group").forEach((g) => { g.hidden = !!q && !g.querySelector(".nav-list > li:not([hidden])"); });
+      };
+      filter.addEventListener("input", apply);
+      filter.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { filter.value = ""; apply(); filter.blur(); }
+        if (e.key === "Enter") { const a = sidebar.querySelector(".nav-list > li:not([hidden]) a"); if (a) a.click(); }
+      });
+      addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); filter.focus(); } });
+    }
+
+    // ドキュメント: 見出し(h2/h3)にアンカーリンクを付ける
+    document.querySelectorAll(".docs-main :is(h2, h3)[id]").forEach((h) => {
+      if (h.querySelector(".heading-anchor")) return;
+      const a = document.createElement("a");
+      a.className = "heading-anchor"; a.href = "#" + h.id; a.textContent = "#";
+      a.setAttribute("aria-label", "この見出しへのリンク");
+      h.append(a);
+    });
+
+    document.querySelectorAll("[data-theme-toggle]").forEach((btn) => {
+      label(btn);
+      btn.addEventListener("click", () => {
+        root.dataset.theme = current() === "dark" ? "light" : "dark";
+        try { localStorage.setItem("theme", root.dataset.theme); } catch (_) {}
+        document.querySelectorAll("[data-theme-toggle]").forEach(label);
+      });
+    });
+
+    document.querySelectorAll(".codeblock").forEach((block) => {
+      const btn = block.querySelector(".copy-btn");
+      const code = block.querySelector("pre");
+      if (!btn || !code) return;
+      btn.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(code.innerText); btn.textContent = "コピーしました"; }
+        catch (_) { btn.textContent = "コピーできません"; }
+        setTimeout(() => (btn.textContent = "コピー"), 1600);
+      });
+    });
+
+    const links = [...document.querySelectorAll(".toc a[href^='#']")];
+    // 目次: 画面上部を通過した最後の見出しを現在位置にする（初期表示は先頭, 最下部では末尾）
+    const pairs = links.map((a) => [a, document.getElementById(decodeURIComponent(a.hash.slice(1)))]).filter(([, el]) => el);
+    if (pairs.length) {
+      const tocBox = document.querySelector(".docs-toc");
+      const setActive = (link) => {
+        links.forEach((a) => {
+          const on = a === link;
+          a.classList.toggle("is-active", on);
+          if (on) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
+        });
+        keepVisible(tocBox, link);
+      };
+      let ticking = false, lockUntil = 0;
+      const update = () => {
+        ticking = false;
+        if (Date.now() < lockUntil) return; // 目次クリック直後はクリックした項目を優先
+        const hdr = document.querySelector(".site-header"); // 2段ヘッダー(112px)もあるので実際の高さを使う
+        const line = (hdr ? hdr.getBoundingClientRect().height : 64) + 96;
+        let current = pairs[0][0];
+        for (const [a, el] of pairs) { if (el.getBoundingClientRect().top <= line) current = a; else break; }
+        if (innerHeight + scrollY >= document.documentElement.scrollHeight - 2) current = pairs[pairs.length - 1][0];
+        setActive(current);
+      };
+      const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+      addEventListener("scroll", onScroll, { passive: true });
+      addEventListener("resize", onScroll);
+      links.forEach((a) => a.addEventListener("click", () => { lockUntil = Date.now() + 1000; setActive(a); }));
+      update();
+    }
+  });
+})();
+
+</script>
+  <style>
+    .prose figure img { display: block; width: 100%; height: auto; border-radius: var(--radius-md); background: var(--bg-subtle); }
+  </style>
+<style>
+/* 見出し用: Noto Serif JP Bold のサブセット（SIL Open Font License 1.1） */
+@font-face { font-family: "Heading Serif"; font-weight: 700; font-style: normal; font-display: block;
+  src: local("Noto Serif JP Bold"), local("NotoSerifJP-Bold"), url(data:font/woff2;base64,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) format("woff2"); }
+:root { --font-serif: "Heading Serif", "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif; }
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+
+  <header class="site-header site-header--docs">
+    <div class="docs-header__inner">
+      <div class="docs-header__bar">
+        <a class="brand" href="#main">
+          <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="14" fill="currentColor"/><g fill="none" stroke-width="4.5" stroke-linecap="round" style="stroke: var(--bg)"><rect x="7" y="18" width="50" height="28" rx="14"/><circle cx="21" cy="31" r="6"/><path d="M25.5 35.5 29.5 39.5M35 32h14"/></g></svg>
+          Hikidashi
+        </a>
+        <label class="docs-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input type="search" placeholder="項目を絞り込む" aria-label="ナビゲーションの項目を絞り込む" data-nav-filter>
+          <kbd aria-hidden="true">Ctrl K</kbd>
+        </label>
+        <nav class="site-nav" aria-label="外部リンク">
+          <a class="hide-sm" href="https://github.com/maonthemoon/hikidashi" target="_blank" rel="noopener">GitHub</a>
+          <button class="theme-toggle" type="button" data-theme-toggle>☾</button>
+        </nav>
+      </div>
+      <nav class="docs-tabs" aria-label="セクション">
+        <a href="#main" aria-current="page">マニュアル</a>
+        <a href="https://github.com/maonthemoon/hikidashi" target="_blank" rel="noopener">ソースコード</a>
+      </nav>
+      <div class="docs-mobilebar">
+        <button class="docs-menu-btn" type="button" data-nav-toggle aria-controls="docs-nav" aria-expanded="false" aria-label="ナビゲーションを開く">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <span class="docs-mobilebar__crumb">Hikidashi <span aria-hidden="true">›</span> <strong>マニュアル</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" id="docs-nav" aria-label="ドキュメントナビゲーション">
+      <div class="nav-group">
+        <p class="nav-group__title">Hikidashi 0.1.0</p>
+        <ul class="nav-list">
+          <li><a href="#main" aria-current="page">マニュアル</a></li>
+          <li><a href="#about">Hikidashiとは</a></li>
+        </ul>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group__title">はじめに</p>
+        <ul class="nav-list">
+          <li><a href="#install">インストール</a></li>
+          <li><a href="#hotkey">ホットキーの登録</a></li>
+          <li><a href="#autostart">Windowsと一緒に起動</a></li>
+          <li><a href="#update">更新する</a></li>
+        </ul>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group__title">使い方</p>
+        <ul class="nav-list">
+          <li><a href="#search">探して開く</a></li>
+          <li><a href="#prefix">種類を絞る</a></li>
+          <li><a href="#keys">キー操作</a></li>
+          <li><a href="#tab">開き方を選ぶ</a></li>
+          <li><a href="#paste">パスを貼って開く</a></li>
+          <li><a href="#web">ChatGPT, Google, ブックマーク</a></li>
+          <li><a href="#window">WSLのファイルを探す</a></li>
+          <li><a href="#kill">プロセスを終わらせる</a></li>
+          <li><a href="#system">Windowsの設定と操作</a></li>
+          <li><a href="#calc">計算</a></li>
+          <li><a href="#command">別名と自作コマンド</a></li>
+        </ul>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group__title">設定と管理</p>
+        <ul class="nav-list">
+          <li><a href="#tray">タスクトレイのメニュー</a></li>
+          <li><a href="#settings">設定</a></li>
+          <li><a href="#index">探す範囲</a></li>
+          <li><a href="#files">保存されるファイル</a></li>
+          <li><a href="#uninstall">アンインストール</a></li>
+          <li><a href="#faq">よくある質問</a></li>
+        </ul>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group__title">リンク</p>
+        <ul class="nav-list">
+          <li><a href="https://github.com/maonthemoon/hikidashi" target="_blank" rel="noopener">GitHub<svg class="nav-ext" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 1h6v6M9 1 1 9"/></svg></a></li>
+        </ul>
+      </div>
+    </aside>
+    <div class="docs-backdrop" aria-hidden="true"></div>
+
+    <main id="main" class="docs-main">
+      <header class="docs-page-header">
+        <p class="docs-eyebrow">Hikidashi 0.1.0</p>
+        <h1>Hikidashiのマニュアル</h1>
+        <p class="docs-desc">アプリ, ファイル, ブックマーク, 窓, プロセスを1つの入力欄から探して開く, Windows用のランチャーの使い方です.</p>
+      </header>
+
+      <article class="prose">
+        <h2 id="about">Hikidashiとは</h2>
+        <p>ホットキーで入力欄を出し, 名前の一部を打って<kbd>Enter</kbd>を押すと開くランチャーです. アプリ, ファイルとフォルダー, ChromeとEdgeのブックマーク, 開いている窓, プロセス, Windowsの設定を, 1つの入力欄からまとめて探せます.</p>
+        <ul>
+          <li><strong>飛び飛びの文字で探せる</strong>: <code>pwpt</code>でPowerPoint, <code>kaigi</code>で「会議」の付くファイルが出ます.</li>
+          <li><strong>パスを貼れば開く</strong>: メールやチャットで受け取ったパスを貼って<kbd>Enter</kbd>を押すだけです. 引用符やWSLのパスも読めます.</li>
+          <li><strong>見つからなければChatGPTに聞く</strong>: 一致がないときは, 打った文字をそのままChatGPTに送れます.</li>
+          <li><strong>軽い</strong>: exe 1つで動き, 管理者権限は要りません. 50万件のファイルを数十msで探します.</li>
+        </ul>
+
+        <h2 id="install">インストール</h2>
+        <p>インストーラーはありません. ZIPを展開して, <code>Hikidashi.exe</code>を起動するだけです. 管理者権限も要りません.</p>
+        <ol class="steps" style="--min: 220px" aria-label="インストールの手順">
+          <li class="card card--subtle"><span class="card__title">ダウンロード</span><span class="card__body"><a href="https://github.com/maonthemoon/hikidashi/releases/latest" target="_blank" rel="noopener">Releases</a>から<code>Hikidashi-x.y.z.zip</code>をダウンロードします.</span></li>
+          <li class="card card--subtle"><span class="card__title">展開と起動</span><span class="card__body">好きな場所に展開して, <code>Hikidashi.exe</code>をダブルクリックします.</span></li>
+          <li class="card card--subtle"><span class="card__title">ホットキー</span><span class="card__body">使いたいキー(例: <code>Alt+Space</code>)を押して登録します.</span></li>
+        </ol>
+        <p>ZIPの中は, <code>Hikidashi.exe</code>, ローマ字で日本語の名前を探すための辞書<code>SKK-JISYO.L</code>とそのライセンス(<code>SKK-JISYO.L-COPYING.txt</code>), <code>LICENSE.txt</code>, <code>THIRD-PARTY-NOTICES.txt</code>, <code>Manual.html</code>(このマニュアル)です. 展開する前に, ZIPを右クリックして「プロパティ」を開き, 「許可する」にチェックを入れて「OK」を押すと, 初めて起動するときの警告が出にくくなります.</p>
+        <p>起動した<code>Hikidashi.exe</code>は, 自分を<code>%LOCALAPPDATA%\Hikidashi\Hikidashi.exe</code>に写してから, そちらで動きます. 展開したフォルダーのexeは掴んだままにならないので, 動かしたまま消したり, 新しい版で置き換えたりできます.</p>
+        <p>動作環境はWindows 10とWindows 11です. 必要なものはWindowsに入っているものだけで, 追加のインストールは要りません.</p>
+
+        <h3 id="git-install">gitで入れる場合</h3>
+        <p>リポジトリをcloneして, 中の<code>bin\Hikidashi.exe</code>を起動するだけでも使えます. <code>bin\Hikidashi.exe</code>は最新のリリースと同じexeで, ビルドは要りません.</p>
+        <div class="codeblock">
+          <button class="copy-btn" type="button">コピー</button>
+          <pre><code>cd %USERPROFILE%
+git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
+        </div>
+        <p>管理者として開いたコマンドプロンプトは<code>C:\Windows\System32</code>から始まり, そこではcloneできません. 普通に開くか, 先に<code>cd %USERPROFILE%</code>(PowerShellなら<code>cd $HOME</code>)で自分のフォルダーに移ります.</p>
+
+        <h3 id="smart-app-control">初めて起動するとき</h3>
+        <p>Hikidashiには署名がないので, 「WindowsによってPCが保護されました」(SmartScreen)と出ることがあります. 「詳細情報」を押して, 出てきた「実行」を押すと起動します.</p>
+        <p>「スマート アプリ コントロールが安全でない可能性のあるアプリをブロックしました」と出たときは, スマートアプリコントロールがオンのPCです. 署名のないexeは個別に許可できないため, Windowsセキュリティの「アプリとブラウザーコントロール」→「スマートアプリコントロールの設定」で「オフ」にします. 会社のPCで実行が禁止されている場合は, 管理者に確認してください.</p>
+
+        <h2 id="hotkey">ホットキーの登録</h2>
+        <p>初めて起動すると, 窓が出て<code>Press the hotkey you want to use, for example Alt+Space</code>と聞かれます. 使いたいキーをそのまま押すと登録され, <code>Hotkey set: Alt+Space</code>のように出ます.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>使えるキー</th><th>例</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Ctrl</kbd>, <kbd>Alt</kbd>, <kbd>Shift</kbd>, <kbd>Win</kbd>のどれかと組み合わせたキー</td><td><code>Alt+Space</code>, <code>Ctrl+Shift+K</code>, <code>Win+F1</code></td></tr>
+              <tr><td>単独で使えるキー</td><td><code>F1</code>〜<code>F24</code>, <code>PrintScreen</code>, <code>Pause</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>文字キーや<kbd>Space</kbd>などは, 単独では登録できません. どのアプリでもそのキーが打てなくなるためです.</li>
+          <li>ほかのアプリが使っているキーを押すと, <code>Alt+Space is used by another app. Try another key.</code>と出ます. 別のキーを押すか, そのアプリの設定を変えます(<a href="#faq-alt-space">PowerToysからAlt+Spaceを引き継ぐ</a>).</li>
+          <li><kbd>Esc</kbd>を押すと, 登録せずにやめます. あとからタスクトレイのメニューの<code>Change hotkey…</code>で登録できます.</li>
+        </ul>
+        <p>ホットキーがなくても, タスクトレイのアイコンをクリックすれば窓を出せます.</p>
+
+        <h2 id="autostart">Windowsと一緒に起動</h2>
+        <p>ホットキーを登録すると, 「Start Hikidashi when Windows starts?」と聞かれます. 「はい」にすると, Windowsにサインインしたときに自動でタスクトレイに常駐します.</p>
+        <p>あとから変えるときは, タスクトレイのメニューの<code>Start with Windows</code>を押して, オンとオフを切り替えます. 登録先はユーザーごとのスタートアップ(レジストリの<code>HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run</code>)なので, 管理者権限は要りません.</p>
+
+        <h2 id="update">更新する</h2>
+        <ol>
+          <li><a href="https://github.com/maonthemoon/hikidashi/releases/latest" target="_blank" rel="noopener">Releases</a>から新しいZIPをダウンロードして展開します. Hikidashiは動かしたままでかまいません.</li>
+          <li>新しい<code>Hikidashi.exe</code>をダブルクリックします.</li>
+        </ol>
+        <p>動いている古いHikidashiが終わり, 新しいexeが<code>%LOCALAPPDATA%\Hikidashi</code>に写されて起動します. 入れ替わったら, 窓の一番下に<code>Hikidashi was updated</code>と出ます. 設定, 学習, 入力の履歴はそのまま残ります.</p>
+        <p>gitで入れた場合は, <code>git pull</code>してから<code>bin\Hikidashi.exe</code>をダブルクリックします.</p>
+
+        <h2 id="search">探して開く</h2>
+        <ol>
+          <li>ホットキーを押します. 窓が出て, 日本語入力はオフになります.</li>
+          <li>名前の一部を打ちます. 1文字打つごとに一覧が変わります.</li>
+          <li><kbd>Enter</kbd>で1行目を開きます. ほかの行は<kbd>↑</kbd> <kbd>↓</kbd>で選びます.</li>
+        </ol>
+        <p>開いたら窓は隠れます. 次に出したときは前回の入力が全選択で残っているので, そのまま打てば上書き, <kbd>Enter</kbd>なら同じものをもう一度開けます.</p>
+
+        <h3 id="match">一致のしかた</h3>
+        <ul>
+          <li><strong>飛び飛びでよい</strong>: 打った文字が名前にこの順で入っていれば一致します(<code>pwpt</code>→PowerPoint). 大文字と小文字, 全角と半角は区別しません.</li>
+          <li><strong>並び順</strong>: 名前の先頭で一致 &gt; 単語の先頭で一致 &gt; 続けて一致 &gt; 飛び飛び, の順に上になります. 同じくらいなら短い名前, アプリ, フォルダー, ファイル, 設定の順です.</li>
+          <li><strong>ローマ字で日本語</strong>: 英字を3文字以上打つと, ひらがな, カタカナ, 漢字にも広げて探します(<code>kaigi</code>→会議, <code>pawa-</code>→パワー). 打ちかけ(<code>kaig</code>)でも出ます.</li>
+          <li><strong>学習</strong>: 同じ文字を打って前に開いたものは1位に出ます. よく使うもの, 最近使ったものも少し上がります.</li>
+          <li><strong>ファイルは2文字から</strong>: 1文字では件数が多すぎるので, ファイルとフォルダーは2文字目から探します(<code>f </code>で絞ったときは1文字から).</li>
+        </ul>
+
+        <h3 id="rows">一覧の見かた</h3>
+        <p>窓に見える一覧は8行です. 結果は50行まであり, 9行目からはホイールか<kbd>↓</kbd>でスクロールして見ます(右端に細い印が出ます). 1行目に名前(一致した文字は太字), 2行目に小さくパスなどが出ます. 右端の文字は種類です.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>右端</th><th><kbd>Enter</kbd>で起きること</th></tr></thead>
+            <tbody>
+              <tr><td><code>app</code></td><td>起動する. 起動中ならその窓を前に出す</td></tr>
+              <tr><td><code>file</code>, <code>folder</code></td><td>既定のアプリで開く. フォルダーはExplorerで開く</td></tr>
+              <tr><td><code>bookmark</code></td><td>そのブックマークのブラウザー(ChromeかEdge)で開く</td></tr>
+              <tr><td><code>window</code></td><td>その窓を前に出す</td></tr>
+              <tr><td><code>setting</code>, <code>system</code></td><td>Windowsの設定のページを開く, スリープなどの操作をする</td></tr>
+              <tr><td><code>kill</code></td><td>確認なしにプロセスを終わらせる</td></tr>
+              <tr><td><code>copy</code></td><td>計算の結果などをコピーする</td></tr>
+              <tr><td><code>ChatGPT</code></td><td>打った文字をChatGPTに送る</td></tr>
+              <tr><td><code>run</code>, <code>url</code></td><td>自作コマンドを実行する, ページを開く</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>窓の一番下には, 索引を作っている間の<code>Indexing your folder…</code>や, エラー(赤)が出ます.</p>
+
+        <h2 id="prefix">種類を絞る</h2>
+        <p>先頭に1〜2文字と空白を打つと, その種類だけを探します. 入力欄の左に<code>file</code>などの印が出ます.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>先頭</th><th>探すもの</th><th>例</th></tr></thead>
+            <tbody>
+              <tr><td><code>a </code></td><td>アプリ</td><td><code>a code</code></td></tr>
+              <tr><td><code>f </code></td><td>ファイルとフォルダー</td><td><code>f 議事録</code></td></tr>
+              <tr><td><code>b </code></td><td>ChromeとEdgeのブックマーク</td><td><code>b 勤怠</code></td></tr>
+              <tr><td><code>k </code></td><td>終わらせるプロセス</td><td><code>k excel</code></td></tr>
+              <tr><td><code>w </code></td><td>WSLのホームのファイルとフォルダー(WSLはこのときだけ読む)</td><td><code>w README</code></td></tr>
+              <tr><td><code>bx </code></td><td>Boxのファイルとフォルダー(Boxはこのときだけ探す)</td><td><code>bx 見積</code></td></tr>
+              <tr><td><code>g </code></td><td>Googleで検索する(<kbd>Enter</kbd>で検索)</td><td><code>g 明日の天気</code></td></tr>
+              <tr><td><code>c </code></td><td>ChatGPTに聞く長い質問の窓をすぐ開く(<a href="#longq">長い質問</a>)</td><td><code>c </code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>入力欄が空のときに<kbd>Backspace</kbd>を押すと, 印が消えて全部を探す状態に戻ります. プロセス, WSL, Boxは, 絞ったときだけ出ます. BoxとWSLはファイルが多く, ふだんの検索に混ぜると一覧が埋まるためです. 文字は<a href="#settings">設定</a>の<code>General</code>で変えられます.</p>
+
+        <h2 id="keys">キー操作</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>キー</th><th>起きること</th></tr></thead>
+            <tbody>
+              <tr><td>ホットキー</td><td>窓を出す. 出ていれば隠す</td></tr>
+              <tr><td><kbd>Enter</kbd></td><td>選んだ行を開く</td></tr>
+              <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>改行して, 長い質問を書く窓にする. 続けて<kbd>Enter</kbd>でChatGPTに送る(<a href="#longq">長い質問</a>)</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>一致があっても, 打った文字をChatGPTに聞く</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>打った文字をGoogleで検索する</td></tr>
+              <tr><td><kbd>→</kbd>(入力欄の終わりで)</td><td>選んでいる<code>%APPDATA%</code>やフォルダーの中身を入力欄に入れて, 続きを打てるようにする</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>選んだアプリ, ファイル, 設定を管理者として実行する</td></tr>
+              <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>選んだファイルやフォルダーのフォルダーに, ターミナル(WezTermかWindows Terminal)で入る</td></tr>
+              <tr><td><kbd>Tab</kbd></td><td>選んだ行の開き方を選ぶ(<a href="#tab">開き方を選ぶ</a>)</td></tr>
+              <tr><td><kbd>↑</kbd> <kbd>↓</kbd>, <kbd>Ctrl</kbd>+<kbd>P</kbd> <kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>行を選ぶ. 端まで行くと反対の端へ回る</td></tr>
+              <tr><td><kbd>PageUp</kbd> <kbd>PageDown</kbd>, ホイール</td><td>9行目からの結果を見る. <kbd>PageUp</kbd> <kbd>PageDown</kbd>は8行ずつ動く</td></tr>
+              <tr><td>行をクリック</td><td>その行を開く(<kbd>Enter</kbd>と同じ). <kbd>Tab</kbd>の一覧の行も同じ. マウスを乗せた行が選ばれる</td></tr>
+              <tr><td>入力欄が空で<kbd>↑</kbd></td><td>前に打った文字を呼び出す. 続けて<kbd>↑</kbd>でさらに前, <kbd>↓</kbd>で戻る(最大100件)</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>Backspace</kbd></td><td>1語消す</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>隠す. 入力は残る</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>ほかの窓をクリックしても隠れます. 速く打ってすぐ<kbd>Enter</kbd>を押したときは, 今の入力の結果を最大0.3秒待ってから開くので, 1つ前の入力の結果が開くことはありません.</p>
+
+        <h2 id="tab">開き方を選ぶ</h2>
+        <p>行を選んで<kbd>Tab</kbd>を押すと, その行の開き方の一覧に変わります. <kbd>↑</kbd> <kbd>↓</kbd>で選んで<kbd>Enter</kbd>で実行します. もう一度<kbd>Tab</kbd>か<kbd>Esc</kbd>で元の一覧に戻ります.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>行の種類</th><th>開き方</th></tr></thead>
+            <tbody>
+              <tr><td>ファイル</td><td>初めは<code>Open folder</code>(入っているフォルダーをExplorerで開き, そのファイルを選ぶ), <code>Copy path</code>, <code>Copy WSL path</code>(<code>/mnt/c/...</code>の形. WSLが入っているときだけ)</td></tr>
+              <tr><td>フォルダー</td><td>初めは<code>Copy path</code>, <code>Copy WSL path</code></td></tr>
+              <tr><td>アプリ</td><td>初めは<code>Open new window</code>(起動中でも新しく起動), <code>Open file location</code>, <code>Copy path</code>, <code>Run as administrator</code></td></tr>
+              <tr><td>ブックマーク</td><td><code>Open</code>, <code>Copy URL</code></td></tr>
+              <tr><td>プロセス</td><td><code>Kill</code>, <code>Open file location</code>, <code>Copy path</code></td></tr>
+              <tr><td>設定</td><td><code>Open</code>, <code>Run as administrator</code>(コントロールパネルの項目だけ)</td></tr>
+              <tr><td>ChatGPT</td><td><code>Ask ChatGPT</code>, <code>Search Google</code>, <code>Copy text</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="paste">パスを貼って開く</h2>
+        <p>入力欄にパスを貼ると, 検索せずにそのファイルかフォルダーの1行だけが出ます. <kbd>Enter</kbd>で開き, <kbd>Tab</kbd>で<code>Open folder</code>などを選べます.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>読める形</th><th>例</th></tr></thead>
+            <tbody>
+              <tr><td>Windowsのパス</td><td><code>C:\Users\me\Documents\見積.xlsx</code>, <code>C:/Users/me/...</code></td></tr>
+              <tr><td>共有フォルダー</td><td><code>\\server\share\資料</code></td></tr>
+              <tr><td>環境変数</td><td><code>%USERPROFILE%\Downloads</code></td></tr>
+              <tr><td>ファイルのURL</td><td><code>file:///C:/Users/me/...</code></td></tr>
+              <tr><td>WSLのパス</td><td><code>/mnt/c/Users/me/...</code>, <code>/home/me/...</code>, <code>~/project</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>前後の空白, 引用符(<code>"</code> <code>'</code> <code>「」</code>など), <code>&lt;&gt;</code>, 末尾の句読点は取ってから読みます. 複数行を貼ったときは1行目を使います.</li>
+          <li>ないパスは2行目に<code>Not found</code>と出ます. 共有フォルダーとWSLのパスは, 届かないと待たされるので, あるかどうかを確かめずに出します.</li>
+          <li>WSLのフォルダーも, <kbd>Enter</kbd>ではExplorerで開きます. ターミナルでそのフォルダーに入るときは<kbd>Alt</kbd>+<kbd>Enter</kbd>です(WSLの中のそのフォルダーに入ります).</li>
+          <li>BoxのWebのURL(<code>https://….box.com/file/...</code>. 社内のツールで作ったリンクもこの形)を貼ると, Box Driveの手元のファイルに引いて, ファイルの行を出します. <kbd>Enter</kbd>でExcelやPowerPointなど, いつものアプリで開きます. Box Driveにないときは, 2行目が<code>Not found in Box Drive · Open in browser</code>になり, ブラウザーで開きます.</li>
+          <li>Boxの共有リンク(<code>https://….box.com/s/...</code>)は, どのファイルか手元では分からないので, ブラウザーで開きます.</li>
+          <li>そのほかの<code>https://</code>で始まるURL(Boxの共有リンクなど)を貼ると, 2行目が<code>Open in browser</code>の1行だけが出ます. <kbd>Enter</kbd>でブラウザーで開きます.</li>
+        </ul>
+
+        <h2 id="web">ChatGPT, Google, ブックマーク</h2>
+        <ul>
+          <li><strong>ChatGPT</strong>: 一致が1つもないときは, 右端が<code>ChatGPT</code>の1行だけが出ます. <kbd>Enter</kbd>でブラウザーに<code>chatgpt.com</code>を開き, 打った文字を入力欄に入れます. 5秒たってChatGPTの窓が前にあれば, Hikidashiが<kbd>Enter</kbd>を押して送ります(ほかの窓が前にあるときは押しません). 一致があるときは, <kbd>Shift</kbd>+<kbd>Enter</kbd>で書く窓にしてから<kbd>Enter</kbd>で送れます.</li>
+          <li><strong>Google</strong>: 先頭に<code>g </code>を打って<kbd>Enter</kbd>か, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd>で, 打った文字をGoogleで検索します. <kbd>Ctrl</kbd>+<kbd>Enter</kbd>は, 一致があってもChatGPTに聞くキーです. どのキーに何をさせるかは, <a href="#settings">設定</a>の<code>General</code>で変えられます.</li>
+          <li><strong>ブックマーク</strong>: ChromeとEdgeのブックマークを名前で探します(ある方だけ). 2行目の頭に<code>Chrome ·</code>か<code>Edge ·</code>が出て, 開くとそのブラウザーで開きます. ブックマークを足したら, 次に窓を出したときに読み直します.</li>
+        </ul>
+        <p>どれも, 初めはWindowsの既定のブラウザーで開きます. <a href="#settings">設定</a>の<code>Web</code>で, ChromeかEdgeに決めたり, 新しい窓で開くか新しいタブで開くかを選んだりできます. ChromeとEdgeは, そこで決めたプロフィールで開きます.</p>
+        <p>ChatGPTに自動で送られないときは, <a href="#settings">設定</a>の<code>Web</code>で, ChatGPTを<code>Copy the question and open ChatGPT</code>にします. 打った文字をコピーしてChatGPTを開くので, 貼り付けて送ります.</p>
+
+        <h3 id="longq">長い質問</h3>
+        <p>入力欄で<kbd>Shift</kbd>+<kbd>Enter</kbd>を押すと改行され, 窓が下に伸びて何行も書けるようになります. 2行以上の文を貼ったときと, <code>c </code>を打ったときも同じです. 窓の上の帯に<code>ChatGPT</code>の印が出るので, ChatGPTに送る窓だと分かります. 見出しや太字などのMarkdownは, Obsidianのように整えて見せます. カーソルのある行だけ<code>**</code>や<code>#</code>などの記号が見え, ほかの行では隠れます. 箇条書きは<code>- </code>を打った時点で「•」になり, 引用には縦線, チェックボックスには□が出ます.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>キー</th><th>起きること</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>Enter</kbd></td><td>ChatGPTに送る. 1行の質問と同じく, 開いたChatGPTの入力欄に入れて<kbd>Enter</kbd>を押します. とても長いとき(日本語でおよそ1,300字より長いとき)は貼り付けで入れます</td></tr>
+              <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>改行. 箇条書き(<code>- </code>, <code>1. </code>, <code>- [ ] </code>, <code>&gt; </code>)の行なら, 次の行に印が付きます. 印だけの行で押すと箇条書きを終えます</td></tr>
+              <tr><td><kbd>Tab</kbd>, <kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>箇条書きの行を字下げする, 戻す</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd>, <kbd>Ctrl</kbd>+<kbd>I</kbd></td><td>選んだ文字を太字(<code>**</code>), 斜体(<code>*</code>)にする</td></tr>
+              <tr><td><kbd>Ctrl</kbd>+<kbd>↑</kbd>, <kbd>Ctrl</kbd>+<kbd>↓</kbd></td><td>前に送った文を新しい順に呼び出す(20件まで). 書く窓が空のときは<kbd>↑</kbd>だけでも呼び出せます</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>検索に戻る. 書きかけは残り, 入力欄が空のときに<kbd>Shift</kbd>+<kbd>Enter</kbd>で続きを開けます</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>ほかの窓をクリックして閉じたときは, 次に窓を出すと書きかけのまま開きます. 表は記号のまま並び, 画像, 数式, 図は出ません. ChatGPTには書いた文字(記号つき)をそのまま送ります. 貼り付けで入れたときは, 送ったあとクリップボードを元の中身に戻します. 記号を隠さず薄く見せたいときは, <a href="#settings">設定</a>の<code>Web</code>で<code>hide Markdown marks</code>のチェックを外します.</p>
+
+        <h2 id="window">WSLのファイルを探す</h2>
+        <p><code>w </code>に続けて名前の一部を打つと, WSLのホームのファイルとフォルダーが出ます. 開き方はふだんのファイルと同じです. WSLの一覧は, 初めて<code>w </code>を打ったときと, 前に読んでから5分たっていたときに読み直します. 読んでいる間は一番下に<code>Reading WSL…</code>と出て, 前の一覧で探せます. WSLを使わない日はWSLを起こしません.</p>
+
+        <h2 id="kill">プロセスを終わらせる</h2>
+        <p><code>k </code>に続けて名前を打つと, 終わらせるプロセスが出ます. <kbd>Enter</kbd>を押すと, <strong>確認なしにすぐ終わらせます</strong>. 右端の<code>kill</code>がクレイ色なのは, この違いを示すためです.</p>
+        <ul>
+          <li>窓のあるプロセスは, 窓のタイトルで1行ずつ出ます. 同じプロセスがほかの窓も持っているときは, 2行目に<code>Also closes its other windows</code>と出ます.</li>
+          <li>窓のないプロセスは, 名前ごとにまとめて出ます(<code>chrome.exe ×20</code>). <kbd>Enter</kbd>でまとめて全部を終わらせます.</li>
+          <li>権限が足りないときは, UAC(管理者の確認)が出ます.</li>
+          <li><code>svchost.exe</code>や<code>explorer.exe</code>など, Windowsの動作に欠かせないプロセスは出ません.</li>
+        </ul>
+
+        <h2 id="system">Windowsの設定と操作</h2>
+        <p>Windowsの設定のページを, 英語と日本語の名前で探せます(<code>display</code>, <code>ディスプレイ</code>, <code>環境変数</code>, <code>bluetooth</code>など約60件). 右端は<code>setting</code>です.</p>
+        <p>次の操作もできます. 右端は<code>system</code>です.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>名前</th><th>起きること</th></tr></thead>
+            <tbody>
+              <tr><td><code>Lock</code></td><td>画面をロックする</td></tr>
+              <tr><td><code>Sleep</code></td><td>スリープする</td></tr>
+              <tr><td><code>Empty Recycle Bin</code></td><td>ごみ箱を空にする</td></tr>
+              <tr><td><code>Restart</code>, <code>Shut down</code>, <code>Sign out</code></td><td><kbd>Enter</kbd>を2回押したときだけ実行する</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><code>Restart</code>, <code>Shut down</code>, <code>Sign out</code>は, 1回目の<kbd>Enter</kbd>で行が<code>Press Enter again to shut down</code>のように変わります. もう一度<kbd>Enter</kbd>を押すと実行し, ほかのキーか<kbd>Esc</kbd>でやめます.</p>
+
+        <h2 id="calc">計算</h2>
+        <p>数や式を打つと, 計算の結果が出ます. <kbd>Enter</kbd>で結果をコピーします. 計算の行は, 名前が一致したアプリやファイルの下(見えている8行の中)に出ます. 一致したものがなければ1行目です.</p>
+        <h3 id="calc-base">進数</h3>
+        <p>16進数は<code>0x</code>, 2進数は<code>0b</code>を付けて打ち, 10進数は数字だけで打ちます. 打った進数<strong>以外</strong>の2つが出ます. 2進数は4桁ごとに区切って見せ, コピーは<code>0b</code>付きで区切りなしです. 16進数のコピーは<code>0x</code>付きです.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>打つもの</th><th>出るもの</th><th>出る場所</th></tr></thead>
+            <tbody>
+              <tr><td><code>0x1F</code></td><td>10進数, 2進数</td><td>一覧の上</td></tr>
+              <tr><td><code>0b111011</code></td><td>16進数, 10進数</td><td>一覧の上</td></tr>
+              <tr><td><code>1187</code>(数字だけ)</td><td>16進数, 2進数</td><td>検索の結果の下</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3 id="calc-rf">RF</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>打つもの</th><th>出るもの</th></tr></thead>
+            <tbody>
+              <tr><td><code>10dBm</code></td><td>W, 50Ωにかけたときの電圧の振幅(ピーク. 2行目に実効値とピークtoピーク)</td></tr>
+              <tr><td><code>1W</code>, <code>100mW</code></td><td>dBm</td></tr>
+              <tr><td><code>3dB</code></td><td>電力比, 電圧比</td></tr>
+              <tr><td><code>x2</code></td><td>dB</td></tr>
+              <tr><td><code>vswr 1.5</code>, <code>rl 20</code>, <code>gamma 0.2</code></td><td>VSWR, リターンロス, |Γ|, 反射電力, ミスマッチロス</td></tr>
+              <tr><td><code>vswr 10 il 2dB</code></td><td>挿入損失2dBの部品を通して, 入力から見たVSWR, リターンロス, |Γ|</td></tr>
+              <tr><td><code>10nH@2.4G</code>, <code>1pF@100M</code></td><td>リアクタンス(<code>Hz</code>は省ける)</td></tr>
+              <tr><td><code>10nH 1pF</code></td><td>共振周波数</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><code>vswr 10 il 2dB</code>は, 部品の出力端から負荷を見たVSWRが10(リターンロス1.74dB)のとき, 損失2dBの部品(ケーブルやフィルターなど)の入力から見た値です. 部品そのものの反射はないとみなします. 反射は行きと帰りで損失を2回通るので, リターンロスが4dB良くなります. <code>rl</code>や<code>gamma</code>でも使えて, <code>dB</code>は省けます.</p>
+        <p>結果は有効数字4桁です.</p>
+
+        <h2 id="command">別名と自作コマンド</h2>
+        <p><a href="#settings">設定</a>の<code>Aliases</code>と<code>Commands</code>で, アプリに別名を付けたり, 自分のコマンドを足したりできます.</p>
+        <div class="codeblock">
+          <button class="copy-btn" type="button">コピー</button>
+          <pre><code>[alias]
+ppt = "PowerPoint"
+
+[[command]]
+name = "jira"
+title = "Open Jira issue"
+url = "https://jira.example.com/browse/{q}"
+
+[[command]]
+name = "dot"
+title = "Open dotfile in VS Code"
+run = 'code "C:\Users\me\project\work\dotfile"'</code></pre>
+        </div>
+        <ul>
+          <li><strong>別名</strong>: <code>ppt</code>と打つとPowerPointが出ます. 2行目に何で一致したかが出ます. アプリはexeの名前(<code>winword</code>など)でも探せます.</li>
+          <li><strong><code>url</code>のコマンド</strong>: <code>jira ABC-123</code>と打つと, <code>{q}</code>に<code>ABC-123</code>を入れたページを開く行が1位に出ます. 右端は<code>url</code>です.</li>
+          <li><strong><code>run</code>のコマンド</strong>: 名前を打つと出て, <kbd>Enter</kbd>でコマンドを実行します(<code>cmd.exe /c</code>で, 窓は出しません). 右端は<code>run</code>です.</li>
+        </ul>
+
+        <h2 id="tray">タスクトレイのメニュー</h2>
+        <p>タスクトレイのアイコンをクリックすると, 窓が出ます. 右クリックでメニューが出ます.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>メニュー</th><th>動き</th></tr></thead>
+            <tbody>
+              <tr><td><code>Show Hikidashi</code></td><td>窓を出す</td></tr>
+              <tr><td><code>Change hotkey…</code></td><td>ホットキーを登録し直す</td></tr>
+              <tr><td><code>Start with Windows</code></td><td>Windowsと一緒に起動するかを切り替える</td></tr>
+              <tr><td><code>Rebuild index</code></td><td>ファイルの索引をすぐ作り直す</td></tr>
+              <tr><td><code>Settings</code></td><td><a href="#settings">設定画面</a>を開く</td></tr>
+              <tr><td><code>Manual</code></td><td>このマニュアルをブラウザーで開く</td></tr>
+              <tr><td><code>Quit</code></td><td>Hikidashiを止める</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Hikidashiは2つ同時には動きません. 動いているときにもう一度<code>Hikidashi.exe</code>を開くと, 動いている方の窓が出ます(新しい版の<code>Hikidashi.exe</code>のときは<a href="#update">更新</a>になります).</p>
+
+        <h2 id="settings">設定</h2>
+        <p>タスクトレイのメニューの<code>Settings</code>か, 入力欄に<code>settings</code>と打って出る<code>Hikidashi settings</code>で, 設定画面が開きます. 左で区分を選び, 右で変えて, <code>Save</code>を押すとすぐ反映されます. 設定画面は閉じないので, 続けて直せます. Hikidashiを起動し直す必要はありません.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>区分</th><th>変えられること</th></tr></thead>
+            <tbody>
+              <tr><td><code>General</code></td><td>ホットキー(<code>Change…</code>), Windowsと一緒に起動するか, 設定画面とトレイのメニューの言語(<code>Language / 言語</code>. 日本語, English, Windowsに合わせる), 種類を絞る文字(接頭辞)</td></tr>
+              <tr><td><code>Search</code></td><td>探すフォルダー, 外すフォルダー(中も全部外れる), 外す名前(<code>node_modules</code>など. どこにあっても外れる). フォルダーは<code>Add…</code>で選ぶ. 外す名前は<code>Restore defaults</code>で初めの一覧に戻る</td></tr>
+              <tr><td><code>Box and WSL</code></td><td>BoxはBox Driveから自動で見つけるので, 変えるものはない(場所を決めたいときは設定ファイルの<code>box_dir</code>, <code>box_db</code>). WSLのホームを探すか, ディストリビューション, WSLで外す名前(検索の外す名前と同じく, 一覧に<code>Add</code>で足す)</td></tr>
+              <tr><td><code>Apps</code></td><td>中のexeをアプリとして出すフォルダー, <kbd>Tab</kbd>の「〜で開く」の一覧(<code>Open with</code>. 名前, exe, 渡すもの. exeが空ならVS Code, WezTerm, Windows Terminalを名前から探す), <kbd>Alt</kbd>+<kbd>Enter</kbd>で使うターミナル</td></tr>
+              <tr><td><code>Tab menu</code></td><td><kbd>Tab</kbd>のメニューに出すもの. 行が項目, 列がアプリ・ファイル・フォルダーのチェック</td></tr>
+              <tr><td><code>Web</code></td><td>開くブラウザー(既定のブラウザー, Chrome, Edge), 新しい窓か新しいタブか, ChromeとEdgeのプロフィール, chrome.exeの場所, ChatGPTへの送り方, ChatGPTとGoogleのURL</td></tr>
+              <tr><td><code>Aliases</code></td><td>アプリの別名(<code>ppt</code>でPowerPointなど). <code>Add…</code>, <code>Edit…</code>(行のダブルクリックでも), <code>Remove</code></td></tr>
+              <tr><td><code>Commands</code></td><td>自作コマンド(<code>jira ABC-123</code>でページを開くなど). 足し方は別名と同じ</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><code>Save</code>を押すと, 設定を確かめてから保存して閉じます. 問題があれば, 窓の下に赤く出ます. <code>Cancel</code>, <kbd>Esc</kbd>, ×で閉じるときは, 変えていれば捨ててよいか聞きます.</p>
+
+        <h3 id="config-file">設定ファイル</h3>
+        <p>設定は<code>%APPDATA%\Hikidashi\config.toml</code>に保存されます. 設定画面の左下の<code>Open config file</code>でメモ帳で開け, 直して保存するとすぐ反映されます. 初めて起動したときに, 説明のコメント付きで作ります.</p>
+        <div class="callout callout--warning">
+          <span class="callout__icon" aria-hidden="true">!</span>
+          <div><p>設定画面で<code>Save</code>すると, ファイルを書き直します. 自分で書き足した<code>#</code>の行(メモ)は消えます.</p></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>項目</th><th>内容</th><th>初期値</th></tr></thead>
+            <tbody>
+              <tr><td><code>[prefix]</code></td><td>種類を絞る文字(<code>app</code>, <code>file</code>, <code>bookmark</code>, <code>kill</code>, <code>wsl</code>, <code>box</code>, <code>google</code>, <code>chatgpt</code>. 前の版の<code>window</code>は<code>wsl</code>として読む)</td><td><code>a</code> <code>f</code> <code>b</code> <code>k</code> <code>w</code> <code>bx</code> <code>g</code> <code>c</code></td></tr>
+              <tr><td><code>[alias]</code></td><td>アプリの別名(<code>ppt = "PowerPoint"</code>)</td><td>なし</td></tr>
+              <tr><td><code>[[command]]</code></td><td>自作コマンド. <code>name</code>, <code>title</code>, <code>url</code>か<code>run</code></td><td>なし</td></tr>
+              <tr><td><code>[apps] extra_dirs</code></td><td>中のexeをアプリとして出すフォルダー(持ち運び用のツールなど)</td><td><code>[]</code></td></tr>
+              <tr><td><code>[files] roots</code></td><td>索引を作るフォルダー</td><td><code>['%USERPROFILE%']</code></td></tr>
+              <tr><td><code>[files] skip_dirs</code></td><td>索引に入れないフォルダー(場所で指定. 中も全部入れない)</td><td><code>[]</code></td></tr>
+              <tr><td><code>[files] box_dir</code></td><td>Boxのフォルダー. 空ならBox Driveのデータから自動で決める</td><td><code>''</code></td></tr>
+              <tr><td><code>[files] box_db</code></td><td>Box Driveのデータ(<code>sync.db</code>)の場所. 空なら<code>%LOCALAPPDATA%\Box\Box\data</code>の下を探す</td><td><code>''</code></td></tr>
+              <tr><td><code>[files] exclude</code></td><td>索引に入れない名前(どこにあっても). 書くと初期値の一覧と置き換わる</td><td><code>AppData</code>, <code>node_modules</code>, <code>.git</code>など</td></tr>
+              <tr><td><code>[wsl] enabled</code>, <code>distro</code></td><td>WSLのホームを索引に入れるか, どのディストリビューションか(空なら既定)</td><td><code>true</code>, <code>""</code></td></tr>
+              <tr><td><code>[browser] browser</code>, <code>open_in</code></td><td>開くブラウザー(<code>"default"</code>, <code>"chrome"</code>, <code>"edge"</code>)と, 新しい窓(<code>"window"</code>)か新しいタブ(<code>"tab"</code>)か</td><td><code>"default"</code>, <code>"window"</code></td></tr>
+              <tr><td><code>[browser] chrome_profile</code>, <code>edge_profile</code>, <code>chrome_exe</code>, <code>edge_exe</code></td><td>ChromeとEdgeのプロフィールと場所(場所は空なら自動で探す). 前の版の<code>[chrome]</code>は読んでここに移す</td><td><code>"Default"</code>, <code>""</code></td></tr>
+              <tr><td><code>[chatgpt] mode</code></td><td><code>"url"</code>は自動で送る. <code>"clipboard"</code>はコピーして開く</td><td><code>"url"</code></td></tr>
+              <tr><td><code>[chatgpt] send_enter</code>, <code>send_delay_ms</code></td><td>開いたあとChatGPTの窓が前にあれば<kbd>Enter</kbd>を押すか, 押すまで待つ時間(ミリ秒)</td><td><code>true</code>, <code>5000</code></td></tr>
+              <tr><td><code>[chatgpt] hide_marks</code></td><td>長い質問で, カーソルのない行のMarkdownの記号を隠す. <code>false</code>なら薄く見せる</td><td><code>true</code></td></tr>
+              <tr><td><code>[tools] terminal</code></td><td><kbd>Alt</kbd>+<kbd>Enter</kbd>で使うターミナル(<code>[[open_with]]</code>の名前). 空ならWezTerm, Windows Terminalの順で入っているもの</td><td><code>""</code></td></tr>
+              <tr><td><code>[[open_with]]</code></td><td><kbd>Tab</kbd>の「〜で開く」. <code>name</code>, <code>exe</code>(空なら名前から探す), <code>args</code>(<code>{path}</code>はファイルかフォルダー, <code>{dir}</code>はフォルダー. 空ならいつもの渡し方)</td><td>VS Code, WezTerm, Windows Terminal</td></tr>
+              <tr><td><code>[menu] app</code>, <code>file</code>, <code>folder</code></td><td><kbd>Tab</kbd>のメニューに出すもの. <code>new_window</code>, <code>open_with</code>, <code>reveal</code>, <code>copy_path</code>, <code>copy_wsl_path</code>, <code>admin</code>, <code>explorer</code>から選ぶ</td><td>アプリ4つ, ファイル3つ, フォルダー2つ</td></tr>
+              <tr><td><code>[ui] language</code></td><td>設定画面とトレイのメニューの言語(<code>"auto"</code>, <code>"ja"</code>, <code>"en"</code>)</td><td><code>"auto"</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout callout--note">
+          <span class="callout__icon" aria-hidden="true">ⓘ</span>
+          <div><p>パスは<code>'C:\Users\me'</code>のように<code>'</code>で囲むと, <code>\</code>をそのまま書けます. <code>"</code>で囲むときは<code>\\</code>と2つ重ねます.</p></div>
+        </div>
+        <p>書き間違いがあると, 窓の一番下に<code>config.toml line 3: …</code>のように赤く出ます. 直すまでの間は, 初期値で動きます.</p>
+        <p>社内のURLやパスなど, 人に見せたくない値は, この設定ファイルにだけ書きます.</p>
+
+        <h2 id="index">探す範囲</h2>
+        <p>ファイルとフォルダーは, 起動したときに一覧(索引)をメモリに作ってから探します. 名前だけを探し, ファイルの中身は探しません.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>対象</th><th>作り直すとき</th></tr></thead>
+            <tbody>
+              <tr><td>ユーザーフォルダー(<code>%USERPROFILE%</code>)</td><td>変更を見張り, 変わってから0.5秒たったら作り直す(ファイルが多いと, 作り直しの間を空ける)</td></tr>
+              <tr><td>Box(Box Driveの手元のデータ<code>sync.db</code>から読む. フォルダーは見に行かない)</td><td>Box Driveのデータが変わったとき(最短5分おき). 起動した直後は下に<code>Reading Box Drive…</code></td></tr>
+              <tr><td>WSLのホーム</td><td><code>w </code>を打ったとき(前に読んでから5分たっていれば)</td></tr>
+              <tr><td>アプリ(スタートメニュー, デスクトップのアプリのショートカット, ストアアプリ. スタートアップ, 説明書, Webページ, インストーラーは入れない)</td><td>スタートメニューかデスクトップが変わったとき</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li><code>AppData</code>, <code>node_modules</code>, <code>.git</code>などは索引に入れません(<a href="#settings">設定</a>の<code>Search</code>で変えられる). シンボリックリンクとジャンクションの先もたどりません.</li>
+          <li>すぐ作り直したいときは, タスクトレイのメニューの<code>Rebuild index</code>を押します. 終わると, 窓の一番下に<code>Index rebuilt: 3,667 files</code>のように出ます.</li>
+          <li>索引を作っている間は, 窓の一番下に<code>Indexing your folder…</code>などと出ます. 最初の索引ができるまでは, ファイルとフォルダーが出ないことがあります.</li>
+        </ul>
+        <p>入力欄に<code>:stats</code>と打つと, ファイルの件数, 索引とHikidashi全体のメモリ, 最後の検索と表示にかかった時間が出ます. <kbd>Enter</kbd>で全部コピーします.</p>
+
+        <h2 id="files">保存されるファイル</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>場所</th><th>中身</th></tr></thead>
+            <tbody>
+              <tr><td><code>%APPDATA%\Hikidashi\config.toml</code></td><td>設定. 設定画面で変える(メモ帳でも直せる)</td></tr>
+              <tr><td><code>%APPDATA%\Hikidashi\state.txt</code></td><td>ホットキーと, 自動起動を聞いたかどうか</td></tr>
+              <tr><td><code>%APPDATA%\Hikidashi\learn.tsv</code></td><td>学習(何を打って何を開いたか)</td></tr>
+              <tr><td><code>%APPDATA%\Hikidashi\history.txt</code></td><td>入力の履歴(最大100件)</td></tr>
+              <tr><td><code>%APPDATA%\Hikidashi\hikidashi.log</code></td><td>索引の件数と時間, エラーの記録. 512KBを超えたら作り直す</td></tr>
+              <tr><td><code>%LOCALAPPDATA%\Hikidashi\Hikidashi.exe</code></td><td>動いているexe(起動した<code>Hikidashi.exe</code>を写したもの)</td></tr>
+              <tr><td><code>%LOCALAPPDATA%\Hikidashi\manual.html</code></td><td>このマニュアル. トレイの<code>Manual</code>で書き出す</td></tr>
+              <tr><td><code>%LOCALAPPDATA%\Hikidashi\SKK-JISYO.L</code></td><td>ローマ字で日本語を探す辞書. 起動したときにZIPの辞書を写す(なければネットから取ってくる. <a href="#faq-romaji">ローマ字で日本語の名前が出ない</a>)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="uninstall">アンインストール</h2>
+        <ol>
+          <li>Windowsと一緒に起動するようにしていたら, タスクトレイのメニューの<code>Start with Windows</code>をオフにします.</li>
+          <li>タスクトレイのメニューの<code>Quit</code>で止めます.</li>
+          <li><code>%LOCALAPPDATA%\Hikidashi</code>と, 展開したフォルダー(gitで入れた人はcloneしたフォルダー)を消します.</li>
+          <li>設定と学習も消すなら, <code>%APPDATA%\Hikidashi</code>を消します.</li>
+        </ol>
+
+        <h2 id="faq">よくある質問</h2>
+
+        <h3 id="faq-alt-space">PowerToysからAlt+Spaceを引き継ぐ</h3>
+        <p>PowerToysのランチャー(PowerToys Run)が<kbd>Alt</kbd>+<kbd>Space</kbd>を使っていると, Hikidashiでは登録できません. PowerToysの設定でランチャーをオフにしてから, タスクトレイのメニューの<code>Change hotkey…</code>で<kbd>Alt</kbd>+<kbd>Space</kbd>を押します.</p>
+
+        <h3 id="faq-not-found">ファイルが出てこない</h3>
+        <ul>
+          <li>1文字だけでは, ファイルとフォルダーは探しません. 2文字以上打つか, <code>f </code>で絞ります.</li>
+          <li>起動した直後は, 索引ができるまで出ないことがあります(窓の一番下に<code>Indexing your folder…</code>などと出ている間).</li>
+          <li>索引に入れない場所(<code>AppData</code>, <code>node_modules</code>, <code>.git</code>など)と, ユーザーフォルダーの外は探しません. 変えるときは<a href="#settings">設定</a>の<code>Search</code>で, 探すフォルダーと外すものを直します.</li>
+          <li>作ったばかりのファイルは, 少しあとに出ます(数千件なら1秒ほど, 数十万件なら数十秒かかることがあります). すぐ出したいときは<code>Rebuild index</code>を押します.</li>
+        </ul>
+
+        <h3 id="faq-romaji">ローマ字で日本語の名前が出ない</h3>
+        <p>ローマ字で日本語を探すのは, 英字を3文字以上打ったときです. 起動した直後は辞書を読んでいるので, 漢字に広げて探すのはそのあとになります.</p>
+        <p>漢字に広げるための辞書(<code>SKK-JISYO.L</code>)は, ライセンス(GPL)の都合でexeには入れず, 別のファイルとしてZIPに入れています(gitで入れた場合は<code>bin\</code>にあります). <code>Hikidashi.exe</code>と同じフォルダーに置いたまま起動すると, exeと一緒に<code>%LOCALAPPDATA%\Hikidashi\SKK-JISYO.L</code>へ写して使います. exeだけを別の場所に移して起動した場合は, 辞書も同じフォルダーに置いてください.</p>
+        <p>exeの隣に辞書がないとき(exeだけを移した場合など)は, 初めて起動したときに<a href="https://github.com/skk-dev/dict">SKKの辞書の公開場所</a>から取ってきます(約5MB. 取ってくる間は窓の一番下に<code>Downloading the dictionary…</code>と出ます). 取れるまでは, ローマ字はひらがなとカタカナにだけ広げます(<code>pawa-</code>→パワーは出ますが, <code>kaigi</code>→会議は出ません).</p>
+        <p>会社のネットワークなどで取れないときは, 窓の一番下に<code>Couldn't download the dictionary…</code>と出ます. 次に起動したときにもう一度試します. 取れない場合は, ZIPの<code>SKK-JISYO.L</code>を使うか, 取れるPCで<a href="https://raw.githubusercontent.com/skk-dev/dict/master/SKK-JISYO.L"><code>SKK-JISYO.L</code></a>を保存し, 上の場所に置いてからHikidashiを起動し直します(タスクトレイの<code>Quit</code>で止めて, もう一度起動します).</p>
+
+        <h3 id="faq-log">動きがおかしいとき</h3>
+        <p><code>%APPDATA%\Hikidashi\hikidashi.log</code>に, 索引の件数とかかった時間, エラーが残っています. 窓の一番下に赤い文字が出たときも, ここに詳しく書いてあります.</p>
+      </article>
+    </main>
+
+    <aside class="docs-toc" aria-label="このページの目次">
+      <nav class="toc">
+        <p class="toc__title"><svg class="toc__icon" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 2.5h10M1 6h7M1 9.5h9"/></svg>このページの内容</p>
+        <ul>
+          <li><a href="#about">Hikidashiとは</a></li>
+          <li><a href="#install">インストール</a></li>
+          <li class="toc__sub"><a href="#git-install">gitで入れる場合</a></li>
+          <li class="toc__sub"><a href="#smart-app-control">初めて起動するとき</a></li>
+          <li><a href="#hotkey">ホットキーの登録</a></li>
+          <li><a href="#autostart">Windowsと一緒に起動</a></li>
+          <li><a href="#update">更新する</a></li>
+          <li><a href="#search">探して開く</a></li>
+          <li class="toc__sub"><a href="#match">一致のしかた</a></li>
+          <li class="toc__sub"><a href="#rows">一覧の見かた</a></li>
+          <li><a href="#prefix">種類を絞る</a></li>
+          <li><a href="#keys">キー操作</a></li>
+          <li><a href="#tab">開き方を選ぶ</a></li>
+          <li><a href="#paste">パスを貼って開く</a></li>
+          <li><a href="#web">ChatGPT, Google, ブックマーク</a></li>
+          <li><a href="#window">WSLのファイルを探す</a></li>
+          <li><a href="#kill">プロセスを終わらせる</a></li>
+          <li><a href="#system">Windowsの設定と操作</a></li>
+          <li><a href="#calc">計算</a></li>
+          <li class="toc__sub"><a href="#calc-base">進数</a></li>
+          <li class="toc__sub"><a href="#calc-rf">RF</a></li>
+          <li><a href="#command">別名と自作コマンド</a></li>
+          <li><a href="#tray">タスクトレイのメニュー</a></li>
+          <li><a href="#settings">設定</a></li>
+          <li><a href="#index">探す範囲</a></li>
+          <li><a href="#files">保存されるファイル</a></li>
+          <li><a href="#uninstall">アンインストール</a></li>
+          <li><a href="#faq">よくある質問</a></li>
+        </ul>
+      </nav>
+    </aside>
+  </div>
+
+  <footer class="site-footer site-footer--docs">
+    <div class="docs-header__inner">
+      <div class="footer-grid">
+        <div><h4>Hikidashi</h4><ul><li><a href="https://github.com/maonthemoon/hikidashi" target="_blank" rel="noopener">ソースコード</a></li></ul></div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

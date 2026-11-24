@@ -2,9 +2,9 @@
 
 **アプリ, ファイル, ブックマーク, 窓, プロセスを1つの入力欄から探して開く**Windows用のランチャー.
 
-![Hikidashiの使い方のイメージ: Alt+Spaceで窓を出し, pwptでPowerPoint, kaigiで会議の付くファイル, 貼ったパスのファイルを開き, 見つからない文はChatGPTに送る. Shift+Enterで長い質問をMarkdownで書き, 0x1Fや10dBmを打つと計算が出る](docs/images/demo.gif)
+<a href="https://maonthemoon.github.io/hikidashi/"><img src="docs/images/hikidashi.png" alt="Hikidashiの紹介のページ: kaigiと打つと「会議」の付くファイルが出るデモ" width="720"></a>
 
-<sub>画像はイメージです(架空の画面に, Hikidashiの窓を同じ色と大きさで描いたもの).</sub>
+[maonthemoon.github.io/hikidashi](https://maonthemoon.github.io/hikidashi/)で, アプリ, ローマ字で日本語, パスを貼る, ChatGPTに聞く, 長い質問, 計算の6つの場面を動くデモで見られます.
 
 ホットキーで入力欄を出し, 名前の一部を打って`Enter`を押すと開きます. 飛び飛びの文字やローマ字でも探せて, パスを貼ればそのまま開き, 見つからなければChatGPTに聞けます. キーボードだけで, アプリもファイルもWebも開きたい人に向いています.
 
@@ -129,9 +129,9 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 - **作り**: Rust + Win32. `crates/core`は検索, 並び順, 計算など, Windowsに依存しない部分(`cargo test`で確かめる). `crates/app`は画面とOSの部分.
 - **ビルド**: Raspberry PiなどのLinuxで, `x86_64-pc-windows-gnu`向けにクロスコンパイルします(mingw-w64と, Rustのそのターゲットが要ります). `./tools/build-exe.sh`でテストを通し, exeを作ります. 開発中のexeは`out/`に出ます. `bin/Hikidashi.exe`はリリースした版なので上書きしません.
 - **リリース**: `v`で始まるタグ(例: `v0.1.0`)をpushすると, GitHub ActionsがビルドとテストをしてZIPを作り, Releasesに置きます. あわせて, `bin/Hikidashi.exe`をそのexeに差し替えます. `bin/Hikidashi.exe`は手で更新しません.
-- **マニュアル**: `docs/index.html`(1つのHTML). exeに埋め込み, トレイの`Manual`で開きます. 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
+- **マニュアル**: `docs/manual.html`(1つのHTML). exeに埋め込み, トレイの`Manual`で開きます. 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
 - **アイコン**: `uv run tools/make-icon.py`で`assets/hikidashi.ico`を作り直します.
-- **紹介のGIF**: `uv run tools/make_demo.py`で`docs/images/demo.gif`を作り直します(実際の画面は撮らず, 架空の画面に同じ色と大きさで窓を描く). 窓の見た目を変えたら, スクリプトの定数もそろえます.
+- **紹介のページ**: GitHub Pagesのトップ(`docs/index.html`)は, 窓をHTMLで作り直した動くデモのページです. `./tools/build-manual.sh`でマニュアル(`docs/manual.html`)と一緒に作ります. READMEの静止画は`uv run tools/make-screenshot.py`でそのページから撮ります(Playwrightのchromiumを使う).
 - **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, 別のファイルとして`bin/`に置き, ZIPにも入れます. 新しくするときは`./tools/update-dict.sh`で[skk-dev/dict](https://github.com/skk-dev/dict)から取ってきてcommitします. exeの隣に辞書がなければ, 初めて起動したときにネットから取ってきます.
 
 ## ライセンス
