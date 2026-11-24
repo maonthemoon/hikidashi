@@ -70,16 +70,19 @@ impl Drop for Fonts {
     }
 }
 
+/// 入力欄の地の色の筆. ライトとダークで1本ずつ作って使い回す(K39)
 fn brush_bg() -> HBRUSH {
-    static B: OnceLock<isize> = OnceLock::new();
-    HBRUSH(*B.get_or_init(|| unsafe { CreateSolidBrush(rgb(BG)).0 as isize }) as *mut _)
+    static LIGHT_B: OnceLock<isize> = OnceLock::new();
+    static DARK_B: OnceLock<isize> = OnceLock::new();
+    let b = if is_dark() { &DARK_B } else { &LIGHT_B };
+    HBRUSH(*b.get_or_init(|| unsafe { CreateSolidBrush(rgb(pal().bg)).0 as isize }) as *mut _)
 }
 
 /// 入力欄の色(WM_CTLCOLOREDIT)
 pub fn edit_colors(_app: &App, hdc: HDC) -> HBRUSH {
     unsafe {
-        SetTextColor(hdc, rgb(TEXT));
-        SetBkColor(hdc, rgb(BG));
+        SetTextColor(hdc, rgb(pal().text));
+        SetBkColor(hdc, rgb(pal().bg));
     }
     brush_bg()
 }
@@ -266,7 +269,7 @@ pub fn paint(app: &mut App) {
         let bmp = CreateCompatibleBitmap(hdc, w, h);
         let old_bmp = SelectObject(mem, bmp.into());
         SetBkMode(mem, TRANSPARENT);
-        fill(mem, &rc, BG);
+        fill(mem, &rc, pal().bg);
         let d = app.dpi;
 
         if app.composing() {
@@ -286,21 +289,21 @@ pub fn paint(app: &mut App) {
             let ch = s(26, d);
             let top = (s(INPUT_H, d) - ch) / 2;
             let crc = RECT { left: s(PAD_X, d), top, right: s(PAD_X, d) + cw, bottom: top + ch };
-            round_fill(mem, &crc, s(6, d), BG_MUTED);
+            round_fill(mem, &crc, s(6, d), pal().bg_muted);
             let mut trc = crc;
-            draw_text(mem, app.fonts.tag, &label, TEXT, &mut trc, DT_CENTER | DT_VCENTER);
+            draw_text(mem, app.fonts.tag, &label, pal().text, &mut trc, DT_CENTER | DT_VCENTER);
         }
 
         // 入力欄の下の線. 打つたびに一瞬クレイ色に光る(J2b)
         let lr = line_rect(app, w, h);
         let base = RECT { left: 0, top: lr.bottom - s(1, d).max(1), right: w, bottom: lr.bottom };
-        fill(mem, &lr, BG);
-        fill(mem, &base, BORDER_FAINT);
+        fill(mem, &lr, pal().bg);
+        fill(mem, &base, pal().border_faint);
         if let Some(g) = app.glow {
             let e = g.elapsed().as_secs_f32() * 1000.0;
             let k = if e < 80.0 { e / 80.0 } else { 1.0 - (e - 80.0) / 600.0 };
             if k > 0.0 {
-                fill(mem, &lr, mix(BORDER_FAINT, ACCENT, k));
+                fill(mem, &lr, mix(pal().border_faint, pal().accent, k));
             }
         }
 
@@ -308,23 +311,23 @@ pub fn paint(app: &mut App) {
         let pad = s(LIST_PAD, d);
         if let Some(menu) = &app.menu {
             let mut trc = RECT { left: s(PAD_X, d), top: y + s(6, d), right: w - s(PAD_X, d), bottom: y + s(MENU_TITLE_H, d) };
-            draw_text(mem, app.fonts.sub, &menu.title, TEXT_TERTIARY, &mut trc, DT_VCENTER | DT_END_ELLIPSIS);
+            draw_text(mem, app.fonts.sub, &menu.title, pal().text_tertiary, &mut trc, DT_VCENTER | DT_END_ELLIPSIS);
             y += s(MENU_TITLE_H, d) + pad;
             for (i, it) in menu.items.iter().enumerate() {
                 let rr = RECT { left: pad, top: y, right: w - pad, bottom: y + s(ROW_H, d) };
                 if i == menu.sel {
-                    round_fill(mem, &rr, s(8, d), BG_MUTED);
+                    round_fill(mem, &rr, s(8, d), pal().bg_muted);
                 }
                 let isz = s(ICON, d);
-                draw_glyph(mem, app, it.glyph, pad + s(12, d), y + (s(ROW_H, d) - isz) / 2, isz, TEXT_SECONDARY, true);
+                draw_glyph(mem, app, it.glyph, pad + s(12, d), y + (s(ROW_H, d) - isz) / 2, isz, pal().text_secondary, true);
                 let fh = text_height(mem, app.fonts.name);
-                draw_name(mem, app, &it.label, &[], pad + s(12 + ICON + 12, d), y + (s(ROW_H, d) - fh) / 2, w - s(120, d), TEXT, false);
+                draw_name(mem, app, &it.label, &[], pad + s(12 + ICON + 12, d), y + (s(ROW_H, d) - fh) / 2, w - s(120, d), pal().text, false);
                 y += s(ROW_H, d);
             }
             y += pad;
             let mut frc = RECT { left: s(PAD_X, d), top: y, right: w - s(PAD_X, d), bottom: y + s(STATUS_H, d) };
-            fill(mem, &RECT { left: 0, top: y, right: w, bottom: y + 1 }, BORDER_FAINT);
-            draw_text(mem, app.fonts.sub, "Enter Run    Esc Back", TEXT_TERTIARY, &mut frc, DT_VCENTER);
+            fill(mem, &RECT { left: 0, top: y, right: w, bottom: y + 1 }, pal().border_faint);
+            draw_text(mem, app.fonts.sub, "Enter Run    Esc Back", pal().text_tertiary, &mut frc, DT_VCENTER);
         } else if !app.rows.is_empty() {
             y += pad;
             let vis = app.visible_rows();
@@ -343,7 +346,7 @@ pub fn paint(app: &mut App) {
                 let ty = list_top + (track - thumb) * top as i32 / max_top.max(1);
                 let bw = s(3, d).max(2);
                 let x = w - s(4, d) - bw / 2;
-                round_fill(mem, &RECT { left: x, top: ty, right: x + bw, bottom: ty + thumb }, bw, BORDER);
+                round_fill(mem, &RECT { left: x, top: ty, right: x + bw, bottom: ty + thumb }, bw, pal().border);
             }
             y += pad;
         }
@@ -352,9 +355,9 @@ pub fn paint(app: &mut App) {
         if app.menu.is_none() {
             if let Some((t, err)) = app.status_text() {
                 let top = h - s(STATUS_H, d);
-                fill(mem, &RECT { left: 0, top, right: w, bottom: h }, BG_SUBTLE);
+                fill(mem, &RECT { left: 0, top, right: w, bottom: h }, pal().bg_subtle);
                 let mut src = RECT { left: s(PAD_X, d), top, right: w - s(PAD_X, d), bottom: h };
-                draw_text(mem, app.fonts.sub, &t, if err { DANGER } else { TEXT_TERTIARY }, &mut src, DT_VCENTER | DT_END_ELLIPSIS);
+                draw_text(mem, app.fonts.sub, &t, if err { pal().danger } else { pal().text_tertiary }, &mut src, DT_VCENTER | DT_END_ELLIPSIS);
             }
         }
         let _ = y;
@@ -372,13 +375,13 @@ fn draw_line(hdc: HDC, app: &App, w: i32, h: i32) {
     let d = app.dpi;
     let lr = line_rect(app, w, h);
     let base = RECT { left: 0, top: lr.bottom - s(1, d).max(1), right: w, bottom: lr.bottom };
-    fill(hdc, &lr, BG);
-    fill(hdc, &base, BORDER_FAINT);
+    fill(hdc, &lr, pal().bg);
+    fill(hdc, &base, pal().border_faint);
     if let Some(g) = app.glow {
         let e = g.elapsed().as_secs_f32() * 1000.0;
         let k = if e < 80.0 { e / 80.0 } else { 1.0 - (e - 80.0) / 600.0 };
         if k > 0.0 {
-            fill(hdc, &lr, mix(BORDER_FAINT, ACCENT, k));
+            fill(hdc, &lr, mix(pal().border_faint, pal().accent, k));
         }
     }
 }
@@ -388,30 +391,30 @@ fn paint_compose(hdc: HDC, app: &App, w: i32, h: i32) {
     let d = app.dpi;
     draw_line(hdc, app, w, h);
     let top = h - s(STATUS_H, d);
-    fill(hdc, &RECT { left: 0, top, right: w, bottom: h }, BG_SUBTLE);
+    fill(hdc, &RECT { left: 0, top, right: w, bottom: h }, pal().bg_subtle);
     let n = app.compose.as_ref().map(|c| c.chars()).unwrap_or(0);
     let count = format!("{} chars", n);
     let cw = text_width(hdc, app.fonts.sub, &count);
     let mut crc = RECT { left: w - s(PAD_X, d) - cw, top, right: w - s(PAD_X, d), bottom: h };
-    draw_text(hdc, app.fonts.sub, &count, TEXT_TERTIARY, &mut crc, DT_VCENTER | DT_RIGHT);
+    draw_text(hdc, app.fonts.sub, &count, pal().text_tertiary, &mut crc, DT_VCENTER | DT_RIGHT);
     let (t, err) = app.status_text().unwrap_or_else(|| ("Ctrl+↑  Earlier questions".into(), false));
     let mut src = RECT { left: s(PAD_X, d), top, right: crc.left - s(12, d), bottom: h };
-    draw_text(hdc, app.fonts.sub, &t, if err { DANGER } else { TEXT_TERTIARY }, &mut src, DT_VCENTER | DT_END_ELLIPSIS);
+    draw_text(hdc, app.fonts.sub, &t, if err { pal().danger } else { pal().text_tertiary }, &mut src, DT_VCENTER | DT_END_ELLIPSIS);
     // 上の帯(K24のQ2): ChatGPTに送る窓だと分かるよう, 左に印(接頭辞の印と同じ形), 右にキーの案内
     let bh = s(COMPOSE_BAND, d);
-    fill(hdc, &RECT { left: 0, top: 0, right: w, bottom: bh }, BG_SUBTLE);
-    fill(hdc, &RECT { left: 0, top: bh - s(1, d).max(1), right: w, bottom: bh }, BORDER_FAINT);
+    fill(hdc, &RECT { left: 0, top: 0, right: w, bottom: bh }, pal().bg_subtle);
+    fill(hdc, &RECT { left: 0, top: bh - s(1, d).max(1), right: w, bottom: bh }, pal().border_faint);
     let label = "ChatGPT";
     let cw = text_width(hdc, app.fonts.tag, label) + s(16, d);
     let ch = s(24, d);
     let ct = (bh - ch) / 2;
     let crc = RECT { left: s(PAD_X, d), top: ct, right: s(PAD_X, d) + cw, bottom: ct + ch };
-    round_fill(hdc, &crc, s(6, d), BG_MUTED);
+    round_fill(hdc, &crc, s(6, d), pal().bg_muted);
     let mut trc = crc;
-    draw_text(hdc, app.fonts.tag, label, TEXT, &mut trc, DT_CENTER | DT_VCENTER);
+    draw_text(hdc, app.fonts.tag, label, pal().text, &mut trc, DT_CENTER | DT_VCENTER);
     let keys = "Enter  Send     Shift+Enter  New line     Esc  Back";
     let mut krc = RECT { left: crc.right + s(12, d), top: 0, right: w - s(PAD_X, d), bottom: bh };
-    draw_text(hdc, app.fonts.sub, keys, TEXT_TERTIARY, &mut krc, DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
+    draw_text(hdc, app.fonts.sub, keys, pal().text_tertiary, &mut krc, DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
 }
 
 fn draw_row(hdc: HDC, app: &mut App, row: &Row, selected: bool, pad: i32, y: i32, w: i32) {
@@ -419,7 +422,7 @@ fn draw_row(hdc: HDC, app: &mut App, row: &Row, selected: bool, pad: i32, y: i32
     let rh = s(ROW_H, d);
     let rr = RECT { left: pad, top: y, right: w - pad, bottom: y + rh };
     if selected {
-        round_fill(hdc, &rr, s(8, d), BG_MUTED);
+        round_fill(hdc, &rr, s(8, d), pal().bg_muted);
     }
     // アイコン(K2)
     let isz = s(ICON, d);
@@ -436,7 +439,7 @@ fn draw_row(hdc: HDC, app: &mut App, row: &Row, selected: bool, pad: i32, y: i32
         _ => false,
     };
     if !drawn {
-        draw_glyph(hdc, app, g, ix, iy, isz, TEXT_SECONDARY, false);
+        draw_glyph(hdc, app, g, ix, iy, isz, pal().text_secondary, false);
     }
     // 右端の種類(K9). killはクレイ色
     let confirm = match &row.action {
@@ -447,7 +450,7 @@ fn draw_row(hdc: HDC, app: &mut App, row: &Row, selected: bool, pad: i32, y: i32
     let tw = text_width(hdc, app.fonts.tag, tag);
     let tx = w - pad - s(12, d) - tw;
     let mut trc = RECT { left: tx, top: y, right: w - pad - s(12, d), bottom: y + rh };
-    draw_text(hdc, app.fonts.tag, tag, if row.warn || confirm { ACCENT_TEXT } else { TEXT_TERTIARY }, &mut trc, DT_VCENTER | DT_RIGHT);
+    draw_text(hdc, app.fonts.tag, tag, if row.warn || confirm { pal().accent_text } else { pal().text_tertiary }, &mut trc, DT_VCENTER | DT_RIGHT);
 
     let nx = ix + isz + s(12, d);
     let max_w = tx - s(12, d) - nx;
@@ -455,9 +458,9 @@ fn draw_row(hdc: HDC, app: &mut App, row: &Row, selected: bool, pad: i32, y: i32
     let sub_h = text_height(hdc, app.fonts.sub);
     let (name, sub, color, bold) = if confirm {
         let a = app.confirm.as_deref().and_then(SysAction::from_id);
-        (a.map(|a| a.confirm_text().to_string()).unwrap_or_default(), "Esc to cancel".to_string(), ACCENT_TEXT, true)
+        (a.map(|a| a.confirm_text().to_string()).unwrap_or_default(), "Esc to cancel".to_string(), pal().accent_text, true)
     } else {
-        (row.name.clone(), row.sub.clone(), TEXT, false)
+        (row.name.clone(), row.sub.clone(), pal().text, false)
     };
     if sub.is_empty() {
         draw_name(hdc, app, &name, &row.positions, nx, y + (rh - name_h) / 2, max_w, color, bold);
@@ -466,6 +469,6 @@ fn draw_row(hdc: HDC, app: &mut App, row: &Row, selected: bool, pad: i32, y: i32
         draw_name(hdc, app, &name, if confirm { &[] } else { &row.positions }, nx, top, max_w, color, bold);
         let mut src = RECT { left: nx, top: top + name_h + s(1, d), right: nx + max_w, bottom: top + name_h + s(1, d) + sub_h };
         let path_like = sub.contains('\\');
-        draw_text(hdc, app.fonts.sub, &sub, TEXT_TERTIARY, &mut src, if path_like { DT_PATH_ELLIPSIS } else { DT_END_ELLIPSIS });
+        draw_text(hdc, app.fonts.sub, &sub, pal().text_tertiary, &mut src, if path_like { DT_PATH_ELLIPSIS } else { DT_END_ELLIPSIS });
     }
 }

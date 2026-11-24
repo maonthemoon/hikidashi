@@ -50,6 +50,7 @@ const ID_HOTKEY: i32 = 100;
 const ID_HOTKEY_CHANGE: i32 = 101;
 const ID_AUTOSTART: i32 = 102;
 const ID_LANG: i32 = 103;
+const ID_THEME: i32 = 104;
 const ID_PFX: i32 = 110; // 110〜117
 const ID_KEYS: i32 = 120; // 120〜124
 const ID_ROOTS: i32 = 200;
@@ -113,6 +114,8 @@ const SECTIONS: [&str; 8] = ["General", "Search", "Box and WSL", "Apps", "Tab me
 const PREFIX_LABELS: [&str; 8] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT"];
 /// 言語(K24). どちらの言語でも同じ文字で出す
 const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows / Windowsに合わせる"), ("ja", "日本語"), ("en", "English")];
+/// ランチャーの窓と書く窓の色(K39). 設定画面とトレイのメニューはライトのまま
+const THEMES: [(&str, &str); 3] = [("auto", "Same as the app mode of Windows"), ("light", "Light"), ("dark", "Dark")];
 /// Tabのメニューの項目(`config::MENU_ITEMS`の順)と種類
 const MENU_LABELS: [&str; 7] = ["Open new window", "Open in … (Open with)", "Open the folder it is in", "Copy path", "Copy WSL path (only with WSL)", "Run as administrator", "Open in Explorer"];
 const MENU_KINDS: [&str; 3] = ["app", "file", "folder"];
@@ -861,6 +864,11 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         let lc = m.combo(ID_LANG, &lang_labels, false);
         select_key(lc, &LANGS, &c.ui.language);
         rows.push(row(vec![it(m.label("Language / 言語"), W::Px(L), 26), combo_it(lc, W::Px(300))]));
+        let theme_labels: Vec<String> = THEMES.iter().map(|(_, l)| l.to_string()).collect();
+        let tc = m.combo(ID_THEME, &theme_labels, false);
+        select_key(tc, &THEMES, &c.ui.theme);
+        rows.push(row(vec![it(m.label("Theme"), W::Px(L), 26), combo_it(tc, W::Px(300))]));
+        rows.push(row(vec![it(m.hint("Colors of the launcher window. Settings and the tray menu stay light."), W::Fill, 22)]));
         rows.push(row_gap(14, vec![it(m.sub("Prefixes"), W::Fill, 24)]));
         rows.push(row(vec![it(m.hint("Type a prefix and a space to search only one kind, for example \"f report\"."), W::Fill, 22)]));
         let p = &c.prefix;
@@ -1175,6 +1183,7 @@ impl Settings {
         c.prefix.google = t(ID_PFX + 6);
         c.prefix.chatgpt = t(ID_PFX + 7);
         c.ui.language = selected_key(item(h, ID_LANG), &LANGS);
+        c.ui.theme = selected_key(item(h, ID_THEME), &THEMES);
         for (k, kind) in MENU_KINDS.iter().enumerate() {
             let list: Vec<String> = config::MENU_ITEMS
                 .iter()

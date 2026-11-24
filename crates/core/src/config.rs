@@ -82,11 +82,13 @@ pub fn menu_item_fits(kind: &str, item: &str) -> bool {
 pub struct Ui {
     /// `auto`(Windowsの言語), `ja`, `en`
     pub language: String,
+    /// ランチャーの窓と書く窓の色(K39): `auto`(Windowsのアプリのモード), `light`, `dark`
+    pub theme: String,
 }
 
 impl Default for Ui {
     fn default() -> Self {
-        Ui { language: "auto".into() }
+        Ui { language: "auto".into(), theme: "auto".into() }
     }
 }
 
@@ -694,6 +696,8 @@ pub fn to_toml(c: &Config) -> String {
     line("# Language of the Settings window and the tray menu: \"auto\" (the language of Windows), \"ja\" or \"en\".");
     line("[ui]");
     line(&format!("language = {}", q(&c.ui.language)));
+    line("# Colors of the launcher window: \"auto\" (follows the app mode of Windows), \"light\" or \"dark\".");
+    line(&format!("theme = {}", q(&c.ui.theme)));
     o
 }
 
@@ -743,6 +747,9 @@ impl Config {
         }
         if !["auto", "ja", "en"].contains(&self.ui.language.as_str()) {
             return Err("Language must be auto, ja or en.".into());
+        }
+        if !["auto", "light", "dark"].contains(&self.ui.theme.as_str()) {
+            return Err("Theme must be auto, light or dark.".into());
         }
         if !["default", "chrome", "edge"].contains(&self.browser.browser.as_str()) {
             return Err("Browser must be default, chrome or edge.".into());
@@ -910,8 +917,20 @@ mod tests {
         c.ui.language = "fr".into();
         assert!(c.validate().is_err());
         let mut c = Config::default();
+        c.ui.theme = "blue".into();
+        assert!(c.validate().is_err());
+        let mut c = Config::default();
         c.browser.open_in = "popup".into();
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn theme_is_written_and_read() {
+        // 前の版の設定(themeがない)は自動. 書き出して読み直しても残る(K39)
+        assert_eq!(Config::parse("[ui]\nlanguage = \"ja\"\n").unwrap().ui.theme, "auto");
+        let mut c = Config::default();
+        c.ui.theme = "dark".into();
+        assert_eq!(Config::parse(&to_toml(&c)).unwrap().ui.theme, "dark");
     }
 
     #[test]

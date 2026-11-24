@@ -27,10 +27,6 @@ const HEADING: [f32; 6] = [1.802, 1.602, 1.424, 1.266, 1.125, 1.0];
 const MONO: f32 = 0.875;
 /// 行の高さ(RichEditの「行」に対する倍率×20. 23で1.15行. 日本語の字の行の高さは字の1.3倍ほどなので, 字の1.5倍ほどになる)
 const LINE_SPACING: i32 = 23;
-/// 薄い字(記号)
-const FAINT: u32 = 0x9C9A92;
-/// 蛍光ペン
-const HIGHLIGHT: u32 = 0xFBE38E;
 
 fn mono_face() -> &'static str {
     static F: OnceLock<String> = OnceLock::new();
@@ -142,7 +138,7 @@ impl Compose {
             LoadLibraryW(w!("Msftedit.dll")).ok()?;
             let style = WS_CHILD | WS_VSCROLL | WINDOW_STYLE((ES_MULTILINE | ES_AUTOVSCROLL | ES_NOHIDESEL) as u32);
             let hwnd = CreateWindowExW(WINDOW_EX_STYLE(0), w!("RICHEDIT50W"), w!(""), style, 0, 0, 100, 100, Some(parent), None, None, None).ok()?;
-            SendMessageW(hwnd, EM_SETBKGNDCOLOR, Some(WPARAM(0)), Some(LPARAM(rgb(BG).0 as isize)));
+            SendMessageW(hwnd, EM_SETBKGNDCOLOR, Some(WPARAM(0)), Some(LPARAM(rgb(pal().bg).0 as isize)));
             SendMessageW(hwnd, EM_EXLIMITTEXT, Some(WPARAM(0)), Some(LPARAM(200_000)));
             SendMessageW(hwnd, EM_SETEVENTMASK, Some(WPARAM(0)), Some(LPARAM((ENM_CHANGE | ENM_SELCHANGE | ENM_REQUESTRESIZE) as isize)));
             // コードのかたまりの背景を行の右端まで伸ばす
@@ -284,6 +280,17 @@ impl Compose {
         pf
     }
 
+    /// ライトとダークが変わったとき(K39): 地の色を変えて, 全体を整え直す
+    pub fn apply_theme(&mut self) {
+        unsafe {
+            SendMessageW(self.hwnd, EM_SETBKGNDCOLOR, Some(WPARAM(0)), Some(LPARAM(rgb(pal().bg).0 as isize)));
+        }
+        self.restyle();
+        unsafe {
+            let _ = InvalidateRect(Some(self.hwnd), None, true);
+        }
+    }
+
     /// 全体を整えて見せる. 中の文字は変えない. 戻り値は整えにかかった時間(ミリ秒)
     pub fn restyle(&mut self) -> f64 {
         if self.ime {
@@ -328,7 +335,7 @@ impl Compose {
             let mut base = self.cf();
             base.Base.dwMask = CFM_BOLD | CFM_ITALIC | CFM_STRIKEOUT | CFM_UNDERLINE | CFM_HIDDEN | CFM_COLOR | CFM_SIZE | CFM_BACKCOLOR | CFM_OFFSET;
             base.Base.dwEffects = CFE_AUTOBACKCOLOR;
-            base.Base.crTextColor = rgb(TEXT);
+            base.Base.crTextColor = rgb(pal().text);
             base.Base.yHeight = self.twips(BODY_PX as f32);
             Self::face(&mut base, body_face());
             SendMessageW(h, EM_SETCHARFORMAT, Some(WPARAM(SCF_ALL as usize)), Some(LPARAM(&base as *const _ as isize)));
@@ -395,8 +402,8 @@ impl Compose {
                 let mut c = self.cf();
                 c.Base.dwMask = CFM_SIZE | CFM_BACKCOLOR | CFM_COLOR;
                 c.Base.yHeight = self.twips(BODY_PX as f32 * MONO);
-                c.crBackColor = rgb(BG_SUBTLE);
-                c.Base.crTextColor = rgb(TEXT_SECONDARY);
+                c.crBackColor = rgb(pal().bg_subtle);
+                c.Base.crTextColor = rgb(pal().text_secondary);
                 Self::face(&mut c, mono_face());
                 // 段落の区切りまで背景を付けると, 行の右端まで伸びる
                 self.apply(a, b + 1, &c);
@@ -404,16 +411,16 @@ impl Compose {
                     if self.hide_marks && !block_active {
                         self.apply(a, b, &self.hidden());
                     } else {
-                        self.apply(a, b, &self.color(FAINT));
+                        self.apply(a, b, &self.color(pal().faint));
                     }
                 }
             }
             Block::Rule => {
                 if self.hide_marks && !active {
-                    self.apply(a, b, &self.color(BG));
+                    self.apply(a, b, &self.color(pal().bg));
                     decos.push(Deco::Rule(a));
                 } else {
-                    self.apply(a, b, &self.color(FAINT));
+                    self.apply(a, b, &self.color(pal().faint));
                 }
             }
             _ => {}
@@ -435,32 +442,32 @@ impl Compose {
                 para = true;
                 match l.block {
                     Block::Bullet => {
-                        self.apply(ma, ma + 1, &self.color(BG));
+                        self.apply(ma, ma + 1, &self.color(pal().bg));
                         decos.push(Deco::Dot(ma));
                     }
                     Block::Task(done) => {
                         self.apply(ma, mb, &self.hidden());
                         if let Some((ca, cb)) = l.check {
-                            self.apply(ca, cb, &self.color(BG));
+                            self.apply(ca, cb, &self.color(pal().bg));
                             decos.push(Deco::Check(ca, done));
                         }
                     }
                     Block::Quote => {
-                        self.apply(ma, ma + 1, &self.color(BG));
+                        self.apply(ma, ma + 1, &self.color(pal().bg));
                         decos.push(Deco::Bar(ma, a, b));
                     }
                     // 番号は字のまま見せる
                     _ => {}
                 }
             } else {
-                self.apply(ma, mb, &self.color(FAINT));
+                self.apply(ma, mb, &self.color(pal().faint));
                 if let Some((ca, cb)) = l.check {
-                    self.apply(ca, cb, &self.color(FAINT));
+                    self.apply(ca, cb, &self.color(pal().faint));
                 }
             }
             if let Block::Task(true) = l.block {
                 // 済みの行は取り消し線で薄く(Obsidianと同じ)
-                let mut c = self.color(FAINT);
+                let mut c = self.color(pal().faint);
                 c.Base.dwMask |= CFM_STRIKEOUT;
                 c.Base.dwEffects = CFE_STRIKEOUT;
                 self.apply(l.marker_end(), b, &c);
@@ -488,18 +495,18 @@ impl Compose {
                 Inline::Code => {
                     c.Base.dwMask = CFM_SIZE | CFM_BACKCOLOR | CFM_COLOR;
                     c.Base.yHeight = self.twips(BODY_PX as f32 * MONO);
-                    c.crBackColor = rgb(BG_MUTED);
-                    c.Base.crTextColor = rgb(TEXT_SECONDARY);
+                    c.crBackColor = rgb(pal().bg_muted);
+                    c.Base.crTextColor = rgb(pal().text_secondary);
                     Self::face(&mut c, mono_face());
                 }
                 Inline::Highlight => {
                     c.Base.dwMask = CFM_BACKCOLOR;
-                    c.crBackColor = rgb(HIGHLIGHT);
+                    c.crBackColor = rgb(pal().highlight);
                 }
                 Inline::Link | Inline::Url => {
                     c.Base.dwMask = CFM_UNDERLINE | CFM_COLOR;
                     c.Base.dwEffects = CFE_UNDERLINE;
-                    c.Base.crTextColor = rgb(ACCENT_TEXT);
+                    c.Base.crTextColor = rgb(pal().accent_text);
                 }
             }
             self.apply(s.start, s.end, &c);
@@ -508,7 +515,7 @@ impl Compose {
             if hide_inline {
                 self.apply(*ma, *mb, &self.hidden());
             } else {
-                let mut c = self.color(FAINT);
+                let mut c = self.color(pal().faint);
                 c.Base.dwMask |= CFM_BOLD | CFM_ITALIC | CFM_STRIKEOUT | CFM_UNDERLINE | CFM_BACKCOLOR;
                 c.Base.dwEffects = CFE_AUTOBACKCOLOR;
                 self.apply(*ma, *mb, &c);
@@ -588,8 +595,8 @@ pub fn paint_decos(hwnd: HWND) {
                         // Obsidianの「•」は本文の字の0.3倍ほどの丸
                         let r = s(BODY_PX as f32 * 0.15);
                         let (cx, cy) = ((x0 + x1) / 2, y + h / 2);
-                        let br = CreateSolidBrush(rgb(TEXT_TERTIARY));
-                        let pen = CreatePen(PS_SOLID, 1, rgb(TEXT_TERTIARY));
+                        let br = CreateSolidBrush(rgb(pal().text_tertiary));
+                        let pen = CreatePen(PS_SOLID, 1, rgb(pal().text_tertiary));
                         let ob = SelectObject(dc, br.into());
                         let op = SelectObject(dc, pen.into());
                         let _ = Ellipse(dc, cx - r, cy - r, cx + r + 1, cy + r + 1);
@@ -605,7 +612,7 @@ pub fn paint_decos(hwnd: HWND) {
                         if !visible(top, bottom) {
                             continue;
                         }
-                        solid(dc, &RECT { left: x + s(1.0), top, right: x + s(1.0) + s(3.0), bottom }, ACCENT);
+                        solid(dc, &RECT { left: x + s(1.0), top, right: x + s(1.0) + s(3.0), bottom }, pal().accent);
                     }
                     Deco::Check(i, done) => {
                         let (x0, y) = pos(hwnd, i);
@@ -618,7 +625,7 @@ pub fn paint_decos(hwnd: HWND) {
                         // 左端を, 引用の縦線や「•」の行の頭にそろえる
                         let (l, t) = (x0 + s(1.0), y + (h - size) / 2);
                         let rr = s(3.0);
-                        let (fillc, edge) = if done { (ACCENT, ACCENT) } else { (BG, TEXT_TERTIARY) };
+                        let (fillc, edge) = if done { (pal().accent, pal().accent) } else { (pal().bg, pal().text_tertiary) };
                         let br = CreateSolidBrush(rgb(fillc));
                         let pen = CreatePen(PS_SOLID, s(1.0), rgb(edge));
                         let ob = SelectObject(dc, br.into());
@@ -629,7 +636,7 @@ pub fn paint_decos(hwnd: HWND) {
                         let _ = DeleteObject(br.into());
                         let _ = DeleteObject(pen.into());
                         if done {
-                            let pen = CreatePen(PS_SOLID, s(2.0), rgb(BG));
+                            let pen = CreatePen(PS_SOLID, s(2.0), rgb(pal().bg));
                             let op = SelectObject(dc, pen.into());
                             let pts = [
                                 POINT { x: l + size * 22 / 100, y: t + size * 52 / 100 },
@@ -649,7 +656,7 @@ pub fn paint_decos(hwnd: HWND) {
                         }
                         let t = s(2.0);
                         let cy = y + h / 2 - t / 2;
-                        solid(dc, &RECT { left: client.left, top: cy, right: client.right, bottom: cy + t }, BORDER);
+                        solid(dc, &RECT { left: client.left, top: cy, right: client.right, bottom: cy + t }, pal().border);
                     }
                 }
             }

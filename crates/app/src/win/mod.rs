@@ -693,8 +693,24 @@ impl App {
         });
     }
 
+    /// ライトとダークが変わったとき(K39): 枠, 書く窓, 入力欄を塗り直す
+    fn apply_theme(&mut self) {
+        set_border_color(self.hwnd);
+        if let Some(c) = &mut self.compose {
+            c.apply_theme();
+        }
+        unsafe {
+            let _ = InvalidateRect(Some(self.hwnd), None, true);
+            let _ = InvalidateRect(Some(self.edit), None, true);
+        }
+    }
+
     fn reload_config(&mut self) {
+        let was_dark = theme::is_dark();
         let (cfg, err) = storage::load_config();
+        if theme::is_dark() != was_dark {
+            self.apply_theme();
+        }
         let files_changed = cfg.files != self.config.files || cfg.wsl != self.config.wsl || cfg.apps != self.config.apps;
         self.config_error = err.map(|e| e.0);
         self.config = cfg.clone();
@@ -2314,6 +2330,14 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                 system::set_autostart(on, &app.exe_path);
                 Some(LRESULT(0))
             }
+            WM_SETTINGCHANGE => {
+                // Windowsのアプリのモード(ライト/ダーク)が変わった. 設定が「自動」なら追いかける(K39)
+                let what = if lparam.0 != 0 { unsafe { PCWSTR(lparam.0 as *const u16).to_string().unwrap_or_default() } } else { String::new() };
+                if what == "ImmersiveColorSet" && theme::set_theme(&app.config.ui.theme) {
+                    app.apply_theme();
+                }
+                None
+            }
             WM_DPICHANGED => {
                 app.set_dpi(hiword(wparam.0) as u32);
                 app.layout();
@@ -2439,6 +2463,14 @@ fn compose_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id:
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
+/// 窓の枠の色(Windows 11). ライトとダークで変える(K39)
+fn set_border_color(hwnd: HWND) {
+    let border: u32 = util::rgb(theme::pal().border).0;
+    unsafe {
+        let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_BORDER_COLOR, &border as *const _ as *const _, 4);
+    }
+}
+
 /// リポジトリなどから起動されたら, `%LOCALAPPDATA%\Hikidashi`に写して, そちらを起動する.
 /// 動いているものがあれば終わらせてから置き換える(更新). 動かしたまま`git pull`できるように.
 fn relocate() -> bool {
@@ -2552,8 +2584,6 @@ pub fn run() {
         // Windows 11では角を丸くする
         let pref: u32 = 2;
         let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE, &pref as *const _ as *const _, 4);
-        let border: u32 = util::rgb(theme::BORDER).0;
-        let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_BORDER_COLOR, &border as *const _ as *const _, 4);
     }
     let edit = unsafe {
         CreateWindowExW(
@@ -2587,6 +2617,7 @@ pub fn run() {
     }
 
     let (config, err) = storage::load_config();
+    set_border_color(hwnd);
     let shared = Shared::new(config.clone());
     let dict: Arc<OnceLock<Dict>> = Arc::new(OnceLock::new());
     dict::start(hwnd, shared.clone(), dict.clone());

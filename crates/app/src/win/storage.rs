@@ -68,6 +68,8 @@ pub fn load_config() -> (Config, Option<ConfigError>) {
     let r = load_config_inner();
     // 設定画面とトレイの言語(K24)
     super::i18n::set_language(&r.0.ui.language);
+    // ランチャーの窓と書く窓のライトとダーク(K39)
+    super::theme::set_theme(&r.0.ui.theme);
     r
 }
 
