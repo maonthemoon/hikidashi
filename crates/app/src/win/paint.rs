@@ -253,6 +253,7 @@ fn icon_of(row: &Row) -> (Option<String>, char) {
         Icon::Google => (None, glyph::GLOBE),
         Icon::Web => (None, glyph::LINK),
         Icon::Favicon(_) => (None, glyph::BOOKMARK),
+        Icon::Clip => (None, glyph::COPY),
     }
 }
 

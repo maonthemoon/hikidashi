@@ -20,3 +20,7 @@ pub mod openwith;
 pub mod markdown;
 pub mod compose;
 pub mod favicon;
+pub mod clip;
+pub mod recent;
+pub mod scripts;
+pub mod selection;

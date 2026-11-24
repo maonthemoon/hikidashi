@@ -29,10 +29,44 @@ pub struct Config {
     pub menu: Menu,
     /// 設定画面とトレイの言語(K24)
     pub ui: Ui,
+    /// 検索まわりの入れ切り(最近のもの, クリップボードの履歴)
+    pub search: Search,
+    /// メインのほかのホットキー(選んだ文字で開く)
+    pub hotkeys: Hotkeys,
+}
+
+/// 検索まわりの入れ切り
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Search {
+    /// 入力欄が空のとき, 最近開いたものを出す
+    pub recent: bool,
+    /// クリップボードの履歴を記録する(`cb `で呼ぶ)
+    pub clipboard_history: bool,
+}
+
+impl Default for Search {
+    fn default() -> Self {
+        Search { recent: true, clipboard_history: true }
+    }
+}
+
+/// メインのホットキー(`state.txt`)のほかのホットキー. 空なら使わない
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hotkeys {
+    /// 選んでいる文字で窓を開く
+    pub selection: String,
+}
+
+impl Default for Hotkeys {
+    fn default() -> Self {
+        Hotkeys { selection: "Ctrl+Alt+Space".into() }
+    }
 }
 
 /// Tabのメニューの項目の名前(K24). 並び順はこの順
-pub const MENU_ITEMS: [&str; 7] = ["new_window", "open_with", "reveal", "copy_path", "copy_wsl_path", "admin", "explorer"];
+pub const MENU_ITEMS: [&str; 8] = ["copy_file", "new_window", "open_with", "reveal", "copy_path", "copy_wsl_path", "admin", "explorer"];
 
 /// Tabのメニューに出すもの(K24). 種類ごとに`MENU_ITEMS`の名前を並べる. 種類に合わないものは出さない
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -48,8 +82,8 @@ impl Default for Menu {
         let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect();
         Menu {
             app: v(&["new_window", "reveal", "copy_path", "admin"]),
-            file: v(&["reveal", "copy_path", "copy_wsl_path"]),
-            folder: v(&["copy_path", "copy_wsl_path"]),
+            file: v(&["copy_file", "reveal", "copy_path", "copy_wsl_path"]),
+            folder: v(&["copy_file", "copy_path", "copy_wsl_path"]),
         }
     }
 }
@@ -70,6 +104,7 @@ impl Menu {
 pub fn menu_item_fits(kind: &str, item: &str) -> bool {
     match item {
         "new_window" => kind == "app",
+        "copy_file" => kind != "app",
         "open_with" | "copy_wsl_path" => kind != "app",
         "admin" => kind != "folder",
         "explorer" => kind == "folder",
@@ -124,6 +159,8 @@ pub struct Prefix {
     pub google: String,
     /// すぐ長い質問の窓にする(K24)
     pub chatgpt: String,
+    /// クリップボードの履歴(`cb `)
+    pub clipboard: String,
 }
 
 /// Enterに修飾キーを足したときにすること. 値は`Ctrl+Enter`のような形. 空ならその操作はキーでは行わない.
@@ -361,13 +398,15 @@ impl Default for Config {
             open_with: crate::openwith::defaults(),
             menu: Menu::default(),
             ui: Ui::default(),
+            search: Search::default(),
+            hotkeys: Hotkeys::default(),
         }
     }
 }
 
 impl Default for Prefix {
     fn default() -> Self {
-        Prefix { app: "a".into(), file: "f".into(), bookmark: "b".into(), kill: "k".into(), wsl: "w".into(), boxdrive: "bx".into(), google: "g".into(), chatgpt: "c".into() }
+        Prefix { app: "a".into(), file: "f".into(), bookmark: "b".into(), kill: "k".into(), wsl: "w".into(), boxdrive: "bx".into(), google: "g".into(), chatgpt: "c".into(), clipboard: "cb".into() }
     }
 }
 
@@ -504,6 +543,7 @@ impl Config {
             (self.prefix.boxdrive.clone(), Mode::Box),
             (self.prefix.google.clone(), Mode::Google),
             (self.prefix.chatgpt.clone(), Mode::ChatGpt),
+            (self.prefix.clipboard.clone(), Mode::Clipboard),
         ];
         v.retain(|(p, _)| !p.is_empty());
         v.sort_by_key(|(p, _)| std::cmp::Reverse(p.len()));
@@ -566,9 +606,10 @@ pub fn to_toml(c: &Config) -> String {
     line("# Prefixes to search only one kind. Type the letter and a space, e.g. \"f report\".");
     line("# Box is searched only with its prefix, e.g. \"bx report\" (it has too many files to mix in).");
     line("# wsl searches the home folder in WSL. chatgpt opens the window for a long question right away.");
+    line("# clipboard shows the clipboard history.");
     line("[prefix]");
     let p = &c.prefix;
-    for (k, v) in [("app", &p.app), ("file", &p.file), ("bookmark", &p.bookmark), ("kill", &p.kill), ("wsl", &p.wsl), ("box", &p.boxdrive), ("google", &p.google), ("chatgpt", &p.chatgpt)] {
+    for (k, v) in [("app", &p.app), ("file", &p.file), ("bookmark", &p.bookmark), ("kill", &p.kill), ("wsl", &p.wsl), ("box", &p.boxdrive), ("google", &p.google), ("chatgpt", &p.chatgpt), ("clipboard", &p.clipboard)] {
         line(&format!("{k} = {}", q(v)));
     }
     line("");
@@ -686,7 +727,7 @@ pub fn to_toml(c: &Config) -> String {
         line(&format!("args = {}", q(&ow.args)));
     }
     line("");
-    line("# What the Tab menu shows for apps, files and folders. Items: new_window (apps), open_with (\"Open in ...\"),");
+    line("# What the Tab menu shows for apps, files and folders. Items: copy_file (copy the file itself), new_window (apps), open_with (\"Open in ...\"),");
     line("# reveal (open the folder it is in), copy_path, copy_wsl_path (only when WSL is installed), admin, explorer (folders).");
     line("[menu]");
     line(&format!("app = {}", list(&c.menu.app)));
@@ -698,6 +739,15 @@ pub fn to_toml(c: &Config) -> String {
     line(&format!("language = {}", q(&c.ui.language)));
     line("# Colors of the launcher window: \"auto\" (follows the app mode of Windows), \"light\" or \"dark\".");
     line(&format!("theme = {}", q(&c.ui.theme)));
+    line("");
+    line("# recent: show recently opened items when the box is empty. clipboard_history: remember what you copy (type \"cb \" to see it).");
+    line("[search]");
+    line(&format!("recent = {}", c.search.recent));
+    line(&format!("clipboard_history = {}", c.search.clipboard_history));
+    line("");
+    line("# selection: open Hikidashi with the text selected in the app in front. Leave empty to turn it off.");
+    line("[hotkeys]");
+    line(&format!("selection = {}", q(&c.hotkeys.selection)));
     o
 }
 
@@ -710,7 +760,7 @@ impl Config {
     /// 設定画面で保存する前の確かめ. 問題があれば画面に出す文(英語)
     pub fn validate(&self) -> Result<(), String> {
         let p = &self.prefix;
-        let prefixes = [("Apps", &p.app), ("Files", &p.file), ("Bookmarks", &p.bookmark), ("Kill", &p.kill), ("WSL", &p.wsl), ("Box", &p.boxdrive), ("Google", &p.google), ("ChatGPT", &p.chatgpt)];
+        let prefixes = [("Apps", &p.app), ("Files", &p.file), ("Bookmarks", &p.bookmark), ("Kill", &p.kill), ("WSL", &p.wsl), ("Box", &p.boxdrive), ("Google", &p.google), ("ChatGPT", &p.chatgpt), ("Clipboard", &p.clipboard)];
         for (i, (label, v)) in prefixes.iter().enumerate() {
             if has_space(v) {
                 return Err(format!("Prefix for {label} cannot contain spaces."));
@@ -744,6 +794,10 @@ impl Config {
             if let Some(bad) = list.iter().find(|i| !MENU_ITEMS.contains(&i.as_str())) {
                 return Err(format!("Unknown Tab menu item \"{bad}\" for {kind}."));
             }
+        }
+        let sel = self.hotkeys.selection.trim();
+        if !sel.is_empty() && !crate::hotkey::Hotkey::parse(sel).is_some_and(|h| h.is_usable()) {
+            return Err("Selection hotkey must look like \"Ctrl+Alt+Space\" (with Ctrl, Alt, Shift or Win).".into());
         }
         if !["auto", "ja", "en"].contains(&self.ui.language.as_str()) {
             return Err("Language must be auto, ja or en.".into());
@@ -970,5 +1024,54 @@ mod tests {
         assert!(e.0.starts_with("config.toml line 3"), "{}", e.0);
         let e = Config::parse("[prefix]\nunknown = \"a\"\n").unwrap_err();
         assert!(e.0.contains("line 2"), "{}", e.0);
+    }
+
+    #[test]
+    fn search_and_selection_hotkey_settings() {
+        let c = Config::default();
+        assert!(c.search.recent && c.search.clipboard_history);
+        assert_eq!(c.hotkeys.selection, "Ctrl+Alt+Space");
+        assert_eq!(c.prefix.clipboard, "cb");
+        // 書き出して読み直しても残る
+        let mut c = Config::default();
+        c.search.recent = false;
+        c.search.clipboard_history = false;
+        c.hotkeys.selection = String::new();
+        c.prefix.clipboard = "cl".into();
+        let r = Config::parse(&to_toml(&c)).unwrap();
+        assert_eq!(r, c);
+        let r = Config::parse("[search]\nrecent = false\n[hotkeys]\nselection = \"Ctrl+Shift+K\"\n").unwrap();
+        assert!(!r.search.recent && r.search.clipboard_history);
+        assert_eq!(r.hotkeys.selection, "Ctrl+Shift+K");
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn selection_hotkey_is_validated() {
+        let mut c = Config::default();
+        c.hotkeys.selection = "Space".into();
+        assert!(c.validate().is_err());
+        c.hotkeys.selection = "Ctrl+Alt+".into();
+        assert!(c.validate().is_err());
+        c.hotkeys.selection = String::new();
+        assert!(c.validate().is_ok());
+        // クリップボードの接頭辞も重なりを調べる
+        let mut c = Config::default();
+        c.prefix.clipboard = "f".into();
+        assert!(c.validate().unwrap_err().contains("twice"));
+    }
+
+    #[test]
+    fn copy_file_is_in_the_default_menu() {
+        let m = Menu::default();
+        assert!(m.has("file", "copy_file"));
+        assert!(m.has("folder", "copy_file"));
+        assert!(!m.has("app", "copy_file"));
+        assert!(menu_item_fits("file", "copy_file"));
+        assert!(menu_item_fits("folder", "copy_file"));
+        assert!(!menu_item_fits("app", "copy_file"));
+        assert_eq!(MENU_ITEMS[0], "copy_file");
+        let c = Config::parse("[menu]\nfile = [\"copy_file\", \"reveal\"]\n").unwrap();
+        assert!(c.validate().is_ok());
     }
 }

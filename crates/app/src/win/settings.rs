@@ -32,7 +32,7 @@ const EDITOR_CLASS: PCWSTR = w!("HikidashiSettingsItem");
 
 // 大きさ(96dpiのとき)
 const CLIENT_W: i32 = 780;
-const CLIENT_H: i32 = 620;
+const CLIENT_H: i32 = 660;
 const SIDE_W: i32 = 168;
 const PAD: i32 = 24;
 const FOOT_H: i32 = 60;
@@ -51,7 +51,12 @@ const ID_HOTKEY_CHANGE: i32 = 101;
 const ID_AUTOSTART: i32 = 102;
 const ID_LANG: i32 = 103;
 const ID_THEME: i32 = 104;
-const ID_PFX: i32 = 110; // 110〜117
+const ID_SELHK: i32 = 105;
+const ID_SELHK_CHANGE: i32 = 106;
+const ID_SELHK_CLEAR: i32 = 107;
+const ID_RECENT: i32 = 230;
+const ID_CLIPHIST: i32 = 231;
+const ID_PFX: i32 = 110; // 110〜118
 const ID_KEYS: i32 = 120; // 120〜124
 const ID_ROOTS: i32 = 200;
 const ID_ROOTS_ADD: i32 = 201;
@@ -111,13 +116,13 @@ const E_ERROR: i32 = 14;
 const E_VALUE_LABEL: i32 = 15;
 
 const SECTIONS: [&str; 8] = ["General", "Search", "Box and WSL", "Apps", "Tab menu", "Web", "Aliases", "Commands"];
-const PREFIX_LABELS: [&str; 8] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT"];
+const PREFIX_LABELS: [&str; 9] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT", "Clipboard"];
 /// 言語(K24). どちらの言語でも同じ文字で出す
 const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows / Windowsに合わせる"), ("ja", "日本語"), ("en", "English")];
 /// ランチャーの窓と書く窓の色(K39). 設定画面とトレイのメニューはライトのまま
 const THEMES: [(&str, &str); 3] = [("auto", "Same as the app mode of Windows"), ("light", "Light"), ("dark", "Dark")];
 /// Tabのメニューの項目(`config::MENU_ITEMS`の順)と種類
-const MENU_LABELS: [&str; 7] = ["Open new window", "Open in … (Open with)", "Open the folder it is in", "Copy path", "Copy WSL path (only with WSL)", "Run as administrator", "Open in Explorer"];
+const MENU_LABELS: [&str; 8] = ["Copy file", "Open new window", "Open in … (Open with)", "Open the folder it is in", "Copy path", "Copy WSL path (only with WSL)", "Run as administrator", "Open in Explorer"];
 const MENU_KINDS: [&str; 3] = ["app", "file", "folder"];
 /// Enterに修飾キーを足したときの操作(2026-11-24. 設定の`[keys]`の順)
 const KEY_LABELS: [&str; 5] = ["Ask ChatGPT", "Search Google", "Long question", "Run as admin", "Open in terminal"];
@@ -675,6 +680,8 @@ enum Task {
     Pick { id: i32, folder: bool, title: &'static str },
     Editor(EditKind),
     ChangeHotkey,
+    ChangeSelectionHotkey,
+    ClearSelectionHotkey,
     OpenFile,
 }
 
@@ -735,6 +742,15 @@ pub fn open(a: OpenArgs) {
 /// ホットキーが変わったら表示を直す
 pub fn set_hotkey(t: &str) {
     with_settings(|s| set_text(item(s.hwnd, ID_HOTKEY), t));
+}
+
+/// 選んだ文字で開くホットキーが変わったら, 表示と(保存済みとして)持っている値を直す. 設定ファイルは呼ぶ側が書く
+pub fn set_selection_hotkey(t: &str) {
+    with_settings(|s| {
+        s.work.hotkeys.selection = t.to_string();
+        s.orig.hotkeys.selection = t.to_string();
+        set_text(item(s.hwnd, ID_SELHK), if t.is_empty() { "Not set" } else { t });
+    });
 }
 
 /// メッセージの前処理(Tabで次の部品へ, Enter, Esc). 扱ったらtrue
@@ -859,6 +875,15 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
                 unsafe { SetWindowLongPtrW(h, GWLP_ID, ID_HOTKEY as isize) };
             }
         }
+        let sel = if c.hotkeys.selection.is_empty() { "Not set".to_string() } else { c.hotkeys.selection.clone() };
+        let sel_label = m.label(&sel);
+        unsafe { SetWindowLongPtrW(sel_label, GWLP_ID, ID_SELHK as isize) };
+        rows.push(row(vec![
+            it(m.label("Selection hotkey"), W::Px(L), 26),
+            it(sel_label, W::Px(160), 26),
+            it(m.button(ID_SELHK_CHANGE, "Change…"), W::Px(110), 30),
+            it(m.button(ID_SELHK_CLEAR, "Clear"), W::Px(80), 30),
+        ]));
         rows.push(row(vec![it(m.check(ID_AUTOSTART, "Start Hikidashi when Windows starts", system::autostart_enabled()), W::Fill, 26)]));
         let lang_labels: Vec<String> = LANGS.iter().map(|(_, l)| l.to_string()).collect();
         let lc = m.combo(ID_LANG, &lang_labels, false);
@@ -872,7 +897,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         rows.push(row_gap(14, vec![it(m.sub("Prefixes"), W::Fill, 24)]));
         rows.push(row(vec![it(m.hint("Type a prefix and a space to search only one kind, for example \"f report\"."), W::Fill, 22)]));
         let p = &c.prefix;
-        let vals = [&p.app, &p.file, &p.bookmark, &p.kill, &p.wsl, &p.boxdrive, &p.google, &p.chatgpt];
+        let vals = [&p.app, &p.file, &p.bookmark, &p.kill, &p.wsl, &p.boxdrive, &p.google, &p.chatgpt, &p.clipboard];
         let mut items = vec![];
         for (i, (label, v)) in PREFIX_LABELS.iter().zip(vals).enumerate() {
             if i > 0 && i % 3 == 0 {
@@ -898,6 +923,9 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
     // Search
     {
         let mut rows = vec![row(vec![it(m.head("Search"), W::Fill, 30)])];
+        rows.push(row(vec![it(m.check(ID_RECENT, "Show recent items when the box is empty", c.search.recent), W::Fill, 26)]));
+        rows.push(row(vec![it(m.check(ID_CLIPHIST, "Clipboard history", c.search.clipboard_history), W::Fill, 26)]));
+        rows.push(row(vec![gap(24), it(m.hint("Remember what you copy (text and files, in memory only). Type the Clipboard prefix (cb) and a space to see it."), W::Fill, 22)]));
         rows.push(row(vec![it(m.sub("Folders to search"), W::Fill, 22)]));
         rows.push(row(vec![it(m.list(ID_ROOTS, &c.files.roots), W::Fill, 74)]));
         rows.push(row(vec![it(m.button(ID_ROOTS_ADD, "Add…"), W::Px(96), 28), it(m.button(ID_ROOTS_DEL, "Remove"), W::Px(96), 28)]));
@@ -1182,6 +1210,9 @@ impl Settings {
         c.prefix.boxdrive = t(ID_PFX + 5);
         c.prefix.google = t(ID_PFX + 6);
         c.prefix.chatgpt = t(ID_PFX + 7);
+        c.prefix.clipboard = t(ID_PFX + 8);
+        c.search.recent = checked(item(h, ID_RECENT));
+        c.search.clipboard_history = checked(item(h, ID_CLIPHIST));
         c.ui.language = selected_key(item(h, ID_LANG), &LANGS);
         c.ui.theme = selected_key(item(h, ID_THEME), &THEMES);
         for (k, kind) in MENU_KINDS.iter().enumerate() {
@@ -1512,6 +1543,8 @@ impl Settings {
             ID_CANCEL => vec![Task::AskClose],
             ID_OPENFILE => vec![Task::OpenFile],
             ID_HOTKEY_CHANGE => vec![Task::ChangeHotkey],
+            ID_SELHK_CHANGE => vec![Task::ChangeSelectionHotkey],
+            ID_SELHK_CLEAR => vec![Task::ClearSelectionHotkey],
             ID_ROOTS_ADD => vec![Task::Pick { id, folder: true, title: "Choose a folder to search" }],
             ID_SKIP_ADD => vec![Task::Pick { id, folder: true, title: "Choose a folder to skip" }],
             ID_APPDIRS_ADD => vec![Task::Pick { id, folder: true, title: "Choose a folder with apps" }],
@@ -1594,7 +1627,13 @@ fn run_tasks(tasks: Vec<Task>) {
             }
             Task::Editor(kind) => open_editor(hwnd, kind),
             Task::ChangeHotkey => {
-                super::with_app(|a| a.start_capture());
+                super::with_app(|a| a.start_capture(false));
+            }
+            Task::ChangeSelectionHotkey => {
+                super::with_app(|a| a.start_capture(true));
+            }
+            Task::ClearSelectionHotkey => {
+                super::with_app(|a| a.set_selection_hotkey(None));
             }
             Task::OpenFile => {
                 let dirty = with_settings(|s| s.dirty()).unwrap_or(false);

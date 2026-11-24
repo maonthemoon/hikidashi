@@ -31,6 +31,8 @@ pub enum Mode {
     Google,
     /// ChatGPT(K24). 画面はすぐ長い質問の窓にする. 窓を作れないときだけ, この1行を出す
     ChatGpt,
+    /// クリップボードの履歴(`cb `). 行は画面の側が`clip::rows`で作る
+    Clipboard,
 }
 
 impl Mode {
@@ -46,6 +48,7 @@ impl Mode {
             Mode::Box => "box",
             Mode::Google => "google",
             Mode::ChatGpt => "ChatGPT",
+            Mode::Clipboard => "clipboard",
         }
     }
 }
@@ -97,6 +100,12 @@ pub enum Action {
     OpenUrl(String),
     /// 自作コマンドの実行
     Run(String),
+    /// クリップボードの履歴の1件(番号). `Enter`で貼る
+    Clip(u64),
+    /// スクリプト(`scripts`の番号)を実行する. `arg`は渡す文字(なければ空)
+    ScriptRun { script: usize, arg: String },
+    /// スクリプトの出力の1行. `Enter`でその行をコピー
+    ScriptLine(String),
 }
 
 /// アイコンの手がかり(K2). 画面の側でWindowsのアイコンを引く.
@@ -112,6 +121,8 @@ pub enum Icon {
     Web,
     /// ブックマークのサイトのアイコン(favicon. URL). 読めなければブックマークの印
     Favicon(String),
+    /// クリップボード
+    Clip,
 }
 
 /// 一覧の1行
@@ -154,6 +165,10 @@ pub trait Env {
     /// フォルダーの中身(名前, フォルダーか). パスの補完に使う. 読めなければ空
     fn list_dir(&self, _dir: &str) -> Vec<(String, bool)> {
         vec![]
+    }
+    /// 小文字にしたパス(学習の鍵)から, 実際の綴りのパスとフォルダーか. なければNone(最近のものから外す)
+    fn resolve_path(&self, _lower: &str) -> Option<(String, bool)> {
+        None
     }
 }
 
@@ -207,7 +222,7 @@ fn kind_weight(k: Kind) -> i32 {
     }
 }
 
-fn item_icon(it: &Item) -> Icon {
+pub(crate) fn item_icon(it: &Item) -> Icon {
     match it.kind {
         Kind::App | Kind::File | Kind::Folder => Icon::Path(it.target.clone()),
         Kind::Window | Kind::Process if !it.args.is_empty() => Icon::Path(it.args.clone()),
@@ -571,7 +586,7 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
         Mode::Bookmark => &[Source::Bookmarks],
         Mode::Kill => &[Source::Processes],
         Mode::File => &[Source::Folders],
-        Mode::Wsl | Mode::Box | Mode::Google | Mode::ChatGpt => &[],
+        Mode::Wsl | Mode::Box | Mode::Google | Mode::ChatGpt | Mode::Clipboard => &[],
     };
     for &s in sources {
         let cat = ctx.sources.get(s);
@@ -972,5 +987,18 @@ mod tests {
         w.learn.record("no", other.learn_key.as_ref().unwrap(), 0);
         let (_, rows) = run(&w, "no");
         assert_eq!(rows[0].name, other.name);
+    }
+
+    #[test]
+    fn clipboard_prefix_is_a_mode() {
+        let w = world();
+        let (m, rows) = run(&w, "cb report");
+        assert_eq!(m, Mode::Clipboard);
+        // 行は画面の側が`clip::rows`で作る. ふだんの検索の結果は混ぜない
+        assert!(rows.is_empty());
+        assert_eq!(Mode::Clipboard.label(), "clipboard");
+        // `c `(ChatGPT)とは別
+        let (m, _) = run(&w, "c hello");
+        assert_eq!(m, Mode::ChatGpt);
     }
 }
