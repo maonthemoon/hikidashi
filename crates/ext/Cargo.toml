@@ -1,0 +1,10 @@
+[package]
+name = "hikidashi-ext"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HikidashiのJavaScript拡張を動かす(Windowsに依存しない)"
+
+[dependencies]
+rquickjs = "0.14.0"
+serde_json = "1.0.154"
