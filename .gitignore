@@ -1,0 +1,15 @@
+# bin/にはリリースした版のHikidashi.exeだけを置く(Actionsが差し替える). 手元のビルドはout/(dev/があればdev/bin/)
+/bin/*
+!/bin/Hikidashi.exe
+/out/
+/target/
+__pycache__/
+Thumbs.db
+desktop.ini
+
+# 開発用の文書(dev/は非公開リポジトリhikidashi-dev. ルートのものはそこへのリンク)
+/dev/
+/HANDOFF.md
+/SPEC.md
+/AGENTS.md
+/CLAUDE.md

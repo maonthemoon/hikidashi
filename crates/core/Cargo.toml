@@ -1,0 +1,12 @@
+[package]
+name = "hikidashi-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Hikidashiの検索・並び順・計算など, Windowsに依存しない部分"
+
+[dependencies]
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.2.2"

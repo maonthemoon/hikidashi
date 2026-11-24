@@ -1,0 +1,25 @@
+// アイコン(1番), マニフェスト, バージョン情報. build.rsがwindresでつなぐ. 版はbuild.rsが作るversion.hから
+#include "version.h"
+1 ICON "../../assets/hikidashi.ico"
+1 24 "hikidashi.manifest"
+1 VERSIONINFO
+FILEVERSION VER_MAJOR,VER_MINOR,VER_PATCH,0
+PRODUCTVERSION VER_MAJOR,VER_MINOR,VER_PATCH,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "Hikidashi launcher"
+      VALUE "ProductName", "Hikidashi"
+      VALUE "FileVersion", VER_STR
+      VALUE "ProductVersion", VER_STR
+      VALUE "LegalCopyright", "Copyright (c) 2026 maonthemoon. MIT License"
+      VALUE "OriginalFilename", "Hikidashi.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
