@@ -199,10 +199,10 @@ fn reflection_rows(g: f64, rows: &mut Vec<CalcRow>, skip: &str) {
     rows.push(row(format!("{} dB", sig4(ml)), "Mismatch loss"));
 }
 
-/// 50Ωにその電力をかけたときの電圧の振幅(ピーク). 2行目に実効値とピークtoピーク
-fn voltage_row(w: f64) -> CalcRow {
-    let vp = (2.0 * w * 50.0).sqrt();
-    let note = format!("Peak voltage at 50 Ω · Vrms {} · Vpp {}", fmt_si(vp / 2f64.sqrt(), "V"), fmt_si(vp * 2.0, "V"));
+/// 基準インピーダンス`z0`にその電力をかけたときの電圧の振幅(ピーク). 2行目に実効値とピークtoピーク
+fn voltage_row(w: f64, z0: f64) -> CalcRow {
+    let vp = (2.0 * w * z0).sqrt();
+    let note = format!("Peak voltage at Z0 = {} · Vrms {} · Vpp {}", fmt_si(z0, "Ω"), fmt_si(vp / 2f64.sqrt(), "V"), fmt_si(vp * 2.0, "V"));
     row(fmt_si(vp, "V"), &note)
 }
 
@@ -372,7 +372,7 @@ fn sum_terms(s: &str, w: Option<f64>, admittance: bool) -> Option<(Cx, bool, boo
 }
 
 /// 複素数のインピーダンスとアドミタンスの計算. `w`は角周波数(`@2G`があるとき).
-fn network(desc: &str, w: Option<f64>) -> Option<Calc> {
+fn network(desc: &str, w: Option<f64>, z0: f64) -> Option<Calc> {
     let d = desc.trim();
     let (d, y_prefix) = match d.get(..2) {
         Some(h) if h.eq_ignore_ascii_case("y ") => (d[2..].trim(), true),
@@ -429,9 +429,9 @@ fn network(desc: &str, w: Option<f64>) -> Option<Calc> {
     .collect();
     // 反射係数Γ, VSWR, リターンロスも添える
     let mut rows = rows;
-    if let Some(g) = z_to_gamma(z) {
-        rows.extend(gamma_head(g));
-        rows.extend(gamma_tail(g));
+    if let Some(g) = z_to_gamma(z, z0) {
+        rows.extend(gamma_head(g, z0));
+        rows.extend(gamma_tail(g, z0));
     }
     (!rows.is_empty()).then_some(Calc { rows })
 }
@@ -510,8 +510,40 @@ fn parallel_eq(y: Cx, w: f64) -> Option<String> {
     Some(parts.join(" ∥ "))
 }
 
-/// 基準インピーダンス(Ω)
-const Z0: f64 = 50.0;
+/// 基準インピーダンスの注記. 基準を前提にした行の2行目に付ける.
+fn z0_note(base: &str, z0: f64) -> String {
+    format!("{base} · Z0 = {}", fmt_si(z0, "Ω"))
+}
+
+/// 入力の中の`z0=75`(`z0 75`, `z0=75ohm`, `z0=75Ω`も可)を取り除く. 返すのは(残りの入力, 基準Ω. なければ50).
+/// 値が正の実数でないときはErr(50で黙って計算しない).
+fn take_z0(t: &str) -> Result<(String, f64), ()> {
+    let toks: Vec<&str> = t.split_whitespace().collect();
+    let mut rest: Vec<&str> = Vec::new();
+    let mut z0 = None;
+    let mut i = 0;
+    while i < toks.len() {
+        let tok = toks[i];
+        i += 1;
+        let l = tok.to_ascii_lowercase();
+        let after = l.strip_prefix("z0").filter(|a| a.is_empty() || a.starts_with('='));
+        if z0.is_some() || after.is_none() {
+            rest.push(tok);
+            continue;
+        }
+        let mut val = tok[2..].trim_start_matches('=');
+        while val.is_empty() {
+            val = toks.get(i).copied().ok_or(())?.trim_start_matches('=');
+            i += 1;
+        }
+        let term = parse_term(val).ok_or(())?;
+        if term.j || !matches!(term.unit, Unit::None | Unit::Ohm) || !(term.v > 0.0) || !term.v.is_finite() {
+            return Err(());
+        }
+        z0 = Some(term.v);
+    }
+    Ok((rest.join(" "), z0.unwrap_or(50.0)))
+}
 
 /// 複素数の割り算. 分母が0に近ければNone.
 fn cx_div(a: Cx, b: Cx) -> Option<Cx> {
@@ -523,20 +555,20 @@ fn cx_div(a: Cx, b: Cx) -> Option<Cx> {
 }
 
 /// Γ = (Z - Z0)/(Z + Z0)
-fn z_to_gamma(z: Cx) -> Option<Cx> {
-    cx_div((z.0 - Z0, z.1), (z.0 + Z0, z.1))
+fn z_to_gamma(z: Cx, z0: f64) -> Option<Cx> {
+    cx_div((z.0 - z0, z.1), (z.0 + z0, z.1))
 }
 
 /// Z = Z0(1 + Γ)/(1 - Γ). Γ=1(開放)はNone.
-fn gamma_to_z(g: Cx) -> Option<Cx> {
+fn gamma_to_z(g: Cx, z0: f64) -> Option<Cx> {
     let r = cx_div((1.0 + g.0, g.1), (1.0 - g.0, -g.1))?;
-    Some((r.0 * Z0, r.1 * Z0))
+    Some((r.0 * z0, r.1 * z0))
 }
 
 /// Y = (1 - Γ)/(Z0(1 + Γ)). Γ=-1(短絡)はNone.
-fn gamma_to_y(g: Cx) -> Option<Cx> {
+fn gamma_to_y(g: Cx, z0: f64) -> Option<Cx> {
     let r = cx_div((1.0 - g.0, -g.1), (1.0 + g.0, g.1))?;
-    Some((r.0 / Z0, r.1 / Z0))
+    Some((r.0 / z0, r.1 / z0))
 }
 
 /// `a + jb`の文字(有効数字4桁)
@@ -556,44 +588,48 @@ fn fmt_rect(a: Cx) -> String {
 }
 
 /// Γの行(直交と極形式)
-fn gamma_head(g: Cx) -> Vec<CalcRow> {
+fn gamma_head(g: Cx, z0: f64) -> Vec<CalcRow> {
     let m = g.0.hypot(g.1);
     let deg = if m == 0.0 { 0.0 } else { g.1.atan2(g.0).to_degrees() };
     let polar = format!("{} ∠ {}°", sig4(m), sig4(deg));
-    vec![cx_row(format!("Γ = {}", fmt_rect(g)), fmt_rect(g), "Reflection coefficient (rectangular)"), cx_row(polar.clone(), polar, "Reflection coefficient (magnitude ∠ angle)")]
+    vec![
+        cx_row(format!("Γ = {}", fmt_rect(g)), fmt_rect(g), &z0_note("Reflection coefficient (rectangular)", z0)),
+        cx_row(polar.clone(), polar, &z0_note("Reflection coefficient (magnitude ∠ angle)", z0)),
+    ]
 }
 
 /// VSWRとリターンロスの行. |Γ|>1のときは出さない.
-fn gamma_tail(g: Cx) -> Vec<CalcRow> {
+fn gamma_tail(g: Cx, z0: f64) -> Vec<CalcRow> {
     let m = g.0.hypot(g.1);
     let mut rows = Vec::new();
     if !m.is_finite() || m > 1.0 + 1e-9 {
         return rows;
     }
     let vswr = if m >= 1.0 - 1e-9 { "∞".to_string() } else { sig4((1.0 + m) / (1.0 - m)) };
-    rows.push(row(vswr, "VSWR"));
+    rows.push(row(vswr, &z0_note("VSWR", z0)));
     let rl = if m < 1e-12 { "∞ dB".to_string() } else { format!("{} dB", fixed2((-20.0 * m.log10()).max(0.0) + 0.0)) };
-    rows.push(row(rl, "Return loss"));
+    rows.push(row(rl, &z0_note("Return loss", z0)));
     rows
 }
 
 /// ΓからZ, Y(開放や短絡は`open`)
-fn gamma_zy_rows(g: Cx) -> Vec<CalcRow> {
-    let z = gamma_to_z(g);
-    let y = gamma_to_y(g);
+fn gamma_zy_rows(g: Cx, z0: f64) -> Vec<CalcRow> {
+    let z = gamma_to_z(g, z0);
+    let y = gamma_to_y(g, z0);
+    let (zn, yn) = (z0_note("Impedance", z0), z0_note("Admittance", z0));
     let zr = match z {
-        Some(z) => cx_row(format!("Z = {}", fmt_z(z)), fmt_z(z), "Impedance"),
-        None => cx_row("Z = open".into(), "open".into(), "Impedance"),
+        Some(z) => cx_row(format!("Z = {}", fmt_z(z)), fmt_z(z), &zn),
+        None => cx_row("Z = open".into(), "open".into(), &zn),
     };
     let yr = match y {
-        Some(y) => cx_row(format!("Y = {}", fmt_y(y)), fmt_y(y), "Admittance"),
-        None => cx_row("Y = open".into(), "open".into(), "Admittance"),
+        Some(y) => cx_row(format!("Y = {}", fmt_y(y)), fmt_y(y), &yn),
+        None => cx_row("Y = open".into(), "open".into(), &yn),
     };
     vec![zr, yr]
 }
 
 /// `gamma 0.2+j0.4`, `gamma 0.2 0.4`, `gamma 0.4472<63.43`(`∠`も可. `@2G`で等価回路も). 値が1つだけのときは読まない.
-fn gamma_input(t: &str) -> Option<Calc> {
+fn gamma_input(t: &str, z0: f64) -> Option<Calc> {
     let (body, w) = match t.split_once('@') {
         Some((l, r)) => (l.trim(), Some(2.0 * PI * freq(r)?)),
         None => (t.trim(), None),
@@ -646,28 +682,28 @@ fn gamma_input(t: &str) -> Option<Calc> {
     if !g.0.is_finite() || !g.1.is_finite() {
         return None;
     }
-    let mut rows = gamma_head(g);
-    rows.extend(gamma_zy_rows(g));
+    let mut rows = gamma_head(g, z0);
+    rows.extend(gamma_zy_rows(g, z0));
     if let Some(w) = w {
         let at = format!(" at {}", fmt_si(w / (2.0 * PI), "Hz"));
-        if let Some(s) = gamma_to_z(g).and_then(|z| series_eq(z, w)) {
+        if let Some(s) = gamma_to_z(g, z0).and_then(|z| series_eq(z, w)) {
             rows.push(cx_row(s.clone(), s, &format!("Series equivalent{at}")));
         }
-        if let Some(s) = gamma_to_y(g).and_then(|y| parallel_eq(y, w)) {
+        if let Some(s) = gamma_to_y(g, z0).and_then(|y| parallel_eq(y, w)) {
             rows.push(cx_row(s.clone(), s, &format!("Parallel equivalent{at}")));
         }
     }
-    rows.extend(gamma_tail(g));
+    rows.extend(gamma_tail(g, z0));
     Some(Calc { rows })
 }
 
 /// RFの計算. 合わなければNone.
-fn rf(s: &str) -> Option<Calc> {
+fn rf(s: &str, z0: f64) -> Option<Calc> {
     let t = s.trim();
     let lower = t.to_ascii_lowercase();
     let mut rows = Vec::new();
     // 複素数の反射係数: gamma 0.2+j0.4, gamma 0.2 0.4, gamma 0.4472<63.43(値が1つだけのときは下の大きさの扱い)
-    if let Some(c) = gamma_input(t) {
+    if let Some(c) = gamma_input(t, z0) {
         return Some(c);
     }
     if lower.contains(" il") {
@@ -684,7 +720,7 @@ fn rf(s: &str) -> Option<Calc> {
             rows.push(row(fmt_si(1.0 / (2.0 * PI * f * c), "Ω"), "XC = 1/(2πfC)"));
         } else {
             // `50+j50@2G`, `50+3.979nH@2G`, `100||7.958nH@2G`など
-            return network(left, Some(2.0 * PI * f));
+            return network(left, Some(2.0 * PI * f), z0);
         }
         return Some(Calc { rows });
     }
@@ -693,13 +729,13 @@ fn rf(s: &str) -> Option<Calc> {
         return Some(c);
     }
     // 複素数のインピーダンス・アドミタンス: 50+j50, 10mS-j10mS
-    if let Some(c) = network(t, None) {
+    if let Some(c) = network(t, None, z0) {
         return Some(c);
     }
     if let Some(v) = quantity(t, "dBm") {
         let w = 10f64.powf(v / 10.0) / 1000.0;
         rows.push(row(fmt_si(w, "W"), "Power"));
-        rows.push(voltage_row(w));
+        rows.push(voltage_row(w, z0));
         return Some(Calc { rows });
     }
     if lower.ends_with("dbw") {
@@ -891,7 +927,12 @@ pub fn evaluate(input: &str) -> Option<Calc> {
     }
     // `3dB`が16進数(0x3DB)にならないよう, 単位の付いたRFの計算を先に見る
     // ふつうの計算はそのあとに見る
-    rf(t).or_else(|| radix(t)).or_else(|| arith(t))
+    // 基準インピーダンス(`z0=75`)を先に取り除く. 値が読めないときは答えを出さない
+    let (t, z0) = take_z0(t).ok()?;
+    if t.is_empty() {
+        return None;
+    }
+    rf(&t, z0).or_else(|| radix(&t)).or_else(|| arith(&t))
 }
 
 #[cfg(test)]
@@ -1007,7 +1048,7 @@ mod tests {
             .unwrap()
             .rows
             .into_iter()
-            .filter(|r| !(r.note.starts_with("Reflection coefficient") || r.note == "VSWR" || r.note == "Return loss"))
+            .filter(|r| !(r.note.starts_with("Reflection coefficient") || r.note.starts_with("VSWR") || r.note.starts_with("Return loss")))
             .map(|r| r.value)
             .collect()
     }
@@ -1040,13 +1081,13 @@ mod tests {
     #[test]
     fn gamma_round_trips() {
         for z in [(25.0, -25.0), (100.0, -50.0), (50.0, 50.0), (10.0, 0.0), (0.0, 30.0), (200.0, 300.0)] {
-            let g = z_to_gamma(z).unwrap();
-            assert!(close(gamma_to_z(g).unwrap(), z), "{z:?}");
+            let g = z_to_gamma(z, 50.0).unwrap();
+            assert!(close(gamma_to_z(g, 50.0).unwrap(), z), "{z:?}");
             let y = cx_inv(z).unwrap();
-            let g2 = z_to_gamma(cx_inv(y).unwrap()).unwrap();
-            assert!(close(gamma_to_y(g2).unwrap(), y), "{z:?}");
+            let g2 = z_to_gamma(cx_inv(y).unwrap(), 50.0).unwrap();
+            assert!(close(gamma_to_y(g2, 50.0).unwrap(), y), "{z:?}");
         }
-        assert_eq!(z_to_gamma((50.0, 0.0)), Some((0.0, 0.0)));
+        assert_eq!(z_to_gamma((50.0, 0.0), 50.0), Some((0.0, 0.0)));
         // 文字からも戻る(25-j25 → Γ → Z)
         let v = vals("25-j25");
         let g = v.iter().find(|x| x.starts_with("Γ = ")).unwrap().trim_start_matches("Γ = ").to_string();
@@ -1143,6 +1184,46 @@ mod tests {
         assert_eq!(core(&format!("{p}@2G"))[0], "50 Ω + 3.979 nH");
         let s = core("100||7.958nH@2G")[0].clone();
         assert_eq!(core(&format!("{s}@2G"))[0], "100 Ω ∥ 7.958 nH");
+    }
+
+    fn notes(s: &str) -> Vec<String> {
+        evaluate(s).unwrap().rows.into_iter().map(|r| r.note).collect()
+    }
+
+    #[test]
+    fn reference_impedance() {
+        // 既定は50 Ω. 基準を前提にした行にだけ付く
+        assert!(notes("gamma 0.2+j0.4").iter().all(|n| n.contains("Z0 = 50 Ω")), "{:?}", notes("gamma 0.2+j0.4"));
+        assert!(notes("10dBm")[1].contains("Z0 = 50 Ω"));
+        let n = notes("50+j50@2G");
+        assert!(!n[0].contains("Z0") && !n[1].contains("Z0") && !n[2].contains("Z0"), "{n:?}");
+        assert!(n[3..].iter().all(|x| x.contains("Z0 = 50 Ω")), "{n:?}");
+        for s in ["50+j50", "10nH 2.4G", "10nH@2.4G", "vswr 1.5", "10mS-j10mS@2G"] {
+            let n = notes(s);
+            let free = if s == "50+j50" { &n[..1] } else { &n[..] };
+            let free = if s == "10mS-j10mS@2G" { &n[..3] } else { free };
+            assert!(free.iter().all(|x| !x.contains("Z0")), "{s}: {n:?}");
+        }
+        // z0=75
+        for s in ["gamma 0.2+j0.4 z0=75", "z0=75 gamma 0.2+j0.4", "gamma 0.2+j0.4 Z0 75", "gamma 0.2+j0.4 z0=75ohm", "gamma 0.2+j0.4 z0 = 75Ω"] {
+            let v = vals(s);
+            assert_eq!(v[2], "Z = 75 + j75 Ω", "{s}");
+            assert!(notes(s)[2].contains("Z0 = 75 Ω"), "{s}");
+        }
+        // Z=75, z0=75 → Γ=0. 50+j50, z0=100 → Γ=-0.2+j0.4(手計算: (-50+j50)/(150+j50))
+        assert_eq!(vals("75@2G z0=75")[3], "Γ = 0");
+        assert_eq!(vals("75+j0 z0=75")[1], "Γ = 0");
+        assert_eq!(vals("50+j50 z0=100")[1], "Γ = -0.2 + j0.4");
+        // 電圧: √(0.01×75)=0.8660 V(実効値)
+        let n = notes("10dBm z0=75");
+        assert!(n[1].contains("Z0 = 75 Ω") && n[1].contains("Vrms 866 mV"), "{n:?}");
+        // 基準によらない計算は同じ答え
+        assert_eq!(vals("50+j50 z0=75")[0], "Y = 10 mS - j10 mS");
+        assert_eq!(vals("(12+3)*4 z0=75"), vec!["60"]);
+        // 読めない値や0, 負は答えを出さない
+        for s in ["gamma 0.2+j0.4 z0=0", "gamma 0.2+j0.4 z0=-50", "gamma 0.2+j0.4 z0=abc", "gamma 0.2+j0.4 z0=", "gamma 0.2+j0.4 z0=j50", "z0=75"] {
+            assert!(evaluate(s).is_none(), "{s}");
+        }
     }
 
     #[test]
