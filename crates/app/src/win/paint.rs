@@ -79,7 +79,7 @@ fn brush_bg() -> HBRUSH {
 }
 
 /// 入力欄の色(WM_CTLCOLOREDIT)
-pub fn edit_colors(_app: &App, hdc: HDC) -> HBRUSH {
+pub fn edit_colors(hdc: HDC) -> HBRUSH {
     unsafe {
         SetTextColor(hdc, rgb(pal().text));
         SetBkColor(hdc, rgb(pal().bg));

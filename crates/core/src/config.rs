@@ -39,7 +39,7 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Search {
-    /// 入力欄が空のとき, 最近開いたものを出す
+    /// 入力欄が空のとき, 最近開いたものを出す(初めはオフ. K43)
     pub recent: bool,
     /// クリップボードの履歴を記録する(`cb `で呼ぶ)
     pub clipboard_history: bool,
@@ -47,7 +47,7 @@ pub struct Search {
 
 impl Default for Search {
     fn default() -> Self {
-        Search { recent: true, clipboard_history: true }
+        Search { recent: false, clipboard_history: true }
     }
 }
 
@@ -1033,19 +1033,19 @@ mod tests {
     #[test]
     fn search_and_selection_hotkey_settings() {
         let c = Config::default();
-        assert!(c.search.recent && c.search.clipboard_history);
+        assert!(!c.search.recent && c.search.clipboard_history);
         assert_eq!(c.hotkeys.selection, "Ctrl+Alt+Space");
         assert_eq!(c.prefix.clipboard, "cb");
         // 書き出して読み直しても残る
         let mut c = Config::default();
-        c.search.recent = false;
+        c.search.recent = true;
         c.search.clipboard_history = false;
         c.hotkeys.selection = String::new();
         c.prefix.clipboard = "cl".into();
         let r = Config::parse(&to_toml(&c)).unwrap();
         assert_eq!(r, c);
-        let r = Config::parse("[search]\nrecent = false\n[hotkeys]\nselection = \"Ctrl+Shift+K\"\n").unwrap();
-        assert!(!r.search.recent && r.search.clipboard_history);
+        let r = Config::parse("[search]\nrecent = true\n[hotkeys]\nselection = \"Ctrl+Shift+K\"\n").unwrap();
+        assert!(r.search.recent && r.search.clipboard_history);
         assert_eq!(r.hotkeys.selection, "Ctrl+Shift+K");
         assert!(r.validate().is_ok());
     }

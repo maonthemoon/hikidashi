@@ -422,13 +422,14 @@ pub fn url_encode(s: &str) -> String {
 }
 
 /// 計算のモードの使い方の例(入力が空のときと, 答えが出ないときに出す)
-const CALC_EXAMPLES: [(&str, &str); 6] = [
+const CALC_EXAMPLES: [(&str, &str); 7] = [
     ("0x1F", "Hex to decimal and binary"),
     ("(12+3)*4", "Calculator: + - * / ^ ( ) %"),
     ("10dBm", "dBm to watts and volts"),
     ("vswr 1.5", "VSWR to return loss and reflection"),
     ("10nH 2.4G", "Capacitance that resonates with 10 nH at 2.4 GHz"),
     ("50+j50@2G", "Impedance to admittance and equivalent circuits"),
+    ("rffe 6 1C 38", "MIPI RFFE frame: SA, address, data (or paste the bits)"),
 ];
 
 fn calc_hint_rows() -> Vec<Row> {

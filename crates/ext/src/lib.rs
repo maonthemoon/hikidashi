@@ -34,6 +34,8 @@ pub struct ExtMeta {
     pub title: String,
     /// trueなら`search`の`ctx.clipboard`にクリップボードの文字を渡す
     pub clipboard: bool,
+    /// trueなら計算のモード(`= `)の中でも使える
+    pub calc: bool,
 }
 
 /// 結果の1行
@@ -359,7 +361,8 @@ fn load_file(rt: &Runtime, guard: &Guard, name: &str, path: &Path, stamp: Stamp)
         }
         let title = v.get("title").and_then(|x| x.as_str()).unwrap_or(name).to_string();
         let clipboard = v.get("clipboard").and_then(|x| x.as_bool()).unwrap_or(false);
-        Ok(ExtMeta { name: name.to_string(), keyword, title, clipboard })
+        let calc = v.get("calc").and_then(|x| x.as_bool()).unwrap_or(false);
+        Ok(ExtMeta { name: name.to_string(), keyword, title, clipboard, calc })
     });
     guard.disarm();
     Ok(Loaded { meta: r?, stamp, ctx })

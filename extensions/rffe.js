@@ -1,8 +1,9 @@
 // MIPI RFFEのコマンドフレームを読み解く見本の拡張(規格の読み解きだけ).
+// 計算のモード(`= `)の中でも, ふだんの検索でも使える.
 //   rffe 6 1C 38          SA, レジスターのアドレス, データ(16進) -> フレームのビット列
 //   rffe 0110010111001001110000   ビット列 -> SA, コマンド, アドレス, データ, パリティ
 //   rffe (クリップボードにExcelの表)  SCLKの列とデータの列から読み取る
-export const meta = { title: "MIPI RFFE", keyword: "rffe", clipboard: true };
+export const meta = { title: "MIPI RFFE", keyword: "rffe", clipboard: true, calc: true };
 
 const REG_NAMES = { 0x1c: "PM_TRIG", 0x1d: "PRODUCT_ID", 0x1e: "MANUFACTURER_ID", 0x1f: "MAN_USID" };
 const PWR_MODES = ["Active", "Startup", "Low Power", "Reserved"];

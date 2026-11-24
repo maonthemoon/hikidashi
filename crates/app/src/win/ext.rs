@@ -135,12 +135,13 @@ impl Ext {
     }
 
     /// 入力が`keyword `で始まる拡張と, そのあとの文字. `taken`(接頭辞とスクリプトのkeyword. 小文字)と重なるものは使わない
-    fn find(&self, text: &str, taken: &[String]) -> Option<(ExtMeta, String)> {
+    /// `calc`(計算のモード)なら`meta.calc`のものだけ
+    fn find(&self, text: &str, taken: &[String], calc: bool) -> Option<(ExtMeta, String)> {
         let host = self.host()?;
         let text = text.trim_start();
         host.list().into_iter().find_map(|m| {
             let kw = m.keyword.to_lowercase();
-            if taken.contains(&kw) {
+            if taken.contains(&kw) || (calc && !m.calc) {
                 return None;
             }
             let head = text.get(..m.keyword.len())?;
@@ -154,8 +155,8 @@ impl Ext {
     }
 
     /// 拡張の行を出す入力なら, 検索を頼んで(待たない)今の行を返す. 届くまでは前の行か`Loading…`
-    pub fn rows(&mut self, text: &str, taken: &[String], hwnd: HWND, gen: u64, current: &[Row]) -> Option<Vec<Row>> {
-        let Some((meta, rest)) = self.find(text, taken) else {
+    pub fn rows(&mut self, text: &str, taken: &[String], calc: bool, hwnd: HWND, gen: u64, current: &[Row]) -> Option<Vec<Row>> {
+        let Some((meta, rest)) = self.find(text, taken, calc) else {
             self.active = None;
             return None;
         };

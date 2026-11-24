@@ -108,7 +108,6 @@ const PAIRS: &[(&str, &str)] = &[
     ("Same as the app mode of Windows", "Windowsのアプリのモードに合わせる"),
     ("Light", "ライト"),
     ("Dark", "ダーク"),
-    ("Colors of the launcher window. Settings and the tray menu stay light.", "ランチャーの窓の色です. 設定画面とトレイのメニューはライトのままです."),
     ("Not set", "未設定"),
     ("Change…", "変える…"),
     ("Start Hikidashi when Windows starts", "Windowsと一緒に起動する"),

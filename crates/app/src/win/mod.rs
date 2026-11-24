@@ -4,6 +4,7 @@ mod actions;
 mod apps;
 mod clipboard;
 mod compose;
+mod dark;
 mod diag;
 mod dict;
 mod ext;
@@ -53,7 +54,7 @@ use windows::Win32::System::DataExchange::{AddClipboardFormatListener, RemoveCli
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Controls::RichEdit::{EN_REQUESTRESIZE, EN_SELCHANGE, REQRESIZE};
-use windows::Win32::UI::Controls::{EM_GETSEL, EM_SETCUEBANNER, EM_SETLIMITTEXT, EM_SETSEL, NMHDR};
+use windows::Win32::UI::Controls::{EM_GETRECT, EM_GETSEL, EM_SETLIMITTEXT, EM_SETSEL, NMHDR};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, SetFocus, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_INSERT, VK_RIGHT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RWIN, VK_SHIFT, VK_TAB, VK_UP};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
@@ -467,6 +468,10 @@ impl App {
         if self.mode == Mode::Clipboard {
             return Some(clip_rows(&self.clips, text));
         }
+        // 計算のモードの中でも, 計算の拡張(`rffe `)は使える(K43)
+        if self.mode == Mode::Calc {
+            return self.ext_rows(text);
+        }
         if self.mode != Mode::All {
             return None;
         }
@@ -630,7 +635,15 @@ impl App {
         let y = (scale(theme::INPUT_H, d) - eh) / 2;
         let w = scale(theme::WIDTH - theme::PAD_X, d) - x;
         unsafe {
-            let _ = SetWindowPos(self.edit, None, x, y, w, eh, SWP_NOZORDER | SWP_NOACTIVATE);
+            let mut rc = RECT::default();
+            let _ = GetWindowRect(self.edit, &mut rc);
+            let mut pt = [POINT { x: rc.left, y: rc.top }];
+            windows::Win32::Graphics::Gdi::MapWindowPoints(None, Some(self.hwnd), &mut pt);
+            if (pt[0].x, pt[0].y, rc.right - rc.left, rc.bottom - rc.top) != (x, y, w, eh) {
+                // 左の印が付いたり消えたりして動いたときは, 前の絵を写さずに全部描き直す(案内の文字の左が欠けたため. K43)
+                let _ = SetWindowPos(self.edit, None, x, y, w, eh, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+                let _ = InvalidateRect(Some(self.edit), None, true);
+            }
         }
     }
 
@@ -819,6 +832,7 @@ impl App {
     /// ライトとダークが変わったとき(K39): 枠, 書く窓, 入力欄を塗り直す
     fn apply_theme(&mut self) {
         set_border_color(self.hwnd);
+        settings::apply_theme();
         if let Some(c) = &mut self.compose {
             c.apply_theme();
         }
@@ -1661,9 +1675,7 @@ impl App {
         if !self.visible() {
             self.show();
         }
-        unsafe {
-            SendMessageW(self.edit, EM_SETCUEBANNER, Some(WPARAM(1)), Some(LPARAM(w!("Press a hotkey…").0 as isize)));
-        }
+        set_cue(self.edit, "Press a hotkey…");
         self.layout();
     }
 
@@ -1677,9 +1689,7 @@ impl App {
         }
         self.capture_sel = false;
         self.apply_selection_hotkey();
-        unsafe {
-            SendMessageW(self.edit, EM_SETCUEBANNER, Some(WPARAM(1)), Some(LPARAM(w!("Search apps, files, bookmarks, or paste a path").0 as isize)));
-        }
+        set_cue(self.edit, CUE_SEARCH);
         self.layout();
     }
 
@@ -1727,9 +1737,7 @@ impl App {
             self.capture = false;
             self.message = Some((format!("Hotkey set: {}", h.format()), false));
             settings::set_hotkey(&h.format());
-            unsafe {
-                SendMessageW(self.edit, EM_SETCUEBANNER, Some(WPARAM(1)), Some(LPARAM(w!("Search apps, files, bookmarks, or paste a path").0 as isize)));
-            }
+            set_cue(self.edit, CUE_SEARCH);
             self.layout();
             if !self.state.autostart_asked {
                 self.state.autostart_asked = true;
@@ -2614,12 +2622,13 @@ impl App {
     fn ext_rows(&mut self, text: &str) -> Option<Vec<Row>> {
         let taken = self.ext_taken();
         let (hwnd, gen) = (self.hwnd, self.gen);
-        self.ext.rows(text, &taken, hwnd, gen, &self.rows)
+        let calc = self.mode == Mode::Calc;
+        self.ext.rows(text, &taken, calc, hwnd, gen, &self.rows)
     }
 
     /// 拡張の結果が届いた. 今の入力の結果なら出す
     fn on_ext(&mut self) {
-        if !self.visible() || self.composing() || self.mode != Mode::All {
+        if !self.visible() || self.composing() || !matches!(self.mode, Mode::All | Mode::Calc) {
             return;
         }
         if let Some(rows) = self.ext.take(self.gen) {
@@ -2680,6 +2689,10 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
     if msg == diag::WM_APP_PING {
         diag::pong(wparam.0 as u64);
         return LRESULT(0);
+    }
+    // 入力欄の色. 文字を入れ替えている途中(Appを借りている間)にも聞かれるので, 先に答える(白い地に黒い字で描かれないように. K43)
+    if msg == WM_CTLCOLOREDIT {
+        return LRESULT(paint::edit_colors(windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _)).0 as isize);
     }
     // 書く窓の中身の高さ. 整えている途中(Appを借りている間)にも届くので, 先にここで受け取る
     let mut notify_code = 0u32;
@@ -2809,10 +2822,6 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                 app.scroll(lines * (delta.abs() / 120).max(1));
                 Some(LRESULT(0))
             }
-            WM_CTLCOLOREDIT => {
-                let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
-                Some(LRESULT(paint::edit_colors(app, hdc).0 as isize))
-            }
             WM_TIMER => {
                 match wparam.0 {
                     TIMER_GLOW => {
@@ -2928,6 +2937,48 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
     }
 }
 
+const CUE_SEARCH: &str = "Search apps, files, bookmarks, or paste a path";
+
+thread_local! {
+    /// 入力欄が空のときの案内の文字. 標準の案内はダークで色が暗く, 欠けることもあったので自分で描く(K43)
+    static CUE: std::cell::Cell<&'static str> = const { std::cell::Cell::new(CUE_SEARCH) };
+    /// 前に描いたときに案内を出していたか
+    static CUE_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// 日本語入力で変換している間は案内を出さない
+    static EDIT_IME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn set_cue(edit: HWND, text: &'static str) {
+    CUE.set(text);
+    unsafe {
+        let _ = InvalidateRect(Some(edit), None, true);
+    }
+}
+
+/// 入力欄が空で, 案内の文字を出すか
+fn cue_wanted(edit: HWND) -> bool {
+    !EDIT_IME.get() && unsafe { DefSubclassProc(edit, WM_GETTEXTLENGTH, WPARAM(0), LPARAM(0)) }.0 == 0
+}
+
+fn draw_cue(edit: HWND) {
+    use windows::Win32::Graphics::Gdi::*;
+    unsafe {
+        let mut rc = RECT::default();
+        SendMessageW(edit, EM_GETRECT, None, Some(LPARAM(&mut rc as *mut _ as isize)));
+        let _ = HideCaret(Some(edit));
+        let hdc = GetDC(Some(edit));
+        let font = HFONT(SendMessageW(edit, WM_GETFONT, None, None).0 as *mut _);
+        let old = SelectObject(hdc, font.into());
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, util::rgb(theme::pal().text_tertiary));
+        let mut t: Vec<u16> = CUE.get().encode_utf16().collect();
+        DrawTextW(hdc, &mut t, &mut rc, DT_SINGLELINE | DT_TOP | DT_LEFT | DT_NOPREFIX | DT_END_ELLIPSIS);
+        SelectObject(hdc, old);
+        ReleaseDC(Some(edit), hdc);
+        let _ = ShowCaret(Some(edit));
+    }
+}
+
 /// 入力欄のキーを横取りする
 extern "system" fn edit_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, id: usize, data: usize) -> LRESULT {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| edit_proc_inner(hwnd, msg, wparam, lparam, id, data))) {
@@ -2938,6 +2989,23 @@ extern "system" fn edit_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
 
 fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
     match msg {
+        WM_PAINT => {
+            let cue = cue_wanted(hwnd);
+            // 案内を出す(出していた)ときは全体を描き直す. 一部だけ描くと欠けや重ね描きになる
+            if cue || CUE_SHOWN.get() {
+                unsafe {
+                    let _ = InvalidateRect(Some(hwnd), None, true);
+                }
+            }
+            let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+            if cue {
+                draw_cue(hwnd);
+            }
+            CUE_SHOWN.set(cue);
+            return r;
+        }
+        WM_IME_STARTCOMPOSITION => EDIT_IME.set(true),
+        WM_IME_ENDCOMPOSITION => EDIT_IME.set(false),
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let sys = msg == WM_SYSKEYDOWN;
             if let Some(true) = with_app(|app| app.on_key(wparam.0 as u16, sys)) {
@@ -2970,7 +3038,18 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
         }
         _ => {}
     }
-    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+    let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+    // 空になった, 空でなくなったときは描き直す(入力欄は変わった文字のところしか描かないことがある)
+    if matches!(
+        msg,
+        WM_SETTEXT | WM_KEYDOWN | WM_CHAR | WM_PASTE | WM_CUT | WM_CLEAR | WM_UNDO | WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION | WM_IME_COMPOSITION | WM_IME_CHAR
+    ) && cue_wanted(hwnd) != CUE_SHOWN.get()
+    {
+        unsafe {
+            let _ = InvalidateRect(Some(hwnd), None, true);
+        }
+    }
+    r
 }
 
 /// 書く窓(RichEdit)のキーを横取りする(K22)
@@ -3193,7 +3272,6 @@ pub fn run() {
     let Ok(edit) = edit else { return };
     unsafe {
         let _ = SetWindowSubclass(edit, Some(edit_proc), 1, 0);
-        SendMessageW(edit, EM_SETCUEBANNER, Some(WPARAM(1)), Some(LPARAM(w!("Search apps, files, bookmarks, or paste a path").0 as isize)));
         SendMessageW(edit, EM_SETLIMITTEXT, Some(WPARAM(4096)), Some(LPARAM(0)));
     }
 

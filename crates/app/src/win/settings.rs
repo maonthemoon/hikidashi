@@ -7,7 +7,7 @@ use super::storage;
 use super::system;
 use super::theme::*;
 use super::util::{from_wide, hiword, loword, rgb, wide, WStr};
-use super::{actions, paint};
+use super::{actions, dark, paint};
 use hikidashi_core::builtin;
 use hikidashi_core::config::{self, parse_enter_key, Command, Config, Files, OpenWith, Wsl, ENTER_KEY_CHOICES};
 use hikidashi_core::pathlike;
@@ -15,7 +15,6 @@ use std::cell::RefCell;
 use std::sync::OnceLock;
 use windows::core::{w, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_INPROC_SERVER};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -28,6 +27,8 @@ use windows::Win32::UI::Shell::{FileOpenDialog, IFileOpenDialog, FOS_FORCEFILESY
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const CLASS: PCWSTR = w!("HikidashiSettings");
+/// 区分の中身を入れる枠. 入りきらなければスクロールする(K43)
+const PANEL_CLASS: PCWSTR = w!("HikidashiPanel");
 const EDITOR_CLASS: PCWSTR = w!("HikidashiSettingsItem");
 
 // 大きさ(96dpiのとき)
@@ -119,7 +120,7 @@ const SECTIONS: [&str; 8] = ["General", "Search", "Box and WSL", "Apps", "Tab me
 const PREFIX_LABELS: [&str; 10] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT", "Clipboard", "Calc"];
 /// 言語(K24). どちらの言語でも同じ文字で出す
 const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows / Windowsに合わせる"), ("ja", "日本語"), ("en", "English")];
-/// ランチャーの窓と書く窓の色(K39). 設定画面とトレイのメニューはライトのまま
+/// ランチャーの窓, 書く窓, 設定画面, トレイのメニューの色(K39, K43)
 const THEMES: [(&str, &str); 3] = [("auto", "Same as the app mode of Windows"), ("light", "Light"), ("dark", "Dark")];
 /// Tabのメニューの項目(`config::MENU_ITEMS`の順)と種類
 const MENU_LABELS: [&str; 8] = ["Copy file", "Open new window", "Open in … (Open with)", "Open the folder it is in", "Copy path", "Copy WSL path (only with WSL)", "Run as administrator", "Open in Explorer"];
@@ -164,8 +165,8 @@ fn s(v: i32, dpi: u32) -> i32 {
     (v as i64 * dpi as i64 / 96) as i32
 }
 
-/// 行を上から並べる. `x`と`width`は96dpiの値
-fn place(rows: &[Row], x: i32, y: i32, width: i32, dpi: u32) {
+/// 行を上から並べる. `x`と`width`は96dpiの値. 返り値は下の端(96dpi)
+fn place(rows: &[Row], x: i32, y: i32, width: i32, dpi: u32) -> i32 {
     let mut y = y;
     for r in rows {
         y += r.gap;
@@ -191,6 +192,7 @@ fn place(rows: &[Row], x: i32, y: i32, width: i32, dpi: u32) {
         }
         y += h + ROW_GAP;
     }
+    y
 }
 
 // ---------------------------------------------------------------- 部品を作る
@@ -236,7 +238,7 @@ impl Maker {
     fn hint(&mut self, text: &str) -> HWND {
         let text = &tr(text);
         let h = self.raw(w!("STATIC"), text, (SS_LEFT.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), -1, F_BODY);
-        tint(h, TEXT_TERTIARY);
+        tint(h, |p| p.text_tertiary);
         h
     }
     fn head(&mut self, text: &str) -> HWND {
@@ -386,8 +388,13 @@ fn table_select(h: HWND, i: usize) {
     }
 }
 
+/// 設定画面の中の枠. なければ(項目を直す小さな窓など)空
+fn panel_of(hwnd: HWND) -> HWND {
+    unsafe { FindWindowExW(Some(hwnd), None, PANEL_CLASS, PCWSTR::null()).unwrap_or_default() }
+}
+
 fn item(parent: HWND, id: i32) -> HWND {
-    unsafe { GetDlgItem(Some(parent), id).unwrap_or_default() }
+    unsafe { GetDlgItem(Some(parent), id).or_else(|_| GetDlgItem(Some(panel_of(parent)), id)).unwrap_or_default() }
 }
 
 fn brush(c: u32) -> HBRUSH {
@@ -404,10 +411,13 @@ fn brush(c: u32) -> HBRUSH {
 
 thread_local! {
     /// 文字の色を変える部品(説明の行, エラー)
-    static TINT: RefCell<Vec<(isize, u32)>> = const { RefCell::new(Vec::new()) };
+    static TINT: RefCell<Vec<(isize, Color)>> = const { RefCell::new(Vec::new()) };
 }
 
-fn tint(h: HWND, c: u32) {
+/// テーマが変わっても付いていくよう, 色そのものではなく選び方で持つ
+type Color = fn(&Palette) -> u32;
+
+fn tint(h: HWND, c: Color) {
     TINT.with(|t| {
         let mut t = t.borrow_mut();
         t.retain(|(k, _)| *k != h.0 as isize);
@@ -416,7 +426,7 @@ fn tint(h: HWND, c: u32) {
 }
 
 fn tint_of(h: HWND) -> u32 {
-    TINT.with(|t| t.borrow().iter().find(|(k, _)| *k == h.0 as isize).map(|(_, c)| *c).unwrap_or(TEXT))
+    TINT.with(|t| t.borrow().iter().find(|(k, _)| *k == h.0 as isize).map(|(_, c)| c(pal())).unwrap_or(pal().text))
 }
 
 /// フォルダーやexeを選ぶ(Windowsの「フォルダーの選択」). 選ばなければNone
@@ -477,8 +487,9 @@ fn centered(dpi: u32, cw: i32, ch: i32, style: WINDOW_STYLE) -> RECT {
         let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
         let _ = GetMonitorInfoW(mon, &mut mi);
         let w = r.right - r.left;
-        let h = r.bottom - r.top;
         let wa = mi.rcWork;
+        // 画面が低ければ窓も低くする(中身はスクロールする)
+        let h = (r.bottom - r.top).min(wa.bottom - wa.top);
         let x = wa.left + ((wa.right - wa.left) - w) / 2;
         let y = wa.top + ((wa.bottom - wa.top) - h) / 2;
         RECT { left: x, top: y.max(wa.top), right: x + w, bottom: y.max(wa.top) + h }
@@ -500,14 +511,13 @@ fn register_classes() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| unsafe {
         let hinst = GetModuleHandleW(None).unwrap_or_default();
-        let procs: [(PCWSTR, WNDPROC); 2] = [(CLASS, Some(settings_proc)), (EDITOR_CLASS, Some(editor_proc))];
+        let procs: [(PCWSTR, WNDPROC); 3] = [(CLASS, Some(settings_proc)), (EDITOR_CLASS, Some(editor_proc)), (PANEL_CLASS, Some(panel_proc))];
         for (class, proc_) in procs {
             let wc = WNDCLASSEXW {
                 cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
                 lpfnWndProc: proc_,
                 hInstance: hinst.into(),
                 hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-                hbrBackground: brush(BG),
                 lpszClassName: class,
                 hIcon: system::app_icon(),
                 ..Default::default()
@@ -517,14 +527,6 @@ fn register_classes() {
         let icc = INITCOMMONCONTROLSEX { dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32, dwICC: ICC_LISTVIEW_CLASSES };
         let _ = InitCommonControlsEx(&icc);
     });
-}
-
-fn caption_color(hwnd: HWND) {
-    // Windows 11ではタイトルの帯も背景の色にする(Windows 10では何もしない)
-    let c = rgb(BG).0;
-    unsafe {
-        let _ = DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &c as *const _ as *const _, 4);
-    }
 }
 
 // ---------------------------------------------------------------- 色と自分で描く部品(両方の窓で使う)
@@ -537,21 +539,22 @@ fn common_proc(msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
                 let hdc = HDC(wparam.0 as *mut _);
                 let h = HWND(lparam.0 as *mut _);
                 SetTextColor(hdc, rgb(tint_of(h)));
-                SetBkColor(hdc, rgb(BG));
-                Some(LRESULT(brush(BG).0 as isize))
+                SetBkColor(hdc, rgb(pal().bg));
+                Some(LRESULT(brush(pal().bg).0 as isize))
             }
             WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
                 let hdc = HDC(wparam.0 as *mut _);
                 let h = HWND(lparam.0 as *mut _);
                 if GetDlgCtrlID(h) == ID_SIDE {
-                    SetTextColor(hdc, rgb(TEXT));
-                    SetBkColor(hdc, rgb(BG_SUBTLE));
-                    return Some(LRESULT(brush(BG_SUBTLE).0 as isize));
+                    SetTextColor(hdc, rgb(pal().text));
+                    SetBkColor(hdc, rgb(pal().bg_subtle));
+                    return Some(LRESULT(brush(pal().bg_subtle).0 as isize));
                 }
-                SetTextColor(hdc, rgb(TEXT));
-                SetBkColor(hdc, rgb(0xFFFFFF));
-                Some(LRESULT(brush(0xFFFFFF).0 as isize))
+                SetTextColor(hdc, rgb(pal().text));
+                SetBkColor(hdc, rgb(pal().field));
+                Some(LRESULT(brush(pal().field).0 as isize))
             }
+            WM_NOTIFY => dark::check_custom_draw(lparam),
             WM_DRAWITEM => {
                 let d = &*(lparam.0 as *const DRAWITEMSTRUCT);
                 if d.CtlType == ODT_BUTTON {
@@ -576,7 +579,7 @@ unsafe fn draw_button(d: &DRAWITEMSTRUCT) {
     let pressed = (d.itemState.0 & ODS_SELECTED.0) != 0;
     let focus = (d.itemState.0 & ODS_FOCUS.0) != 0;
     let disabled = (d.itemState.0 & ODS_DISABLED.0) != 0;
-    FillRect(hdc, &r, brush(BG));
+    FillRect(hdc, &r, brush(pal().bg));
     let font = HFONT(SendMessageW(d.hwndItem, WM_GETFONT, None, None).0 as *mut _);
     let old_font = SelectObject(hdc, font.into());
     let mut buf = [0u16; 128];
@@ -586,21 +589,21 @@ unsafe fn draw_button(d: &DRAWITEMSTRUCT) {
     let mut tr = r;
     if id == ID_OPENFILE {
         // リンクの形
-        SetTextColor(hdc, rgb(if pressed { TEXT } else { ACCENT_TEXT }));
+        SetTextColor(hdc, rgb(if pressed { pal().text } else { pal().accent_text }));
         DrawTextW(hdc, &mut label, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
         if focus {
             let mut fr = r;
             DrawTextW(hdc, &mut label, &mut fr, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_CALCRECT);
             fr.top = r.bottom - 3;
             fr.bottom = r.bottom - 1;
-            FillRect(hdc, &fr, brush(ACCENT_TEXT));
+            FillRect(hdc, &fr, brush(pal().accent_text));
         }
     } else {
         let primary = id == ID_SAVE;
         let (fill, border, fg) = if primary {
-            (if pressed { ACCENT_TEXT } else { 0xB85A39 }, if pressed { ACCENT_TEXT } else { 0xB85A39 }, 0xFFFFFF)
+            (if pressed { 0xA9472A } else { 0xB85A39 }, if pressed { 0xA9472A } else { 0xB85A39 }, 0xFFFFFF)
         } else {
-            (if pressed { BG_MUTED } else { 0xFFFFFF }, BORDER, if disabled { TEXT_TERTIARY } else { TEXT })
+            (if pressed { pal().btn_down } else { pal().btn }, pal().border, if disabled { pal().text_tertiary } else { pal().text })
         };
         let pen = CreatePen(PS_SOLID, 1, rgb(if focus { 0x2C84DB } else { border }));
         let old_pen = SelectObject(hdc, pen.into());
@@ -624,16 +627,16 @@ unsafe fn draw_button(d: &DRAWITEMSTRUCT) {
 unsafe fn draw_side_item(d: &DRAWITEMSTRUCT) {
     let hdc = d.hDC;
     let r = d.rcItem;
-    FillRect(hdc, &r, brush(BG_SUBTLE));
+    FillRect(hdc, &r, brush(pal().bg_subtle));
     if d.itemID == u32::MAX {
         return;
     }
     let sel = (d.itemState.0 & ODS_SELECTED.0) != 0;
     let dpi = GetDpiForWindow(d.hwndItem).max(96);
     if sel {
-        let pen = CreatePen(PS_SOLID, 1, rgb(BG_MUTED));
+        let pen = CreatePen(PS_SOLID, 1, rgb(pal().bg_muted));
         let old_pen = SelectObject(hdc, pen.into());
-        let old_brush = SelectObject(hdc, brush(BG_MUTED).into());
+        let old_brush = SelectObject(hdc, brush(pal().bg_muted).into());
         let m = s(4, dpi);
         let _ = RoundRect(hdc, r.left + m, r.top + 2, r.right - m, r.bottom - 2, s(8, dpi), s(8, dpi));
         SelectObject(hdc, old_brush);
@@ -643,7 +646,7 @@ unsafe fn draw_side_item(d: &DRAWITEMSTRUCT) {
     let font = HFONT(SendMessageW(d.hwndItem, WM_GETFONT, None, None).0 as *mut _);
     let old_font = SelectObject(hdc, font.into());
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, rgb(if sel { TEXT } else { TEXT_SECONDARY }));
+    SetTextColor(hdc, rgb(if sel { pal().text } else { pal().text_secondary }));
     let name = tr(SECTIONS.get(d.itemID as usize).copied().unwrap_or(""));
     let mut t: Vec<u16> = name.encode_utf16().collect();
     let mut tr = RECT { left: r.left + s(16, dpi), ..r };
@@ -662,6 +665,7 @@ struct Settings {
     sections: Vec<Vec<Row>>,
     footer: Vec<Row>,
     side: HWND,
+    panel: HWND,
     current: usize,
     orig: Config,
     /// 一覧で足し引きするもの(別名, 自作コマンド, フォルダー, 名前)はここで持つ
@@ -725,11 +729,10 @@ pub fn open(a: OpenArgs) {
     }) else {
         return;
     };
-    caption_color(hwnd);
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
     let mut st = build(hwnd, hinst.into(), a, dpi);
     st.show_section(0);
-    st.layout();
+    dark::apply(hwnd);
     let side = st.side;
     SETTINGS.with(|s| *s.borrow_mut() = Some(st));
     unsafe {
@@ -757,12 +760,158 @@ pub fn set_selection_hotkey(t: &str) {
 pub fn pre_translate(msg: &MSG) -> bool {
     for h in [editor_hwnd(), settings_hwnd()].into_iter().flatten() {
         unsafe {
-            if (msg.hwnd == h || IsChild(h, msg.hwnd).as_bool()) && IsDialogMessageW(h, msg).as_bool() {
+            if msg.hwnd != h && !IsChild(h, msg.hwnd).as_bool() {
+                continue;
+            }
+            if msg.message == WM_MOUSEWHEEL && wheel(h, msg) {
+                return true;
+            }
+            let before = GetFocus();
+            if IsDialogMessageW(h, msg).as_bool() {
+                // Tabなどで見えない部品に移ったら, 見えるところまでスクロールする
+                let f = GetFocus();
+                if msg.message == WM_KEYDOWN && f != before && Some(h) == settings_hwnd() {
+                    ensure_visible(panel_of(h), f);
+                }
                 return true;
             }
         }
     }
     false
+}
+
+// ---------------------------------------------------------------- 中身のスクロール(K43)
+
+/// 枠のすぐ下の部品(コンボボックスの中の入力欄なら, コンボボックス). 枠の中でなければNone
+fn panel_child(panel: HWND, h: HWND) -> Option<HWND> {
+    let mut h = h;
+    while !h.is_invalid() {
+        let p = unsafe { GetAncestor(h, GA_PARENT) };
+        if p == panel {
+            return Some(h);
+        }
+        h = p;
+    }
+    None
+}
+
+fn scroll_info(panel: HWND) -> SCROLLINFO {
+    let mut si = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, ..Default::default() };
+    unsafe {
+        let _ = GetScrollInfo(panel, SB_VERT, &mut si);
+    }
+    si
+}
+
+fn scroll_to(panel: HWND, pos: i32) {
+    let si = scroll_info(panel);
+    let max = (si.nMax - si.nPage as i32 + 1).max(0);
+    let pos = pos.clamp(0, max);
+    if pos == si.nPos {
+        return;
+    }
+    let new = SCROLLINFO { cbSize: si.cbSize, fMask: SIF_POS, nPos: pos, ..Default::default() };
+    unsafe {
+        SetScrollInfo(panel, SB_VERT, &new, true);
+        ScrollWindowEx(panel, 0, si.nPos - pos, None, None, None, None, SW_SCROLLCHILDREN | SW_INVALIDATE | SW_ERASE);
+        let _ = UpdateWindow(panel);
+    }
+}
+
+fn ensure_visible(panel: HWND, focus: HWND) {
+    let Some(h) = panel_child(panel, focus) else { return };
+    unsafe {
+        let (mut r, mut pr) = (RECT::default(), RECT::default());
+        let _ = GetWindowRect(h, &mut r);
+        let _ = GetWindowRect(panel, &mut pr);
+        let m = s(12, GetDpiForWindow(panel).max(96));
+        let pos = scroll_info(panel).nPos;
+        if r.top < pr.top {
+            // 一番上の部品なら見出しまで戻す
+            let to = pos - (pr.top - r.top) - m;
+            scroll_to(panel, if to < m * 5 { 0 } else { to });
+        } else if r.bottom > pr.bottom {
+            scroll_to(panel, pos + (r.bottom - pr.bottom) + m);
+        }
+    }
+}
+
+/// ホイール. 中身の上なら中身をスクロールする(閉じたコンボボックスの値は変えない). 扱ったらtrue
+fn wheel(hwnd: HWND, msg: &MSG) -> bool {
+    let panel = panel_of(hwnd);
+    if panel.is_invalid() {
+        return false;
+    }
+    unsafe {
+        // 開いているコンボボックスの一覧を動かしている
+        if let Some(f) = panel_child(panel, GetFocus()) {
+            if dark::class_name(f) == "ComboBox" && SendMessageW(f, CB_GETDROPPEDSTATE, None, None).0 != 0 {
+                return false;
+            }
+        }
+        let under = WindowFromPoint(msg.pt);
+        if under != panel {
+            let Some(c) = panel_child(panel, under) else { return false };
+            // 中身が多い一覧と表は, それ自身をスクロールする
+            let own = GetWindowLongPtrW(c, GWL_STYLE) as u32 & WS_VSCROLL.0 != 0;
+            if own && ["ListBox", "SysListView32"].contains(&dark::class_name(c).as_str()) {
+                return false;
+            }
+        }
+        let delta = (msg.wParam.0 >> 16) as i16 as i32;
+        let step = s(60, GetDpiForWindow(panel).max(96));
+        scroll_to(panel, scroll_info(panel).nPos - delta * step / 120);
+    }
+    true
+}
+
+extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| panel_inner(hwnd, msg, wparam, lparam))) {
+        Ok(r) => r,
+        Err(_) => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+fn panel_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if let Some(r) = common_proc(msg, wparam, lparam) {
+        return r;
+    }
+    unsafe {
+        match msg {
+            // 部品からの知らせは設定画面で受ける
+            WM_COMMAND | WM_NOTIFY => SendMessageW(GetAncestor(hwnd, GA_PARENT), msg, Some(wparam), Some(lparam)),
+            WM_ERASEBKGND => {
+                let mut rc = RECT::default();
+                let _ = GetClientRect(hwnd, &mut rc);
+                FillRect(HDC(wparam.0 as *mut _), &rc, brush(pal().bg));
+                LRESULT(1)
+            }
+            WM_VSCROLL => {
+                let si = scroll_info(hwnd);
+                let line = s(34, GetDpiForWindow(hwnd).max(96));
+                let pos = match SCROLLBAR_COMMAND(loword(wparam.0) as i32) {
+                    SB_LINEUP => si.nPos - line,
+                    SB_LINEDOWN => si.nPos + line,
+                    SB_PAGEUP => si.nPos - si.nPage as i32,
+                    SB_PAGEDOWN => si.nPos + si.nPage as i32,
+                    SB_THUMBTRACK | SB_THUMBPOSITION => si.nTrackPos,
+                    SB_TOP => 0,
+                    SB_BOTTOM => si.nMax,
+                    _ => si.nPos,
+                };
+                scroll_to(hwnd, pos);
+                LRESULT(0)
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+}
+
+/// テーマが変わったら, 開いている設定画面の色を変える
+pub fn apply_theme() {
+    for h in [settings_hwnd(), editor_hwnd()].into_iter().flatten() {
+        dark::apply(h);
+    }
 }
 
 /// ブラウザーのプロフィールの一覧. `Local State`から名前付きで. 今の設定の値がなければ先頭に足す
@@ -861,6 +1010,10 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         let _ = ShowWindow(side, SW_SHOW);
     }
 
+    let panel = unsafe {
+        CreateWindowExW(WS_EX_CONTROLPARENT, PANEL_CLASS, PCWSTR::null(), WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_VSCROLL, 0, 0, 10, 10, Some(hwnd), None, Some(hinst), None).unwrap_or_default()
+    };
+    m.parent = panel;
     let mut sections: Vec<Vec<Row>> = vec![];
     const L: i32 = 110;
 
@@ -893,7 +1046,6 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         let tc = m.combo(ID_THEME, &theme_labels, false);
         select_key(tc, &THEMES, &c.ui.theme);
         rows.push(row(vec![it(m.label("Theme"), W::Px(L), 26), combo_it(tc, W::Px(300))]));
-        rows.push(row(vec![it(m.hint("Colors of the launcher window. Settings and the tray menu stay light."), W::Fill, 22)]));
         rows.push(row_gap(14, vec![it(m.sub("Prefixes"), W::Fill, 24)]));
         rows.push(row(vec![it(m.hint("Type a prefix and a space to search only one kind, for example \"f report\"."), W::Fill, 22)]));
         let p = &c.prefix;
@@ -1080,9 +1232,10 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         sections.push(rows);
     }
     // 下の帯
+    m.parent = hwnd;
     let open_file = m.button(ID_OPENFILE, "Open config file");
     let err = m.raw(w!("STATIC"), "", (SS_LEFT.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), ID_ERROR, F_BODY);
-    tint(err, DANGER);
+    tint(err, |p| p.danger);
     if let Some(e) = &a.error {
         set_text(err, &format!("{e}. Defaults are shown; Save replaces the file."));
     }
@@ -1104,6 +1257,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         sections,
         footer,
         side,
+        panel,
         current: 0,
         orig: a.config.clone(),
         work: a.config,
@@ -1118,18 +1272,40 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
 impl Settings {
     fn layout(&self) {
         let d = self.dpi;
+        let mut rc = RECT::default();
         unsafe {
-            let _ = SetWindowPos(self.side, None, s(8, d), s(16, d), s(SIDE_W - 16, d), s(CLIENT_H - FOOT_H - 24, d), SWP_NOZORDER | SWP_NOACTIVATE);
+            let _ = GetClientRect(self.hwnd, &mut rc);
+        }
+        let client_h = (rc.bottom as i64 * 96 / d as i64) as i32;
+        // 下の帯の線の上まで
+        let panel_h = (rc.bottom - s(FOOT_H, d)).max(0);
+        unsafe {
+            let _ = SetWindowPos(self.side, None, s(8, d), s(16, d), s(SIDE_W - 16, d), s(client_h - FOOT_H - 24, d), SWP_NOZORDER | SWP_NOACTIVATE);
             SendMessageW(self.side, LB_SETITEMHEIGHT, Some(WPARAM(0)), Some(LPARAM(s(36, d) as isize)));
+            let _ = SetWindowPos(self.panel, None, s(SIDE_W, d), 0, rc.right - s(SIDE_W, d), panel_h, SWP_NOZORDER | SWP_NOACTIVATE);
         }
-        let x = SIDE_W + PAD;
-        let width = CLIENT_W - x - PAD;
-        for rows in &self.sections {
-            place(rows, x, 16, width, d);
+        let width = CLIENT_W - SIDE_W - 2 * PAD;
+        let mut bottom = 0;
+        for (i, rows) in self.sections.iter().enumerate() {
+            let b = place(rows, PAD, 16, width, d);
+            if i == self.current {
+                bottom = b;
+            }
         }
-        place(&self.footer, x - 8, CLIENT_H - FOOT_H + 12, width + 8, d);
+        place(&self.footer, SIDE_W + PAD - 8, client_h - FOOT_H + 12, width + 8, d);
         unsafe {
-            let _ = InvalidateRect(Some(self.hwnd), None, true);
+            // 入りきるときは, スクロールの帯は隠れる
+            let si = SCROLLINFO {
+                cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+                fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
+                nMin: 0,
+                nMax: s(bottom + 4, d) - 1,
+                nPage: panel_h as u32,
+                nPos: 0,
+                ..Default::default()
+            };
+            SetScrollInfo(self.panel, SB_VERT, &si, true);
+            let _ = RedrawWindow(Some(self.hwnd), None, None, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
         }
     }
 
@@ -1149,6 +1325,7 @@ impl Settings {
         unsafe {
             SendMessageW(self.side, LB_SETCURSEL, Some(WPARAM(i)), None);
         }
+        self.layout();
     }
 
     fn set_dpi(&mut self, dpi: u32) {
@@ -1173,22 +1350,22 @@ impl Settings {
             let hdc = BeginPaint(self.hwnd, &mut ps);
             let mut rc = RECT::default();
             let _ = GetClientRect(self.hwnd, &mut rc);
-            FillRect(hdc, &rc, brush(BG));
+            FillRect(hdc, &rc, brush(pal().bg));
             let d = self.dpi;
             let side = RECT { left: 0, top: 0, right: s(SIDE_W, d), bottom: rc.bottom - s(FOOT_H, d) };
-            FillRect(hdc, &side, brush(BG_SUBTLE));
+            FillRect(hdc, &side, brush(pal().bg_subtle));
             let line = RECT { left: 0, top: rc.bottom - s(FOOT_H, d), right: rc.right, bottom: rc.bottom - s(FOOT_H, d) + 1.max(s(1, d)) };
-            FillRect(hdc, &line, brush(BORDER_FAINT));
+            FillRect(hdc, &line, brush(pal().border_faint));
             let _ = EndPaint(self.hwnd, &ps);
         }
     }
 
     fn error(&self, msg: &str) {
-        self.footer_text(msg, DANGER);
+        self.footer_text(msg, |p| p.danger);
     }
 
     /// 下の帯の文字(エラーは赤, 保存できた知らせは薄い色)
-    fn footer_text(&self, msg: &str, color: u32) {
+    fn footer_text(&self, msg: &str, color: Color) {
         let h = item(self.hwnd, ID_ERROR);
         tint(h, color);
         set_text(h, msg);
@@ -1289,7 +1466,7 @@ impl Settings {
         self.orig = c.clone();
         self.work = c;
         self.autostart = on;
-        self.footer_text(if lang_changed { "Saved. Close and open Settings again to change the language." } else { "Saved. The changes are in effect now." }, TEXT_SECONDARY);
+        self.footer_text(if lang_changed { "Saved. Close and open Settings again to change the language." } else { "Saved. The changes are in effect now." }, |p| p.text_secondary);
         vec![]
     }
 
@@ -1772,7 +1949,6 @@ fn open_editor(owner: HWND, kind: EditKind) {
     else {
         return;
     };
-    caption_color(hwnd);
     let mut m = Maker { parent: hwnd, hinst: hinst.into(), made: vec![] };
     let mut rows = vec![];
     const L: i32 = 110;
@@ -1812,13 +1988,14 @@ fn open_editor(owner: HWND, kind: EditKind) {
         }
     }
     let err = m.raw(w!("STATIC"), "", (SS_LEFT.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), E_ERROR, F_BODY);
-    tint(err, DANGER);
+    tint(err, |p| p.danger);
     rows.push(row(vec![gap(L), it(err, W::Fill, 20)]));
     let cancel = m.button(ID_CANCEL, "Cancel");
     let ok = m.button(ID_SAVE, "OK");
     rows.push(row_gap(4, vec![gap(0), It { hwnd: None, w: W::Fill, h: 0, drop: 0 }, it(cancel, W::Px(96), 32), it(ok, W::Px(96), 32)]));
     let fonts = fonts_for(dpi);
     apply_fonts(&m.made, &fonts);
+    dark::apply(hwnd);
     place(&rows, PAD - 8, 16, ED_W - 2 * PAD + 8, dpi);
     for (h, _) in &m.made {
         unsafe {
@@ -1910,6 +2087,12 @@ fn editor_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT
             close_editor();
             LRESULT(0)
         }
+        WM_ERASEBKGND => unsafe {
+            let mut rc = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rc);
+            FillRect(HDC(wparam.0 as *mut _), &rc, brush(pal().bg));
+            LRESULT(1)
+        },
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }

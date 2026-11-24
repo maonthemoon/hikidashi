@@ -1,6 +1,6 @@
 //! 画面の色と大きさ(A5. wakudoriの`Theme.cs`と同じ色).
 //! ランチャーの窓と書く窓は, ライトとダークの色の組(`Palette`)を`pal()`で使い分ける(K39).
-//! 設定画面とトレイのメニューは, 下の定数(ライト)のまま.
+//! 設定画面も同じ色の組を使う(K43. 標準の部品のダークは`dark.rs`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -21,6 +21,11 @@ pub struct Palette {
     pub faint: u32,
     /// 書く窓の蛍光ペン(`==語==`)
     pub highlight: u32,
+    /// 設定画面の入力欄と一覧の地
+    pub field: u32,
+    /// 設定画面のボタン, 押したとき
+    pub btn: u32,
+    pub btn_down: u32,
 }
 
 pub const LIGHT: Palette = Palette {
@@ -37,6 +42,9 @@ pub const LIGHT: Palette = Palette {
     danger: DANGER,
     faint: 0x9C9A92,
     highlight: 0xFBE38E,
+    field: 0xFFFFFF,
+    btn: 0xFFFFFF,
+    btn_down: BG_MUTED,
 };
 
 /// ダーク(暖かい黒. 紹介のページのダークと同じ系統. K39のQ1)
@@ -54,6 +62,9 @@ pub const DARK: Palette = Palette {
     danger: 0xE07A70,
     faint: 0x73726C,
     highlight: 0x6B5A24,
+    field: 0x2B2A28,
+    btn: 0x30302E,
+    btn_down: 0x3D3D3A,
 };
 
 static DARK_ON: AtomicBool = AtomicBool::new(false);
@@ -78,7 +89,11 @@ pub fn set_theme(code: &str) -> bool {
         "light" => false,
         _ => windows_apps_dark(),
     };
-    DARK_ON.swap(dark, Ordering::Relaxed) != dark
+    let changed = DARK_ON.swap(dark, Ordering::Relaxed) != dark;
+    if changed {
+        super::dark::set_app_mode(dark);
+    }
+    changed
 }
 
 /// Windowsの設定の「既定のアプリモード」がダークか

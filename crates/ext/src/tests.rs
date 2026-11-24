@@ -321,3 +321,14 @@ export function search(){ return [{title:"only-b"}]; }"#).unwrap();
     let h = ExtHost::start(vec![b, a]);
     assert_eq!(run(&h, "x", "", None)[0].title, "bundled");
 }
+
+#[test]
+fn 計算のモードで使えるかはmetaで決まる() {
+    let d = tmpdir("calcmeta");
+    fs::write(d.join("a.js"), "export const meta={keyword:'a',calc:true}; export function search(){return []}").unwrap();
+    fs::write(d.join("b.js"), "export const meta={keyword:'b'}; export function search(){return []}").unwrap();
+    fs::write(d.join("rffe.js"), include_str!("../../../extensions/rffe.js")).unwrap();
+    let h = ExtHost::start(vec![d]);
+    let v: Vec<(String, bool)> = h.list().into_iter().map(|m| (m.keyword, m.calc)).collect();
+    assert_eq!(v, vec![("a".into(), true), ("b".into(), false), ("rffe".into(), true)]);
+}
