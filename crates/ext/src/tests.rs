@@ -275,3 +275,28 @@ fn 溜まった古い要求は捨てて最新だけ実行する() {
     assert_eq!(got.last().unwrap(), "q10");
     assert!(got.len() < 10, "{:?}", got);
 }
+
+#[test]
+fn コマンドフレームのパリティはsaを含む() {
+    let h = rffe_host();
+    // SA 0x7(1が3つ): 12ビット中の1は7個なのでパリティ0
+    let r = run(&h, "rffe", "7 1C 38", None);
+    assert_eq!(r[0].title, "0111 010 11100 0 00111000 0");
+    let back = run(&h, "rffe", &r[0].copy, None);
+    assert!(back[0].subtitle.ends_with("parity OK"), "{}", back[0].subtitle);
+    // SAを除いた計算(パリティ1)のものはNG
+    let bad = run(&h, "rffe", "0111010111001001110000", None);
+    assert!(bad[0].subtitle.ends_with("parity NG"), "{}", bad[0].subtitle);
+    // Register 0 Write: 0111 1 0111000 -> 1は7個 -> 0
+    let r = run(&h, "rffe", "7 38", None);
+    assert_eq!(r[0].title, "0111 10111000 0");
+    assert!(run(&h, "rffe", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
+    // Extended: 0111 0000 0000 -> 1は3個 -> 0
+    let r = run(&h, "rffe", "7 40 12", None);
+    assert!(r[0].title.starts_with("0111 00000000 0 "), "{}", r[0].title);
+    assert!(run(&h, "rffe", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
+    // Long: 0111 00110000 -> 1は5個 -> 0
+    let r = run(&h, "rffe", "7 1234 AB", None);
+    assert!(r[0].title.starts_with("0111 00110000 0 "), "{}", r[0].title);
+    assert!(run(&h, "rffe", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
+}

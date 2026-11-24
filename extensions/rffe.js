@@ -10,7 +10,7 @@ const PWR_MODES = ["Active", "Startup", "Low Power", "Reserved"];
 const bin = (n, w) => n.toString(2).padStart(w, "0");
 const hex = (n, w) => "0x" + n.toString(16).toUpperCase().padStart(w || 1, "0");
 const ones = (s) => s.split("").filter((c) => c === "1").length;
-// 奇数パリティ: パリティを含めた1の数が奇数になる値
+// 奇数パリティ: パリティを含めた1の数が奇数になる値. コマンドフレームのパリティはSA(4ビット)を含む12ビットにかける
 const parityOf = (s) => (ones(s) % 2 === 0 ? "1" : "0");
 
 function pmTrig(d) {
@@ -40,18 +40,19 @@ function decode(bits) {
   };
   let desc;
   try {
-    const sa = parseInt(take(4, "SA"), 2);
+    const sab = take(4, "SA");
+    const sa = parseInt(sab, 2);
     const head = `SA ${hex(sa)}`;
     if (bits[pos] === "1") {
       // Register 0 Write: SA, 1, データ7ビット, パリティ
       const body = take(8, "1+data[6:0]");
-      par("cmd", body);
+      par("cmd", sab + body);
       desc = `${head} · Register 0 Write · 0x00 ← ${hex(parseInt(body.slice(1), 2), 2)}`;
     } else if (bits.substr(pos, 3) === "010" || bits.substr(pos, 3) === "011") {
       const write = bits.substr(pos, 3) === "010";
       const cmd = take(3, "CMD");
       const abits = take(5, "ADDR");
-      par("cmd", cmd + abits);
+      par("cmd", sab + cmd + abits);
       const addr = parseInt(abits, 2);
       const label = regLabel(addr, 2);
       if (write) {
@@ -70,7 +71,7 @@ function decode(bits) {
     } else if (bits.substr(pos, 4) === "0000" || bits.substr(pos, 4) === "0010") {
       const write = bits.substr(pos, 4) === "0000";
       const cmd = take(8, "CMD+BC");
-      par("cmd", cmd);
+      par("cmd", sab + cmd);
       const n = parseInt(cmd.slice(4), 2) + 1;
       const ab = take(8, "ADDR");
       par("addr", ab);
@@ -80,7 +81,7 @@ function decode(bits) {
     } else if (bits.substr(pos, 5) === "00110" || bits.substr(pos, 5) === "00111") {
       const write = bits.substr(pos, 5) === "00110";
       const cmd = take(8, "CMD+BC");
-      par("cmd", cmd);
+      par("cmd", sab + cmd);
       const n = parseInt(cmd.slice(5), 2) + 1;
       const hi = take(8, "ADDR[15:8]");
       par("addr hi", hi);
@@ -136,7 +137,7 @@ function encode(tokens) {
   };
   if (vals.length === 2) {
     if (vals[1].v > 0x7f) throw "Register 0 Writeのデータは7ビットまで(0x7F以下)";
-    put("1" + bin(vals[1].v, 7));
+    g.push("1" + bin(vals[1].v, 7), parityOf(g[0] + "1" + bin(vals[1].v, 7)));
     return g;
   }
   const addr = vals[1].v;
@@ -150,18 +151,18 @@ function encode(tokens) {
     if (bytes.some((b) => b > 0xff)) throw "データは1バイトずつ(0xFF以下)で書く";
   }
   if (vals.length === 3 && bytes.length === 1 && addr <= 0x1f) {
-    g.push("010", bin(addr, 5), parityOf("010" + bin(addr, 5)), bin(bytes[0], 8), parityOf(bin(bytes[0], 8)));
+    g.push("010", bin(addr, 5), parityOf(g[0] + "010" + bin(addr, 5)), bin(bytes[0], 8), parityOf(bin(bytes[0], 8)));
     return g;
   }
   if (addr > 0xffff) throw "アドレスは0xFFFFまで";
   const n = bytes.length;
   if (addr <= 0xff) {
     if (n > 16) throw "Extended Register Writeは16バイトまで";
-    put("0000" + bin(n - 1, 4));
+    g.push("0000" + bin(n - 1, 4), parityOf(g[0] + "0000" + bin(n - 1, 4)));
     put(bin(addr, 8));
   } else {
     if (n > 8) throw "Extended Register Write Longは8バイトまで";
-    put("00110" + bin(n - 1, 3));
+    g.push("00110" + bin(n - 1, 3), parityOf(g[0] + "00110" + bin(n - 1, 3)));
     put(bin(addr >> 8, 8));
     put(bin(addr & 0xff, 8));
   }
