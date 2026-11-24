@@ -124,6 +124,8 @@ pub struct Prefix {
     pub google: String,
     /// すぐ長い質問の窓にする(K24)
     pub chatgpt: String,
+    /// 計算(2026-11-25. `= 0x1F`). 計算の行はこの接頭辞のときだけ出す
+    pub calc: String,
 }
 
 /// Enterに修飾キーを足したときにすること. 値は`Ctrl+Enter`のような形. 空ならその操作はキーでは行わない.
@@ -367,7 +369,7 @@ impl Default for Config {
 
 impl Default for Prefix {
     fn default() -> Self {
-        Prefix { app: "a".into(), file: "f".into(), bookmark: "b".into(), kill: "k".into(), wsl: "w".into(), boxdrive: "bx".into(), google: "g".into(), chatgpt: "c".into() }
+        Prefix { app: "a".into(), file: "f".into(), bookmark: "b".into(), kill: "k".into(), wsl: "w".into(), boxdrive: "bx".into(), google: "g".into(), chatgpt: "c".into(), calc: "=".into() }
     }
 }
 
@@ -504,6 +506,7 @@ impl Config {
             (self.prefix.boxdrive.clone(), Mode::Box),
             (self.prefix.google.clone(), Mode::Google),
             (self.prefix.chatgpt.clone(), Mode::ChatGpt),
+            (self.prefix.calc.clone(), Mode::Calc),
         ];
         v.retain(|(p, _)| !p.is_empty());
         v.sort_by_key(|(p, _)| std::cmp::Reverse(p.len()));
@@ -566,9 +569,10 @@ pub fn to_toml(c: &Config) -> String {
     line("# Prefixes to search only one kind. Type the letter and a space, e.g. \"f report\".");
     line("# Box is searched only with its prefix, e.g. \"bx report\" (it has too many files to mix in).");
     line("# wsl searches the home folder in WSL. chatgpt opens the window for a long question right away.");
+    line("# calc is the only place where calculations are shown, e.g. \"= 0x1F\", \"= 10dBm\", \"= (12+3)*4\".");
     line("[prefix]");
     let p = &c.prefix;
-    for (k, v) in [("app", &p.app), ("file", &p.file), ("bookmark", &p.bookmark), ("kill", &p.kill), ("wsl", &p.wsl), ("box", &p.boxdrive), ("google", &p.google), ("chatgpt", &p.chatgpt)] {
+    for (k, v) in [("app", &p.app), ("file", &p.file), ("bookmark", &p.bookmark), ("kill", &p.kill), ("wsl", &p.wsl), ("box", &p.boxdrive), ("google", &p.google), ("chatgpt", &p.chatgpt), ("calc", &p.calc)] {
         line(&format!("{k} = {}", q(v)));
     }
     line("");
@@ -710,7 +714,7 @@ impl Config {
     /// 設定画面で保存する前の確かめ. 問題があれば画面に出す文(英語)
     pub fn validate(&self) -> Result<(), String> {
         let p = &self.prefix;
-        let prefixes = [("Apps", &p.app), ("Files", &p.file), ("Bookmarks", &p.bookmark), ("Kill", &p.kill), ("WSL", &p.wsl), ("Box", &p.boxdrive), ("Google", &p.google), ("ChatGPT", &p.chatgpt)];
+        let prefixes = [("Apps", &p.app), ("Files", &p.file), ("Bookmarks", &p.bookmark), ("Kill", &p.kill), ("WSL", &p.wsl), ("Box", &p.boxdrive), ("Google", &p.google), ("ChatGPT", &p.chatgpt), ("Calc", &p.calc)];
         for (i, (label, v)) in prefixes.iter().enumerate() {
             if has_space(v) {
                 return Err(format!("Prefix for {label} cannot contain spaces."));

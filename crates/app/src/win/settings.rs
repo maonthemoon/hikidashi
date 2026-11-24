@@ -51,7 +51,7 @@ const ID_HOTKEY_CHANGE: i32 = 101;
 const ID_AUTOSTART: i32 = 102;
 const ID_LANG: i32 = 103;
 const ID_THEME: i32 = 104;
-const ID_PFX: i32 = 110; // 110〜117
+const ID_PFX: i32 = 110; // 110〜118
 const ID_KEYS: i32 = 120; // 120〜124
 const ID_ROOTS: i32 = 200;
 const ID_ROOTS_ADD: i32 = 201;
@@ -111,7 +111,7 @@ const E_ERROR: i32 = 14;
 const E_VALUE_LABEL: i32 = 15;
 
 const SECTIONS: [&str; 8] = ["General", "Search", "Box and WSL", "Apps", "Tab menu", "Web", "Aliases", "Commands"];
-const PREFIX_LABELS: [&str; 8] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT"];
+const PREFIX_LABELS: [&str; 9] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT", "Calc"];
 /// 言語(K24). どちらの言語でも同じ文字で出す
 const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows / Windowsに合わせる"), ("ja", "日本語"), ("en", "English")];
 /// ランチャーの窓と書く窓の色(K39). 設定画面とトレイのメニューはライトのまま
@@ -872,7 +872,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         rows.push(row_gap(14, vec![it(m.sub("Prefixes"), W::Fill, 24)]));
         rows.push(row(vec![it(m.hint("Type a prefix and a space to search only one kind, for example \"f report\"."), W::Fill, 22)]));
         let p = &c.prefix;
-        let vals = [&p.app, &p.file, &p.bookmark, &p.kill, &p.wsl, &p.boxdrive, &p.google, &p.chatgpt];
+        let vals = [&p.app, &p.file, &p.bookmark, &p.kill, &p.wsl, &p.boxdrive, &p.google, &p.chatgpt, &p.calc];
         let mut items = vec![];
         for (i, (label, v)) in PREFIX_LABELS.iter().zip(vals).enumerate() {
             if i > 0 && i % 3 == 0 {
@@ -1182,6 +1182,7 @@ impl Settings {
         c.prefix.boxdrive = t(ID_PFX + 5);
         c.prefix.google = t(ID_PFX + 6);
         c.prefix.chatgpt = t(ID_PFX + 7);
+        c.prefix.calc = t(ID_PFX + 8);
         c.ui.language = selected_key(item(h, ID_LANG), &LANGS);
         c.ui.theme = selected_key(item(h, ID_THEME), &THEMES);
         for (k, kind) in MENU_KINDS.iter().enumerate() {

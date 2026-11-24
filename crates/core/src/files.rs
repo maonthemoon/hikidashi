@@ -541,8 +541,9 @@ mod tests {
         assert_eq!(names(&t, "mem in:案件 modified:30d"), vec!["memo.docx"]);
     }
 
-    /// 検索の速さ. 10万件(debugのcargo testで30秒に収めるため)で, 前から1文字ずつ打つように検索する(29回).
-    /// Raspberry Piのdebugビルドの実測: 1回あたりp95が0.19〜0.24秒, 最大0.25秒. 上限はp95の約3倍(0.7秒). 参考: 50万件はdebugでp95 1.9秒, releaseでp95 0.10秒(最大0.16秒).
+    /// 検索の速さ. 50万件で, 前から1文字ずつ打つように検索する(29回). `[profile.test] opt-level = 2`(ルートのCargo.toml)で最適化している.
+    /// Raspberry Piでの実測: 1回あたりp95が0.11〜0.12秒(ほかの処理と重なると0.25秒), 最大0.13〜0.28秒. 上限はp95の約3倍(0.4秒), 最大は0.8秒.
+    /// 参考: 最適化なしのdebugだと同じ50万件でp95が1.9秒, releaseだと0.097秒(最大0.16秒).
     #[test]
     fn typing_speed() {
         let words = ["report", "会議資料", "proposal", "budget", "定例", "design", "spec", "テスト", "image", "data", "kaigi", "mitsumori", "pwpt", "見積書", "plan", "2026", "測定結果"];
@@ -557,7 +558,7 @@ mod tests {
             seed ^= seed << 17;
             seed
         };
-        const COUNT: u32 = 100_000;
+        const COUNT: u32 = 500_000;
         for i in 0..COUNT {
             let p = dirs[(rnd() as usize) % dirs.len()];
             if i % 20 == 0 {
@@ -587,7 +588,7 @@ mod tests {
         let p95 = times[((times.len() as f64 * 0.95).ceil() as usize).saturating_sub(1)];
         let max = *times.last().unwrap();
         println!("typing_speed: n={}, p95={:.3}s, max={:.3}s", times.len(), p95, max);
-        assert!(p95 < 0.7, "p95 {p95:.3}s");
-        assert!(max < 1.0, "max {max:.3}s");
+        assert!(p95 < 0.4, "p95 {p95:.3}s");
+        assert!(max < 0.8, "max {max:.3}s");
     }
 }

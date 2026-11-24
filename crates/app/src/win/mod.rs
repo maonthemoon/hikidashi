@@ -257,6 +257,7 @@ impl App {
             Mode::Box => &p.boxdrive,
             Mode::Google => &p.google,
             Mode::ChatGpt => &p.chatgpt,
+            Mode::Calc => &p.calc,
             Mode::All => "",
         }
     }
