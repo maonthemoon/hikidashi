@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "THIRD-PARTY-NOTICES.txt"
 TARGET = "x86_64-pc-windows-gnu"
-OWN = {"hikidashi", "hikidashi-core"}
+OWN = {"hikidashi", "hikidashi-core", "hikidashi-ext"}
 # 2つ以上から選べるときはMITを選ぶ(本文が短く, 著作権者の行がある)
 PREFER = ["MIT", "Zlib", "Apache-2.0"]
 OFL = Path(os.environ.get("ANTHROPIC_HTML", Path.home() / ".claude/skills/anthropic-html")) / "assets/fonts/OFL.txt"
