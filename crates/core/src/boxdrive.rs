@@ -298,7 +298,7 @@ pub fn read_index(conn: &Connection, root: &str, excludes: &Excludes, skip_paths
 
     let mut table = FileTable::new('\\');
     let root_path = root.trim_end_matches('\\');
-    let root_id = table.push(None, root_path, true);
+    let root_id = table.push(None, root_path, true, 0);
     let mut files: HashMap<u64, u32> = HashMap::new();
     let mut folders: HashMap<u64, u32> = HashMap::new();
     let mut visited: HashSet<usize> = HashSet::new();
@@ -320,7 +320,7 @@ pub fn read_index(conn: &Connection, root: &str, excludes: &Excludes, skip_paths
                 continue;
             }
             let dir = is_folder(i);
-            let id = table.push(Some(tid), &r.name, dir);
+            let id = table.push(Some(tid), &r.name, dir, 0);
             stats.placed += 1;
             if let Ok(b) = r.box_id.parse::<u64>() {
                 if dir { folders.insert(b, id) } else { files.insert(b, id) };

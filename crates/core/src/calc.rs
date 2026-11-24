@@ -1,4 +1,4 @@
-//! 進数の変換とRFの計算(H5, K6). 結果の行は`Enter`でコピーする.
+//! 進数の変換, RFの計算, ふつうの計算(四則演算)(H5, K6). 結果の行は`Enter`でコピーする.
 
 use std::f64::consts::PI;
 
@@ -314,6 +314,128 @@ fn rf(s: &str) -> Option<Calc> {
     None
 }
 
+/// 四則演算の式を読む再帰下降の構文解析. `+ - * / ^`, 括弧, 小数, 単項の`+`と`-`, 後置の`%`.
+/// `^`は右結合で単項マイナスより強い(`-2^2`は-4). `%`は100で割るだけ.
+struct Arith<'a> {
+    s: &'a [u8],
+    i: usize,
+}
+
+impl Arith<'_> {
+    fn peek(&mut self) -> Option<u8> {
+        while self.s.get(self.i).is_some_and(|c| c.is_ascii_whitespace()) {
+            self.i += 1;
+        }
+        self.s.get(self.i).copied()
+    }
+
+    fn expr(&mut self) -> Option<f64> {
+        let mut v = self.term()?;
+        while let Some(c @ (b'+' | b'-')) = self.peek() {
+            self.i += 1;
+            let r = self.term()?;
+            v = if c == b'+' { v + r } else { v - r };
+        }
+        Some(v)
+    }
+
+    fn term(&mut self) -> Option<f64> {
+        let mut v = self.unary()?;
+        while let Some(c @ (b'*' | b'/')) = self.peek() {
+            self.i += 1;
+            let r = self.unary()?;
+            v = if c == b'*' { v * r } else { v / r };
+        }
+        Some(v)
+    }
+
+    fn unary(&mut self) -> Option<f64> {
+        match self.peek()? {
+            b'-' => {
+                self.i += 1;
+                Some(-self.unary()?)
+            }
+            b'+' => {
+                self.i += 1;
+                self.unary()
+            }
+            _ => self.power(),
+        }
+    }
+
+    fn power(&mut self) -> Option<f64> {
+        let base = self.postfix()?;
+        if self.peek() == Some(b'^') {
+            self.i += 1;
+            let e = self.unary()?;
+            return Some(base.powf(e));
+        }
+        Some(base)
+    }
+
+    fn postfix(&mut self) -> Option<f64> {
+        let mut v = self.primary()?;
+        while self.peek() == Some(b'%') {
+            self.i += 1;
+            v /= 100.0;
+        }
+        Some(v)
+    }
+
+    fn primary(&mut self) -> Option<f64> {
+        if self.peek()? == b'(' {
+            self.i += 1;
+            let v = self.expr()?;
+            if self.peek()? != b')' {
+                return None;
+            }
+            self.i += 1;
+            return Some(v);
+        }
+        let start = self.i;
+        while self.s.get(self.i).is_some_and(|c| c.is_ascii_digit() || *c == b'.') {
+            self.i += 1;
+        }
+        std::str::from_utf8(&self.s[start..self.i]).ok()?.parse().ok()
+    }
+}
+
+/// 計算結果の表示. 整数はそのまま, 小数は有効数字10桁で末尾の0を消す.
+fn fmt_num(v: f64) -> String {
+    if v == 0.0 {
+        return "0".into();
+    }
+    if v.abs() >= 1e21 {
+        return format!("{v:e}");
+    }
+    if v == v.trunc() {
+        return format!("{v:.0}");
+    }
+    let digits = (9 - v.abs().log10().floor() as i32).clamp(0, 40) as usize;
+    let s = format!("{v:.digits$}");
+    let s = if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
+    if s == "-0" { "0".into() } else { s }
+}
+
+/// ふつうの計算. 演算子か括弧を含み, 数字・演算子・括弧・空白・小数点だけでできているときだけ答える.
+/// 数字だけ(`1187`)や先頭のマイナスだけ(`-5`)は計算の形にしない. 解けない式や0での割り算はNone.
+fn arith(s: &str) -> Option<Calc> {
+    if !s.chars().all(|c| c.is_ascii_digit() || c.is_ascii_whitespace() || "+-*/^()%.".contains(c)) {
+        return None;
+    }
+    let body = s.trim();
+    let has_op = body.char_indices().any(|(i, c)| "+*/^()%".contains(c) || (c == '-' && i > 0));
+    if !has_op {
+        return None;
+    }
+    let mut p = Arith { s: body.as_bytes(), i: 0 };
+    let v = p.expr()?;
+    if p.peek().is_some() || !v.is_finite() {
+        return None;
+    }
+    Some(Calc { rows: vec![row(fmt_num(v), "Result")], top: false })
+}
+
 /// 入力が計算の形なら結果を返す.
 pub fn evaluate(input: &str) -> Option<Calc> {
     let t = input.trim();
@@ -321,7 +443,8 @@ pub fn evaluate(input: &str) -> Option<Calc> {
         return None;
     }
     // `3dB`が16進数(0x3DB)にならないよう, 単位の付いたRFの計算を先に見る
-    rf(t).or_else(|| radix(t))
+    // ふつうの計算はそのあとに見る
+    rf(t).or_else(|| radix(t)).or_else(|| arith(t))
 }
 
 #[cfg(test)]
@@ -402,6 +525,38 @@ mod tests {
         let c = evaluate("vswr 10 il 2dB").unwrap();
         assert!(c.rows[0].note.contains("output VSWR 10 (RL 1.74 dB)"), "{}", c.rows[0].note);
         assert!(evaluate("vswr 0.5 il 2").is_none());
+    }
+
+    #[test]
+    fn arithmetic() {
+        assert_eq!(vals("(12+3)*4"), vec!["60"]);
+        assert_eq!(vals("2^10"), vec!["1024"]);
+        assert_eq!(vals("1500*1.1"), vec!["1650"]);
+        assert_eq!(vals("200*15%"), vec!["30"]);
+        assert_eq!(vals("15%+1"), vec!["1.15"]);
+        assert_eq!(vals("1/3"), vec!["0.3333333333"]);
+        assert_eq!(vals("-(2+3)"), vec!["-5"]);
+        assert_eq!(vals("-2^2"), vec!["-4"]);
+        assert_eq!(vals("2 ^ 3 ^ 2"), vec!["512"]);
+        assert_eq!(vals("0.1+0.2"), vec!["0.3"]);
+        let c = evaluate("1500*1.1").unwrap();
+        assert_eq!(c.rows[0].copy, c.rows[0].value);
+    }
+
+    #[test]
+    fn arithmetic_rejects() {
+        assert!(evaluate("1/0").is_none());
+        assert!(evaluate("(1+2").is_none());
+        assert!(evaluate("1+").is_none());
+        assert!(evaluate("-5").is_none());
+        assert!(evaluate("1.5").is_none());
+        assert!(evaluate("0x1+1").is_none());
+        assert!(evaluate("3dB+1").is_none());
+        // 進数と文字はそのまま
+        assert_eq!(vals("1187"), vec!["0x4A3", "0100 1010 0011"]);
+        assert!(evaluate("each").is_none());
+        // 進数の1187と同じ扱い(一致の下)
+        assert!(!evaluate("(1+2)*3").unwrap().top);
     }
 
     #[test]
