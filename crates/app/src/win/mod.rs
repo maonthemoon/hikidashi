@@ -6,6 +6,7 @@ mod clipboard;
 mod compose;
 mod diag;
 mod dict;
+mod ext;
 mod icons;
 mod i18n;
 mod indexer;
@@ -208,6 +209,8 @@ pub struct App {
     recent_view: bool,
     script_all: String,
     script_result: Arc<std::sync::Mutex<Option<(u64, RunOutcome)>>>,
+    /// JavaScriptの拡張
+    ext: ext::Ext,
     /// 整える頼みが来ている(文字が変わった, カーソルが動いた)
     restyle_text: bool,
     restyle_sel: bool,
@@ -398,6 +401,7 @@ impl App {
         self.confirm = None;
         self.script_view = false;
         self.recent_view = false;
+        self.ext.begin_refresh();
         let input = self.input();
         let text = self.edit_text();
         if text.trim() == ":stats" {
@@ -468,7 +472,7 @@ impl App {
             self.recent_view = true;
             return Some(self.with_ctx(&[], |ctx| hikidashi_core::recent::rows(ctx)));
         }
-        let (i, rest) = cscripts::list_target(&self.scripts, text)?;
+        let Some((i, rest)) = cscripts::list_target(&self.scripts, text) else { return self.ext_rows(text) };
         let rest = rest.to_string();
         let s = self.scripts.get(i)?.clone();
         scripts::ensure_list(&self.lists, &s, self.hwnd);
@@ -672,6 +676,7 @@ impl App {
         self.processes_fresh = false;
         self.reload_bookmarks();
         self.check_scripts();
+        self.reload_ext();
         // サイトのアイコンは, ブラウザーで開くと増えるので30分ごとに読み直す
         if self.favicons_at.is_none_or(|t| t.elapsed().as_secs() > 30 * 60) {
             self.load_favicons();
@@ -708,6 +713,7 @@ impl App {
 
     fn hide(&mut self) {
         self.script_view = false;
+        self.ext.reset();
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_HIDE);
             let _ = KillTimer(Some(self.hwnd), TIMER_QUICK);
@@ -1904,6 +1910,9 @@ impl App {
         }
         let admin = action == Some(KeyAction::Admin);
         self.wait_pending();
+        if !self.wait_ext() {
+            return;
+        }
         // 最近のものは, ↓かクリックで選ぶまで開かない
         if self.nothing_selected() {
             return;
@@ -2053,6 +2062,9 @@ impl App {
 
     fn open_menu(&mut self) {
         self.wait_pending();
+        if !self.wait_ext() {
+            return;
+        }
         if self.nothing_selected() {
             return;
         }
@@ -2062,6 +2074,16 @@ impl App {
         let mut items = Vec::new();
         let path = self.row_path(&row);
         match &row.action {
+            // 拡張の行: Copy, urlがあれば Open in browser と Copy URL
+            _ if self.ext.view => {
+                if let Some(c) = self.ext.copies.get(self.sel).filter(|c| !c.is_empty()) {
+                    items.push(mi("Copy", g::COPY, MenuAct::CopyText(c.clone())));
+                }
+                if let Action::OpenUrl(u) = &row.action {
+                    items.push(mi("Open in browser", g::GLOBE, MenuAct::Open));
+                    items.push(mi("Copy URL", g::COPY, MenuAct::CopyText(u.clone())));
+                }
+            }
             Action::File { .. } | Action::Path(_) | Action::BoxUrl { local: Some(_), .. } => {
                 let is_dir = self.row_is_dir(&row);
                 // 出すものは設定の`[menu]`で種類ごとに選ぶ(K24). Copy WSL pathはWSLが入っているときだけ
@@ -2570,6 +2592,51 @@ impl App {
         self.set_rows(rows, vec![]);
     }
 
+    /// 拡張のkeywordにできない名前(接頭辞とスクリプトのkeyword. 小文字)
+    fn ext_taken(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.config.prefixes().into_iter().map(|(p, _)| p.trim().to_lowercase()).collect();
+        v.extend(self.scripts.iter().filter_map(|s| s.keyword.as_ref().map(|k| k.to_lowercase())));
+        v
+    }
+
+    /// 窓を出すたびに拡張を読み直す
+    fn reload_ext(&mut self) {
+        let taken = self.ext_taken();
+        self.ext.reload(&taken);
+    }
+
+    /// `keyword `で始まる入力なら拡張の行(結果が届くまでは前の行か`Loading…`)
+    fn ext_rows(&mut self, text: &str) -> Option<Vec<Row>> {
+        let taken = self.ext_taken();
+        let (hwnd, gen) = (self.hwnd, self.gen);
+        self.ext.rows(text, &taken, hwnd, gen, &self.rows)
+    }
+
+    /// 拡張の結果が届いた. 今の入力の結果なら出す
+    fn on_ext(&mut self) {
+        if !self.visible() || self.composing() || self.mode != Mode::All {
+            return;
+        }
+        if let Some(rows) = self.ext.take(self.gen) {
+            self.set_rows(rows, vec![]);
+        }
+    }
+
+    /// 打ってすぐEnterを押したとき, 拡張の結果がまだなら少し待つ. 届かなければfalse(何もしない)
+    fn wait_ext(&mut self) -> bool {
+        let Some(g) = self.ext.pending() else { return true };
+        if g != self.gen {
+            return false;
+        }
+        match self.ext.wait(g) {
+            Some(rows) => {
+                self.set_rows(rows, vec![]);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// `list`のスクリプトの結果がそろった. その一覧を見ているなら出し直す
     fn on_script_list(&mut self) {
         if self.visible() && !self.composing() && !self.script_view && self.menu.is_none() && self.mode == Mode::All {
@@ -2657,6 +2724,10 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             }
             scripts::WM_APP_SCRIPT => {
                 app.on_script_done();
+                Some(LRESULT(0))
+            }
+            ext::WM_APP_EXT => {
+                app.on_ext();
                 Some(LRESULT(0))
             }
             scripts::WM_APP_SCRIPT_LIST => {
@@ -3167,6 +3238,7 @@ pub fn run() {
         recent_view: false,
         script_all: String::new(),
         script_result: Arc::new(std::sync::Mutex::new(None)),
+        ext: ext::Ext::new(),
         folders: Catalog::new(builtin::folder_items(
             &builtin::FOLDER_VARS
                 .iter()
@@ -3226,6 +3298,7 @@ pub fn run() {
         app.set_dpi(96);
         system::tray_add(hwnd);
         indexer::start(&app.shared, hwnd);
+        app.ext.start();
         diag::start(hwnd);
         app.icons.start(hwnd);
         app.reload_bookmarks();

@@ -83,8 +83,8 @@ pub struct ExtHost {
 
 impl ExtHost {
     /// 専用のスレッドを立て, フォルダーの`*.js`を読む(読み終わるまで待つ).
-    /// フォルダーがなくてもよい(拡張が0個になる).
-    pub fn start(dir: PathBuf) -> ExtHost {
+    /// フォルダーは先のものほど優先(同じファイル名は先のものを使う). フォルダーがなくてもよい(拡張が0個になる).
+    pub fn start(dirs: Vec<PathBuf>) -> ExtHost {
         let (tx, rx) = channel();
         let shared = Arc::new(Mutex::new(Shared::default()));
         let latest = Arc::new(AtomicU64::new(0));
@@ -92,7 +92,7 @@ impl ExtHost {
         let (s, l) = (shared.clone(), latest.clone());
         let join = std::thread::Builder::new()
             .name("hikidashi-ext".into())
-            .spawn(move || worker(dir, rx, s, l, ready_tx))
+            .spawn(move || worker(dirs, rx, s, l, ready_tx))
             .expect("拡張のスレッドを立てられない");
         let _ = ready_rx.recv();
         ExtHost { tx, shared, latest, join: Some(join) }
@@ -192,7 +192,7 @@ struct State {
     failed: HashMap<String, (Stamp, String)>,
 }
 
-fn worker(dir: PathBuf, rx: Receiver<Cmd>, shared: Arc<Mutex<Shared>>, latest: Arc<AtomicU64>, ready: Sender<()>) {
+fn worker(dirs: Vec<PathBuf>, rx: Receiver<Cmd>, shared: Arc<Mutex<Shared>>, latest: Arc<AtomicU64>, ready: Sender<()>) {
     let guard = Arc::new(Guard { base: Instant::now(), deadline: AtomicU64::new(0), fired: AtomicBool::new(false) });
     let rt = Runtime::new().expect("QuickJSを初期化できない");
     rt.set_memory_limit(MEMORY_LIMIT);
@@ -201,7 +201,7 @@ fn worker(dir: PathBuf, rx: Receiver<Cmd>, shared: Arc<Mutex<Shared>>, latest: A
     // stateはrtより後に作る(= 先に捨てる)
     let mut st = State::default();
 
-    reload_all(&rt, &guard, &dir, &mut st, &shared);
+    reload_all(&rt, &guard, &dirs, &mut st, &shared);
     let _ = ready.send(());
 
     loop {
@@ -229,7 +229,7 @@ fn worker(dir: PathBuf, rx: Receiver<Cmd>, shared: Arc<Mutex<Shared>>, latest: A
             break;
         }
         if want_reload {
-            reload_all(&rt, &guard, &dir, &mut st, &shared);
+            reload_all(&rt, &guard, &dirs, &mut st, &shared);
         }
         for a in acks {
             let _ = a.send(());
@@ -245,14 +245,24 @@ fn worker(dir: PathBuf, rx: Receiver<Cmd>, shared: Arc<Mutex<Shared>>, latest: A
     st.exts.clear();
 }
 
-fn reload_all(rt: &Runtime, guard: &Guard, dir: &Path, st: &mut State, shared: &Mutex<Shared>) {
+fn reload_all(rt: &Runtime, guard: &Guard, dirs: &[PathBuf], st: &mut State, shared: &Mutex<Shared>) {
     let mut files: Vec<(String, PathBuf)> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for e in rd.flatten() {
-            let p = e.path();
-            let is_js = p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("js")) == Some(true);
-            if let (true, Some(stem)) = (is_js, p.file_stem().and_then(|s| s.to_str())) {
-                files.push((stem.to_string(), p.clone()));
+    // 先のフォルダーから順に見て, 同じ名前は最初に見つけたものだけ使う
+    for dir in dirs {
+        let mut found: Vec<(String, PathBuf)> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                let is_js = p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("js")) == Some(true);
+                if let (true, Some(stem)) = (is_js, p.file_stem().and_then(|s| s.to_str())) {
+                    found.push((stem.to_string(), p.clone()));
+                }
+            }
+        }
+        found.sort();
+        for (n, p) in found {
+            if !files.iter().any(|(m, _)| *m == n) {
+                files.push((n, p));
             }
         }
     }

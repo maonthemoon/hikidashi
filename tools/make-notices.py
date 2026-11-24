@@ -64,6 +64,11 @@ def license_text(pkg, lic):
     files = sorted(f for f in d.iterdir() if f.is_file() and f.name.upper().startswith(("LICENSE", "LICENCE", "COPYING")))
     key = {"MIT": "MIT", "Apache-2.0": "APACHE", "Zlib": "ZLIB"}.get(lic, lic.upper())
     hit = [f for f in files if key in f.name.upper()] or ([files[0]] if len(files) == 1 else [])
+    if not files and pkg["name"].startswith("rquickjs-"):
+        # rquickjs-core, rquickjs-sysはライセンスの本文を持たない. 同じリポジトリのrquickjsのものを使う
+        sib = d.parent / f"rquickjs-{pkg['version']}" / "LICENSE"
+        if sib.is_file():
+            return sib.read_text(encoding="utf-8").strip()
     if not hit:
         sys.exit(f"{pkg['name']}: {lic}のライセンスファイルが見つからない({[f.name for f in files]})")
     return hit[0].read_text(encoding="utf-8").strip()
@@ -90,6 +95,12 @@ def main():
         for name, lic, orig, repo in users:
             out.append(f"{name}  ({lic}; offered as {orig})  {repo}".rstrip())
         out += [bar, "", text, ""]
+
+    # QuickJS(rquickjs-sysに同梱. JavaScriptの拡張を動かす)
+    sys_pkg = next((p for p in pkgs if p["name"] == "rquickjs-sys"), None)
+    if sys_pkg:
+        qjs = Path(sys_pkg["manifest_path"]).parent / "quickjs" / "LICENSE"
+        out += [bar, "QuickJS (bundled through rquickjs-sys)  https://github.com/quickjs-ng/quickjs", bar, "", qjs.read_text(encoding="utf-8").strip(), ""]
 
     out += [
         bar,

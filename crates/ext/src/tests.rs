@@ -10,7 +10,7 @@ fn tmpdir(tag: &str) -> PathBuf {
 }
 
 fn rffe_host() -> ExtHost {
-    ExtHost::start(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extensions"))
+    ExtHost::start(vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extensions")])
 }
 
 fn run(h: &ExtHost, kw: &str, q: &str, cb: Option<&str>) -> Vec<ExtRow> {
@@ -151,7 +151,7 @@ fn 例外はエラーの行() {
     let d = tmpdir("throw");
     fs::write(d.join("a.js"), r#"export const meta={title:"Bad",keyword:"bad"};
 export function search(q,c){ if(q==="arr") return "str"; if(q==="ok") return [{title:"t"}]; throw new Error("boom\nsecond"); }"#).unwrap();
-    let h = ExtHost::start(d);
+    let h = ExtHost::start(vec![d]);
     let r = run(&h, "bad", "x", None);
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].title, "Bad: boom");
@@ -167,7 +167,7 @@ fn 行は50件まで() {
     let d = tmpdir("many");
     fs::write(d.join("m.js"), r#"export const meta={keyword:"m"};
 export function search(q){ return Array.from({length:80},(_, i)=>({title:"r"+i, url:"https://example.com/"+i})); }"#).unwrap();
-    let h = ExtHost::start(d);
+    let h = ExtHost::start(vec![d]);
     let r = run(&h, "m", "", None);
     assert_eq!(r.len(), 50);
     assert_eq!(r[1].url.as_deref(), Some("https://example.com/1"));
@@ -178,7 +178,7 @@ fn 無限ループは止まって次が動く() {
     let d = tmpdir("loop");
     fs::write(d.join("l.js"), r#"export const meta={title:"Loop",keyword:"l"};
 export function search(q){ if(q==="loop"){ while(true){} } return [{title:"fine "+q}]; }"#).unwrap();
-    let h = ExtHost::start(d);
+    let h = ExtHost::start(vec![d]);
     let t = Instant::now();
     let r = run(&h, "l", "loop", None);
     let el = t.elapsed();
@@ -193,7 +193,7 @@ fn メモリの使いすぎも止まる() {
     let d = tmpdir("mem");
     fs::write(d.join("m.js"), r#"export const meta={title:"Mem",keyword:"m"};
 export function search(q){ if(q==="big"){ const a=[]; for(;;) a.push("x".repeat(1000000)+a.length); } return [{title:"ok"}]; }"#).unwrap();
-    let h = ExtHost::start(d);
+    let h = ExtHost::start(vec![d]);
     let r = run(&h, "m", "big", None);
     assert!(r[0].title.starts_with("Mem: "), "{}", r[0].title);
     let r = run(&h, "m", "x", None);
@@ -209,7 +209,7 @@ fn metaのないファイルなどはエラー() {
     fs::write(d.join("nokw.js"), "export const meta={}; export function search(){return []}").unwrap();
     fs::write(d.join("spin.js"), "export const meta={keyword:'s'}; while(true){}").unwrap();
     fs::write(d.join("good.js"), "export const meta={keyword:'g'}; export function search(){return []}").unwrap();
-    let h = ExtHost::start(d);
+    let h = ExtHost::start(vec![d]);
     let errs = h.errors();
     let names: Vec<&str> = errs.iter().map(|e| e.0.as_str()).collect();
     assert_eq!(names, vec!["nokw", "nometa", "nosearch", "spin", "syntax"], "{:?}", errs);
@@ -223,7 +223,7 @@ fn reloadで変更が反映される() {
     let d = tmpdir("reload");
     let p = d.join("r.js");
     fs::write(&p, r#"export const meta={title:"R",keyword:"r"}; export function search(q){return [{title:"v1"}]}"#).unwrap();
-    let h = ExtHost::start(d.clone());
+    let h = ExtHost::start(vec![d.clone()]);
     assert_eq!(run(&h, "r", "", None)[0].title, "v1");
     // 変えていなければ読み直さない(ここでは動作だけ確かめる)
     h.reload_wait();
@@ -253,7 +253,7 @@ fn クリップボードはmetaで頼んだときだけ渡る() {
     let d = tmpdir("clip");
     fs::write(d.join("a.js"), "export const meta={keyword:'a',clipboard:true}; export function search(q,c){return [{title:'['+c.clipboard+']'}]}").unwrap();
     fs::write(d.join("b.js"), "export const meta={keyword:'b'}; export function search(q,c){return [{title:'['+c.clipboard+']'}]}").unwrap();
-    let h = ExtHost::start(d);
+    let h = ExtHost::start(vec![d]);
     assert_eq!(run(&h, "a", "", Some("abc"))[0].title, "[abc]");
     assert_eq!(run(&h, "a", "", None)[0].title, "[]");
     assert_eq!(run(&h, "b", "", Some("abc"))[0].title, "[]");
@@ -263,7 +263,7 @@ fn クリップボードはmetaで頼んだときだけ渡る() {
 fn 溜まった古い要求は捨てて最新だけ実行する() {
     let d = tmpdir("gen");
     fs::write(d.join("s.js"), "export const meta={keyword:'s'}; export function search(q){ const t=Date.now(); while(Date.now()-t<60){} return [{title:q}]}").unwrap();
-    let h = ExtHost::start(d);
+    let h = ExtHost::start(vec![d]);
     let rxs: Vec<_> = (1..=10u64).map(|g| (g, h.search("s", &format!("q{}", g), None, 1000 + g))).collect();
     let mut got = Vec::new();
     for (g, rx) in rxs {
@@ -299,4 +299,25 @@ fn コマンドフレームのパリティはsaを含む() {
     let r = run(&h, "rffe", "7 1234 AB", None);
     assert!(r[0].title.starts_with("0111 00110000 0 "), "{}", r[0].title);
     assert!(run(&h, "rffe", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
+}
+
+#[test]
+fn 同じファイル名は先のフォルダーを使う() {
+    let a = tmpdir("prio-a");
+    let b = tmpdir("prio-b");
+    let missing = b.join("none");
+    fs::write(a.join("x.js"), r#"export const meta={keyword:"x"};
+export function search(){ return [{title:"user"}]; }"#).unwrap();
+    fs::write(b.join("x.js"), r#"export const meta={keyword:"x"};
+export function search(){ return [{title:"bundled"}]; }"#).unwrap();
+    fs::write(b.join("y.js"), r#"export const meta={keyword:"y"};
+export function search(){ return [{title:"only-b"}]; }"#).unwrap();
+    // 先のフォルダーが優先. 存在しないフォルダーがあっても動く
+    let h = ExtHost::start(vec![missing.clone(), a.clone(), b.clone()]);
+    assert_eq!(h.list().len(), 2);
+    assert_eq!(run(&h, "x", "", None)[0].title, "user");
+    assert_eq!(run(&h, "y", "", None)[0].title, "only-b");
+    // 順番を逆にすると同梱の方
+    let h = ExtHost::start(vec![b, a]);
+    assert_eq!(run(&h, "x", "", None)[0].title, "bundled");
 }

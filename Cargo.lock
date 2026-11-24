@@ -79,6 +79,7 @@ name = "hikidashi"
 version = "0.1.0"
 dependencies = [
  "hikidashi-core",
+ "hikidashi-ext",
  "windows",
 ]
 
