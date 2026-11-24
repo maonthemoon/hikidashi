@@ -204,6 +204,8 @@ pub struct App {
     /// `run`のスクリプトの仕事の番号と結果. 結果の行を出している間はtrue
     script_job: u64,
     script_view: bool,
+    /// 空の入力の「最近のもの」を出している(↓かクリックで選ぶまで, 何も選ばれていない形)
+    recent_view: bool,
     script_all: String,
     script_result: Arc<std::sync::Mutex<Option<(u64, RunOutcome)>>>,
     /// 整える頼みが来ている(文字が変わった, カーソルが動いた)
@@ -395,6 +397,7 @@ impl App {
         self.menu = None;
         self.confirm = None;
         self.script_view = false;
+        self.recent_view = false;
         let input = self.input();
         let text = self.edit_text();
         if text.trim() == ":stats" {
@@ -462,6 +465,7 @@ impl App {
             if !self.config.search.recent {
                 return None;
             }
+            self.recent_view = true;
             return Some(self.with_ctx(&[], |ctx| hikidashi_core::recent::rows(ctx)));
         }
         let (i, rest) = cscripts::list_target(&self.scripts, text)?;
@@ -1058,6 +1062,7 @@ impl App {
         }
         let pressed = self.press_row.take();
         if hit.is_some() && hit == pressed {
+            self.user_moved = true;
             if let Some(i) = hit {
                 self.select(i);
             }
@@ -1065,7 +1070,22 @@ impl App {
         }
     }
 
+    /// 最近のものを出していて, まだ何も選んでいない
+    pub fn nothing_selected(&self) -> bool {
+        self.recent_view && !self.user_moved && self.menu.is_none()
+    }
+
     fn move_sel(&mut self, delta: i32) {
+        // 何も選ばれていない形からの最初の↓は1行目を選ぶ
+        if self.nothing_selected() && !self.rows.is_empty() {
+            self.sel = if delta > 0 { 0 } else { self.rows.len() - 1 };
+            self.user_moved = true;
+            self.ensure_visible();
+            unsafe {
+                let _ = InvalidateRect(Some(self.hwnd), None, false);
+            }
+            return;
+        }
         if let Some(m) = &mut self.menu {
             let n = m.items.len() as i32;
             if n > 0 {
@@ -1884,6 +1904,10 @@ impl App {
         }
         let admin = action == Some(KeyAction::Admin);
         self.wait_pending();
+        // 最近のものは, ↓かクリックで選ぶまで開かない
+        if self.nothing_selected() {
+            return;
+        }
         let Some(row) = self.rows.get(self.sel).cloned() else { return };
         self.run_row(&row, admin);
     }
@@ -2029,6 +2053,9 @@ impl App {
 
     fn open_menu(&mut self) {
         self.wait_pending();
+        if self.nothing_selected() {
+            return;
+        }
         let Some(row) = self.rows.get(self.sel).cloned() else { return };
         use icons::glyph as g;
         let mi = |label: &str, glyph: char, act: MenuAct| MenuItem { label: label.into(), glyph, act };
@@ -3137,6 +3164,7 @@ pub fn run() {
         lists: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         script_job: 0,
         script_view: false,
+        recent_view: false,
         script_all: String::new(),
         script_result: Arc::new(std::sync::Mutex::new(None)),
         folders: Catalog::new(builtin::folder_items(

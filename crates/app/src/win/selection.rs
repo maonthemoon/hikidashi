@@ -65,6 +65,10 @@ pub fn capture(hwnd: HWND) -> (Option<String>, Option<u32>) {
         return (None, None);
     }
     let saved = clipboard::save(hwnd);
+    // 元の中身を写しきれない(大きすぎる, 写せない形式だけ)ときは, 壊さないよう読み取りをしない
+    if saved.as_ref().is_some_and(|s| s.abort) {
+        return (None, None);
+    }
     let before = clipboard::sequence();
     release_modifiers();
     send(&[key(VK_CONTROL, false, false), key(VK_C, false, false), key(VK_C, true, false), key(VK_CONTROL, true, false)]);

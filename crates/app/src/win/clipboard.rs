@@ -6,7 +6,7 @@ use hikidashi_core::clip::{ClipKind, MAX_TEXT_BYTES};
 use std::sync::OnceLock;
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, CountClipboardFormats, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    CloseClipboard, CountClipboardFormats, EmptyClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT};
 use windows::Win32::System::Ole::{CF_HDROP, CF_UNICODETEXT};
@@ -169,37 +169,85 @@ pub fn read_text(hwnd: HWND) -> Option<String> {
     r
 }
 
-/// 退避したクリップボード(文字とファイルだけ)
+/// 退避できる量の上限(バイト)
+const MAX_SAVE_BYTES: usize = 32 * 1024 * 1024;
+
+/// 退避したクリップボード(HGLOBALで持てる形式を, 形式の番号とバイト列で)
 pub struct Saved {
-    text: Option<String>,
-    files: Option<Vec<String>>,
+    formats: Vec<(u32, Vec<u8>)>,
     /// 何も入っていなかった
     empty: bool,
+    /// 写しきれない(32MBを超える, 写せる形式がない). 読み取りをせず, 元の中身を壊さない
+    pub abort: bool,
 }
 
-/// 今の文字とファイルを退避する. 開けなければ`None`(あとで戻さない)
+/// GDIのハンドルで持つ形式(写せない). CF_BITMAP, CF_METAFILEPICT, CF_PALETTE, CF_ENHMETAFILE, CF_DSP*, GDIオブジェクトの範囲
+fn is_gdi_format(f: u32) -> bool {
+    matches!(f, 2 | 3 | 9 | 14 | 0x80..=0x8E | 0x0300..=0x03FF)
+}
+
+/// 今のクリップボードの形式をすべて写して退避する. 開けなければ`None`(あとで戻さない)
 pub fn save(hwnd: HWND) -> Option<Saved> {
     if !open(hwnd) {
         return None;
     }
-    let empty = unsafe { CountClipboardFormats() } == 0;
-    let text = text_open().and_then(|r| r.ok());
-    let files = files_open();
+    let mut s = Saved { formats: vec![], empty: unsafe { CountClipboardFormats() } == 0, abort: false };
     unsafe {
+        let mut list = vec![];
+        let mut f = EnumClipboardFormats(0);
+        while f != 0 {
+            list.push(f);
+            f = EnumClipboardFormats(f);
+        }
+        let has_text = list.contains(&CF_TEXT_ID);
+        let mut total = 0usize;
+        for f in list {
+            // 文字から作られる形式(CF_TEXT, CF_OEMTEXT, CF_LOCALE)は, 文字を戻せば自動で付く
+            if is_gdi_format(f) || (has_text && matches!(f, 1 | 7 | 16)) {
+                continue;
+            }
+            let Ok(h) = GetClipboardData(f) else { continue };
+            let hg = HGLOBAL(h.0);
+            let size = GlobalSize(hg);
+            total += size;
+            if total > MAX_SAVE_BYTES {
+                s.abort = true;
+                break;
+            }
+            let p = GlobalLock(hg) as *const u8;
+            if p.is_null() {
+                continue;
+            }
+            s.formats.push((f, std::slice::from_raw_parts(p, size).to_vec()));
+            let _ = GlobalUnlock(hg);
+        }
+        // 入っているのに, 1つも写せなかった(GDIのハンドルだけなど)
+        if !s.empty && s.formats.is_empty() {
+            s.abort = true;
+        }
         let _ = CloseClipboard();
     }
-    Some(Saved { text, files, empty })
+    Some(s)
 }
 
 /// 退避したものを戻す. 戻したあとの通し番号を返す(履歴に残さない目印)
 pub fn restore(hwnd: HWND, s: &Saved) -> u32 {
-    let _ = match (&s.files, &s.text) {
-        (Some(f), _) => set_files(hwnd, f),
-        (None, Some(t)) => set_text(hwnd, t),
-        // 退避するものがなかった. 空だったなら空に戻す(Ctrl+Cで入った文字を残さない)
-        (None, None) if s.empty => empty(hwnd),
-        (None, None) => Ok(()),
-    };
+    if s.formats.is_empty() {
+        // 空だったなら空に戻す(Ctrl+Cで入った文字を残さない)
+        if s.empty {
+            let _ = empty(hwnd);
+        }
+        return sequence();
+    }
+    if open(hwnd) {
+        unsafe {
+            let _ = EmptyClipboard();
+            for (f, bytes) in &s.formats {
+                set_open(*f, bytes);
+            }
+            let _ = CloseClipboard();
+        }
+    }
     sequence()
 }
 

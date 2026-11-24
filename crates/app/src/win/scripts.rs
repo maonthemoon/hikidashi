@@ -97,7 +97,7 @@ fn spawn(s: &Script, arg: &str) -> Result<Child, String> {
     match s.lang {
         Lang::PowerShell => {
             let mut c = Command::new("powershell.exe");
-            c.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]).arg(&s.path);
+            c.args(["-NoProfile", "-File"]).arg(&s.path);
             if !arg.is_empty() {
                 c.arg(arg);
             }
