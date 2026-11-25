@@ -739,6 +739,231 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 @media print { .site-header, .docs-sidebar, .docs-toc, .docs-backdrop, .app-nav, .theme-toggle { display: none !important; } body { background: #fff; color: #000; } }
 
 </style>
+  <style>
+/* ---- デモの窓の寸法と色(Hikidashiの画面と同じ. crates/app/src/win/theme.rs). ページがダークなら窓もダーク(K39) ---- */
+:root {
+  --win-w: 680px;
+  --win-input-h: 60px;
+  --win-pad-x: 20px;
+  --win-row-h: 52px;
+  --win-list-pad: 6px;
+  --win-icon: 28px;
+  --win-input-fs: 20px;
+  --win-name-fs: 15px;
+  --win-sub-fs: 13px;
+  --win-band-h: 38px;
+  --win-status-h: 30px;
+  --win-bg: var(--gray-050);
+  --win-subtle: var(--gray-150);
+  --win-muted: var(--gray-200);
+  --win-text: var(--gray-950);
+  --win-text2: var(--gray-700);
+  --win-text3: var(--gray-600);
+  --win-border: var(--gray-300);
+  --win-faint: var(--gray-200);
+  --win-accent: var(--clay);
+  --win-accent-text: var(--clay-deep);
+  --desk-h: 420px;
+  --key-fs: 15px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  --win-bg: #1f1e1d; --win-subtle: #262624; --win-muted: #30302e; --win-text: #faf9f5; --win-text2: #d1cfc5; --win-text3: #9c9a92;
+  --win-border: #3d3d3a; --win-faint: #30302e; --win-accent-text: #e8956f;
+  }
+}
+:root[data-theme="dark"] {
+  --win-bg: #1f1e1d; --win-subtle: #262624; --win-muted: #30302e; --win-text: #faf9f5; --win-text2: #d1cfc5; --win-text3: #9c9a92;
+  --win-border: #3d3d3a; --win-faint: #30302e; --win-accent-text: #e8956f;
+}
+
+/* ---- デモ ---- */
+.demo { display: grid; gap: var(--space-16); }
+.demo-tabs { display: flex; flex-wrap: wrap; gap: var(--space-8); }
+.demo-tab {
+  font: inherit; font-size: var(--fs-caption); font-weight: var(--weight-medium);
+  padding: var(--space-8) var(--space-16); border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.demo-tab:hover { background: var(--bg-muted); color: var(--text); }
+.demo-tab[aria-selected="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
+
+.desk {
+  position: relative; height: var(--desk-h); overflow: hidden;
+  border-radius: var(--radius-lg); background: var(--bg-oat);
+  display: flex; justify-content: center; padding: var(--space-32) var(--space-16) 0;
+}
+.desk__note { position: absolute; right: var(--space-16); bottom: var(--space-12); font-size: var(--fs-caption); color: var(--text-tertiary); }
+
+/* ランチャーの窓 */
+.win {
+  position: relative; z-index: 2; width: min(var(--win-w), 100%); align-self: flex-start;
+  background: var(--win-bg); color: var(--win-text); border: 1px solid var(--win-border); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop); overflow: hidden; letter-spacing: 0;
+  transition: opacity 120ms var(--ease), transform 120ms var(--ease);
+}
+.win[hidden] { display: block !important; opacity: 0; transform: translateY(-6px); pointer-events: none; }
+.win__input { position: relative; height: var(--win-input-h); display: flex; align-items: center; gap: var(--space-8); padding-inline: var(--win-pad-x); font-size: var(--win-input-fs); white-space: nowrap; overflow: hidden; }
+.win__input::after { content: ""; position: absolute; inset: auto 0 0; height: 1px; background: var(--win-faint); transition: background 600ms var(--ease), height 600ms var(--ease); }
+.win__input.is-glow::after { background: var(--win-accent); height: 2px; transition: none; }
+.win__chip { flex: none; font-size: var(--win-sub-fs); background: var(--win-muted); border-radius: var(--radius-xs); padding: 2px var(--space-8); }
+.win__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.win__placeholder { color: var(--win-text3); overflow: hidden; text-overflow: ellipsis; }
+.caret { display: inline-block; width: 1px; height: 1.2em; margin-left: 1px; vertical-align: -0.2em; background: var(--win-text); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.win__rows { list-style: none; margin: 0; padding: var(--win-list-pad); border-top: 0; }
+.win__rows:empty { display: none; }
+.row { height: var(--win-row-h); display: grid; grid-template-columns: var(--win-icon) minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding-inline: var(--space-12); border-radius: var(--radius-sm); }
+.row.is-sel { background: var(--win-muted); }
+.row__name { font-size: var(--win-name-fs); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row__name b { font-weight: var(--weight-bold); }
+.row__sub { font-size: var(--win-sub-fs); line-height: 1.3; color: var(--win-text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row__tag { font-size: var(--win-sub-fs); color: var(--win-text3); }
+.row__tag.is-warn { color: var(--win-accent-text); }
+.icon { width: var(--win-icon); height: var(--win-icon); display: grid; place-items: center; }
+.icon svg { width: 100%; height: 100%; display: block; }
+
+/* 長い質問を書く窓 */
+.compose__band { height: var(--win-band-h); display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding-inline: var(--win-pad-x); background: var(--win-subtle); border-bottom: 1px solid var(--win-faint); font-size: var(--win-sub-fs); color: var(--win-text3); white-space: nowrap; overflow: hidden; }
+.compose__band .win__chip { color: var(--win-text); }
+.compose__band .keys, .compose__status span { white-space: pre; }
+.compose__body { padding: var(--space-12) var(--win-pad-x) var(--space-12); min-height: 96px; font-size: var(--win-input-fs); line-height: 1.55; }
+.compose__body p { margin: 0; min-height: 1.55em; }
+.compose__body .h2 { font-size: calc(var(--win-input-fs) * 1.6); font-weight: var(--weight-bold); line-height: 1.3; margin-bottom: var(--space-4); }
+.compose__body .li { position: relative; padding-left: 1.2em; }
+.compose__body .li::before { content: ""; position: absolute; left: 0.3em; top: 0.68em; width: 6px; height: 6px; border-radius: 50%; background: var(--win-text3); }
+.compose__body code { font-family: var(--font-mono); font-size: 0.875em; background: var(--win-muted); color: var(--win-text2); border-radius: var(--radius-xs); padding: 0.05em 0.3em; }
+.compose__body .mark { color: var(--win-text3); }
+.compose__status { height: var(--win-status-h); display: flex; align-items: center; justify-content: space-between; padding-inline: var(--win-pad-x); background: var(--win-subtle); font-size: var(--win-sub-fs); color: var(--win-text3); }
+
+/* 開いた先(アプリやブラウザーの窓. 架空). Windows 11の窓の形に寄せる */
+:root {
+  --app-bg: #ffffff; --app-chrome: #f3f3f3; --app-chrome2: #ebebeb; --app-canvas: #e9e9e9; --app-paper: #ffffff;
+  --app-text: #1f1f1f; --app-text2: #424242; --app-text3: #6b6b6b; --app-line: #e0e0e0; --app-bubble: #f2f2f2; --app-code: #f6f6f6;
+  --app-word: #185abd; --app-ppt: #c43e1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --app-bg: #202020; --app-chrome: #2b2b2b; --app-chrome2: #323232; --app-canvas: #1b1b1b; --app-paper: #2a2a2a;
+    --app-text: #f0f0f0; --app-text2: #d0d0d0; --app-text3: #a0a0a0; --app-line: #3a3a3a; --app-bubble: #333333; --app-code: #2e2e2e;
+    --app-word: #4a8ae8; --app-ppt: #e8693f;
+  }
+}
+:root[data-theme="dark"] {
+  --app-bg: #202020; --app-chrome: #2b2b2b; --app-chrome2: #323232; --app-canvas: #1b1b1b; --app-paper: #2a2a2a;
+  --app-text: #f0f0f0; --app-text2: #d0d0d0; --app-text3: #a0a0a0; --app-line: #3a3a3a; --app-bubble: #333333; --app-code: #2e2e2e;
+  --app-word: #4a8ae8; --app-ppt: #e8693f;
+}
+.opened {
+  position: absolute; z-index: 1; left: 50%; top: var(--space-24); width: min(720px, calc(100% - 2 * var(--space-16))); height: calc(var(--desk-h) - 76px);
+  transform: translateX(-50%); background: var(--app-bg); color: var(--app-text); border: 1px solid var(--app-line); border-radius: 8px;
+  box-shadow: var(--shadow-pop); overflow: hidden; display: flex; flex-direction: column; font-family: var(--font-sans); letter-spacing: 0;
+  transition: opacity 180ms var(--ease), transform 220ms var(--ease);
+}
+.opened[hidden] { display: flex !important; opacity: 0; transform: translateX(-50%) scale(0.96); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .opened, .opened[hidden] { transition: none; transform: translateX(-50%); } }
+/* 窓の枠 */
+.ap-title { flex: none; height: 30px; display: flex; align-items: center; gap: 8px; padding-left: 10px; background: var(--app-chrome); font-size: 12px; color: var(--app-text2); white-space: nowrap; }
+.ap-title__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ap-title__ctl { display: flex; height: 100%; }
+.ap-title__ctl span { width: 40px; display: grid; place-items: center; font-size: 12px; color: var(--app-text2); }
+.ap-tile { width: 16px; height: 16px; border-radius: 3px; display: grid; place-items: center; color: #fff; font-size: 10px; font-weight: 700; flex: none; }
+/* Officeのリボン */
+.ap-tabs { flex: none; display: flex; gap: 16px; padding: 4px 12px 0; background: var(--app-chrome); font-size: 12px; color: var(--app-text2); white-space: nowrap; overflow: hidden; }
+.ap-tabs span { padding-bottom: 5px; }
+.ap-tabs .is-cur { color: var(--app-text); font-weight: 600; border-bottom: 2px solid var(--ap-color); }
+.ap-tabs .is-file { color: var(--ap-color); }
+.ap-ribbon { flex: none; height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 12px; background: var(--app-chrome); border-bottom: 1px solid var(--app-line); overflow: hidden; }
+.ap-ribbon i { display: block; width: 18px; height: 18px; border-radius: 3px; background: var(--app-chrome2); flex: none; }
+.ap-ribbon i.w { width: 70px; height: 20px; border: 1px solid var(--app-line); background: var(--app-bg); }
+.ap-ribbon b { width: 1px; height: 20px; background: var(--app-line); margin: 0 4px; flex: none; }
+/* Wordの紙 */
+.ap-canvas { flex: 1; min-height: 0; background: var(--app-canvas); padding: 14px 0 0; display: flex; justify-content: center; overflow: hidden; }
+.ap-paper { width: min(440px, 86%); background: var(--app-paper); box-shadow: 0 1px 3px rgba(0,0,0,.18); padding: 26px 36px; font-size: 11px; line-height: 1.75; color: var(--app-text); }
+.opened h4 { font-family: var(--font-sans); }
+.ap-paper h4 { margin: 0 0 8px; font-size: 16px; font-weight: 700; text-align: center; letter-spacing: 0.05em; }
+.ap-paper p { margin: 0; }
+.ap-paper .r { text-align: right; color: var(--app-text2); }
+.ap-paper .h { font-weight: 700; margin-top: 6px; }
+.ap-status { flex: none; height: 22px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; background: var(--ap-color); color: #fff; font-size: 11px; }
+/* PowerPointの最初の画面 */
+.ap-start { flex: 1; min-height: 0; display: flex; }
+.ap-nav { width: 92px; flex: none; background: var(--ap-color); color: #fff; padding: 14px 0; display: grid; align-content: start; gap: 2px; font-size: 12px; }
+.ap-nav span { padding: 6px 14px; }
+.ap-nav .is-cur { background: rgba(0,0,0,.18); }
+.ap-main { flex: 1; min-width: 0; padding: 16px 20px; display: grid; align-content: start; gap: 10px; overflow: hidden; }
+.ap-main h4 { margin: 0; font-size: 17px; font-weight: 600; }
+.ap-cap { font-size: 12px; color: var(--app-text2); }
+.ap-thumbs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ap-thumb { display: grid; gap: 4px; font-size: 11px; color: var(--app-text2); min-width: 0; }
+.ap-thumb div { aspect-ratio: 16 / 9; border: 1px solid var(--app-line); border-radius: 3px; background: var(--app-paper); display: grid; place-items: center; font-size: 10px; color: var(--app-text3); overflow: hidden; }
+.ap-thumb span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-list { display: grid; font-size: 12px; }
+.ap-list div { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--app-line); }
+.ap-list span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-list small { color: var(--app-text3); font-size: 11px; }
+/* ブラウザー */
+.ap-btabs { flex: none; height: 34px; display: flex; align-items: end; gap: 4px; padding: 0 8px; background: var(--app-chrome2); font-size: 12px; }
+.ap-btab { height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--app-bg); border-radius: 8px 8px 0 0; color: var(--app-text); white-space: nowrap; max-width: 200px; overflow: hidden; }
+.ap-btab i { width: 12px; height: 12px; border-radius: 50%; background: var(--app-text); flex: none; }
+.ap-bplus { height: 28px; display: grid; place-items: center; width: 24px; color: var(--app-text3); }
+.ap-addr { flex: none; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; background: var(--app-bg); border-bottom: 1px solid var(--app-line); font-size: 12px; color: var(--app-text3); }
+.ap-addr__box { flex: 1; min-width: 0; height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: 13px; background: var(--app-chrome); color: var(--app-text2); white-space: nowrap; overflow: hidden; }
+.ap-addr__box b { font-weight: 400; color: var(--app-text); }
+.ap-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px 0 10px; overflow: hidden; }
+.ap-chat__flow { flex: 1; min-height: 0; width: min(520px, 90%); margin: 0 auto; display: grid; align-content: start; gap: 12px; font-size: 13px; line-height: 1.6; overflow: hidden; }
+.ap-user { justify-self: end; max-width: 78%; background: var(--app-bubble); border-radius: 16px; padding: 8px 14px; }
+.ap-user .h { font-weight: 700; font-size: 14px; }
+.ap-user ul { margin: 2px 0 0; padding-left: 1.2em; }
+.ap-bot p { margin: 0 0 6px; }
+.ap-bot pre { margin: 0 0 6px; background: var(--app-code); border-radius: 8px; padding: 8px 12px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; }
+.ap-bot code { font-family: var(--font-mono); font-size: 12px; background: var(--app-code); border-radius: 4px; padding: 0 4px; }
+.ap-dots { display: flex; gap: 4px; padding: 4px 0; }
+.ap-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--app-text3); animation: ap-dot 1s infinite ease-in-out; }
+.ap-dots i:nth-child(2) { animation-delay: .15s; } .ap-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes ap-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ap-dots i { animation: none; opacity: .6; } }
+.ap-ask { flex: none; width: min(520px, 90%); margin: 8px auto 0; height: 38px; border: 1px solid var(--app-line); border-radius: 19px; display: flex; align-items: center; padding: 0 16px; font-size: 13px; color: var(--app-text3); }
+
+/* 押したキー */
+.keycap {
+  position: absolute; z-index: 3; left: 50%; bottom: var(--space-48); transform: translateX(-50%);
+  font-size: var(--key-fs); font-weight: var(--weight-medium); color: var(--gray-950); background: var(--gray-000);
+  border: 1px solid var(--gray-300); border-bottom-width: 3px; border-radius: var(--radius-sm); padding: var(--space-8) var(--space-16);
+  transition: opacity 120ms var(--ease), transform 80ms var(--ease);
+}
+.keycap[hidden] { display: block !important; opacity: 0; }
+.keycap.is-down { transform: translateX(-50%) translateY(2px); border-bottom-width: 1px; }
+
+.demo-caption { min-height: 3.5em; color: var(--text-secondary); }
+.demo-caption strong { color: var(--text); }
+
+@media (max-width: 767px) {
+  :root { --desk-h: 400px; --win-input-fs: 17px; --win-name-fs: 14px; --win-pad-x: 14px; }
+  .compose__band .keys { display: none; }
+}
+
+
+/* マニュアルの本文(.prose)の中に置いたときに, 本文の余白や箇条書きの形を受けない */
+.demo { margin-block: var(--space-24); }
+.demo .win ul, .demo .opened ul { list-style: none; }
+.demo .opened .ap-user ul { list-style: disc; }
+.demo .win li, .demo .opened li { margin: 0; }
+.demo .win li::before, .demo .opened li::before, .demo .win li::marker { content: none; }
+.demo .win p, .demo .opened p, .demo .opened h4, .demo .opened pre { max-width: none; }
+.demo .opened pre, .demo .win code, .demo .opened code { border: 0; box-shadow: none; }
+.demo .demo-caption { margin: 0; }
+.demo .demo-tabs[hidden] { display: none; }
+.demo .win .win__rows { display: block; margin: 0; padding: var(--win-list-pad); }
+.demo .win .win__rows:empty { display: none; }
+.demo .win .row { padding-inline: var(--space-12); }
+.demo .opened code { font-size: 12px; font-weight: 400; padding: 0 4px; background: var(--app-code); color: inherit; }
+.demo .opened pre code { padding: 0; }
+.demo .win .win__rows .row + .row { margin: 0; }
+
+</style>
   <script>
 /* テーマ切替 + コードコピー + 目次の現在位置ハイライト + ドキュメントのナビ(依存なし) */
 (() => {
@@ -857,214 +1082,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 </script>
   <style>
-    /* ---- デモの窓の寸法と色(Hikidashiの画面と同じ. crates/app/src/win/theme.rs). ページがダークなら窓もダーク(K39) ---- */
-    :root {
-      --win-w: 680px;
-      --win-input-h: 60px;
-      --win-pad-x: 20px;
-      --win-row-h: 52px;
-      --win-list-pad: 6px;
-      --win-icon: 28px;
-      --win-input-fs: 20px;
-      --win-name-fs: 15px;
-      --win-sub-fs: 13px;
-      --win-band-h: 38px;
-      --win-status-h: 30px;
-      --win-bg: var(--gray-050);
-      --win-subtle: var(--gray-150);
-      --win-muted: var(--gray-200);
-      --win-text: var(--gray-950);
-      --win-text2: var(--gray-700);
-      --win-text3: var(--gray-600);
-      --win-border: var(--gray-300);
-      --win-faint: var(--gray-200);
-      --win-accent: var(--clay);
-      --win-accent-text: var(--clay-deep);
-      --desk-h: 420px;
-      --key-fs: 15px;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-      --win-bg: #1f1e1d; --win-subtle: #262624; --win-muted: #30302e; --win-text: #faf9f5; --win-text2: #d1cfc5; --win-text3: #9c9a92;
-      --win-border: #3d3d3a; --win-faint: #30302e; --win-accent-text: #e8956f;
-      }
-    }
-    :root[data-theme="dark"] {
-      --win-bg: #1f1e1d; --win-subtle: #262624; --win-muted: #30302e; --win-text: #faf9f5; --win-text2: #d1cfc5; --win-text3: #9c9a92;
-      --win-border: #3d3d3a; --win-faint: #30302e; --win-accent-text: #e8956f;
-    }
-
     .hero { padding-block: var(--space-64) var(--space-32); }
     @media (min-width: 1024px) { .hero { padding-block: var(--space-80) var(--space-32); } }
     .hero__title { max-width: 16em; }
-
-    /* ---- デモ ---- */
-    .demo { display: grid; gap: var(--space-16); }
-    .demo-tabs { display: flex; flex-wrap: wrap; gap: var(--space-8); }
-    .demo-tab {
-      font: inherit; font-size: var(--fs-caption); font-weight: var(--weight-medium);
-      padding: var(--space-8) var(--space-16); border-radius: var(--radius-pill);
-      border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer;
-      transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
-    }
-    .demo-tab:hover { background: var(--bg-muted); color: var(--text); }
-    .demo-tab[aria-selected="true"] { background: var(--text); border-color: var(--text); color: var(--bg); }
-
-    .desk {
-      position: relative; height: var(--desk-h); overflow: hidden;
-      border-radius: var(--radius-lg); background: var(--bg-oat);
-      display: flex; justify-content: center; padding: var(--space-32) var(--space-16) 0;
-    }
-    .desk__note { position: absolute; right: var(--space-16); bottom: var(--space-12); font-size: var(--fs-caption); color: var(--text-tertiary); }
-
-    /* ランチャーの窓 */
-    .win {
-      position: relative; z-index: 2; width: min(var(--win-w), 100%); align-self: flex-start;
-      background: var(--win-bg); color: var(--win-text); border: 1px solid var(--win-border); border-radius: var(--radius-sm);
-      box-shadow: var(--shadow-pop); overflow: hidden; letter-spacing: 0;
-      transition: opacity 120ms var(--ease), transform 120ms var(--ease);
-    }
-    .win[hidden] { display: block !important; opacity: 0; transform: translateY(-6px); pointer-events: none; }
-    .win__input { position: relative; height: var(--win-input-h); display: flex; align-items: center; gap: var(--space-8); padding-inline: var(--win-pad-x); font-size: var(--win-input-fs); white-space: nowrap; overflow: hidden; }
-    .win__input::after { content: ""; position: absolute; inset: auto 0 0; height: 1px; background: var(--win-faint); transition: background 600ms var(--ease), height 600ms var(--ease); }
-    .win__input.is-glow::after { background: var(--win-accent); height: 2px; transition: none; }
-    .win__chip { flex: none; font-size: var(--win-sub-fs); background: var(--win-muted); border-radius: var(--radius-xs); padding: 2px var(--space-8); }
-    .win__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .win__placeholder { color: var(--win-text3); overflow: hidden; text-overflow: ellipsis; }
-    .caret { display: inline-block; width: 1px; height: 1.2em; margin-left: 1px; vertical-align: -0.2em; background: var(--win-text); animation: blink 1s steps(1) infinite; }
-    @keyframes blink { 50% { opacity: 0; } }
-
-    .win__rows { list-style: none; margin: 0; padding: var(--win-list-pad); border-top: 0; }
-    .win__rows:empty { display: none; }
-    .row { height: var(--win-row-h); display: grid; grid-template-columns: var(--win-icon) minmax(0, 1fr) auto; align-items: center; gap: var(--space-12); padding-inline: var(--space-12); border-radius: var(--radius-sm); }
-    .row.is-sel { background: var(--win-muted); }
-    .row__name { font-size: var(--win-name-fs); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .row__name b { font-weight: var(--weight-bold); }
-    .row__sub { font-size: var(--win-sub-fs); line-height: 1.3; color: var(--win-text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .row__tag { font-size: var(--win-sub-fs); color: var(--win-text3); }
-    .row__tag.is-warn { color: var(--win-accent-text); }
-    .icon { width: var(--win-icon); height: var(--win-icon); display: grid; place-items: center; }
-    .icon svg { width: 100%; height: 100%; display: block; }
-
-    /* 長い質問を書く窓 */
-    .compose__band { height: var(--win-band-h); display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding-inline: var(--win-pad-x); background: var(--win-subtle); border-bottom: 1px solid var(--win-faint); font-size: var(--win-sub-fs); color: var(--win-text3); white-space: nowrap; overflow: hidden; }
-    .compose__band .win__chip { color: var(--win-text); }
-    .compose__band .keys, .compose__status span { white-space: pre; }
-    .compose__body { padding: var(--space-12) var(--win-pad-x) var(--space-12); min-height: 96px; font-size: var(--win-input-fs); line-height: 1.55; }
-    .compose__body p { margin: 0; min-height: 1.55em; }
-    .compose__body .h2 { font-size: calc(var(--win-input-fs) * 1.6); font-weight: var(--weight-bold); line-height: 1.3; margin-bottom: var(--space-4); }
-    .compose__body .li { position: relative; padding-left: 1.2em; }
-    .compose__body .li::before { content: ""; position: absolute; left: 0.3em; top: 0.68em; width: 6px; height: 6px; border-radius: 50%; background: var(--win-text3); }
-    .compose__body code { font-family: var(--font-mono); font-size: 0.875em; background: var(--win-muted); color: var(--win-text2); border-radius: var(--radius-xs); padding: 0.05em 0.3em; }
-    .compose__body .mark { color: var(--win-text3); }
-    .compose__status { height: var(--win-status-h); display: flex; align-items: center; justify-content: space-between; padding-inline: var(--win-pad-x); background: var(--win-subtle); font-size: var(--win-sub-fs); color: var(--win-text3); }
-
-    /* 開いた先(アプリやブラウザーの窓. 架空). Windows 11の窓の形に寄せる */
-    :root {
-      --app-bg: #ffffff; --app-chrome: #f3f3f3; --app-chrome2: #ebebeb; --app-canvas: #e9e9e9; --app-paper: #ffffff;
-      --app-text: #1f1f1f; --app-text2: #424242; --app-text3: #6b6b6b; --app-line: #e0e0e0; --app-bubble: #f2f2f2; --app-code: #f6f6f6;
-      --app-word: #185abd; --app-ppt: #c43e1c;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --app-bg: #202020; --app-chrome: #2b2b2b; --app-chrome2: #323232; --app-canvas: #1b1b1b; --app-paper: #2a2a2a;
-        --app-text: #f0f0f0; --app-text2: #d0d0d0; --app-text3: #a0a0a0; --app-line: #3a3a3a; --app-bubble: #333333; --app-code: #2e2e2e;
-        --app-word: #4a8ae8; --app-ppt: #e8693f;
-      }
-    }
-    :root[data-theme="dark"] {
-      --app-bg: #202020; --app-chrome: #2b2b2b; --app-chrome2: #323232; --app-canvas: #1b1b1b; --app-paper: #2a2a2a;
-      --app-text: #f0f0f0; --app-text2: #d0d0d0; --app-text3: #a0a0a0; --app-line: #3a3a3a; --app-bubble: #333333; --app-code: #2e2e2e;
-      --app-word: #4a8ae8; --app-ppt: #e8693f;
-    }
-    .opened {
-      position: absolute; z-index: 1; left: 50%; top: var(--space-24); width: min(720px, calc(100% - 2 * var(--space-16))); height: calc(var(--desk-h) - 76px);
-      transform: translateX(-50%); background: var(--app-bg); color: var(--app-text); border: 1px solid var(--app-line); border-radius: 8px;
-      box-shadow: var(--shadow-pop); overflow: hidden; display: flex; flex-direction: column; font-family: var(--font-sans); letter-spacing: 0;
-      transition: opacity 180ms var(--ease), transform 220ms var(--ease);
-    }
-    .opened[hidden] { display: flex !important; opacity: 0; transform: translateX(-50%) scale(0.96); pointer-events: none; }
-    @media (prefers-reduced-motion: reduce) { .opened, .opened[hidden] { transition: none; transform: translateX(-50%); } }
-    /* 窓の枠 */
-    .ap-title { flex: none; height: 30px; display: flex; align-items: center; gap: 8px; padding-left: 10px; background: var(--app-chrome); font-size: 12px; color: var(--app-text2); white-space: nowrap; }
-    .ap-title__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .ap-title__ctl { display: flex; height: 100%; }
-    .ap-title__ctl span { width: 40px; display: grid; place-items: center; font-size: 12px; color: var(--app-text2); }
-    .ap-tile { width: 16px; height: 16px; border-radius: 3px; display: grid; place-items: center; color: #fff; font-size: 10px; font-weight: 700; flex: none; }
-    /* Officeのリボン */
-    .ap-tabs { flex: none; display: flex; gap: 16px; padding: 4px 12px 0; background: var(--app-chrome); font-size: 12px; color: var(--app-text2); white-space: nowrap; overflow: hidden; }
-    .ap-tabs span { padding-bottom: 5px; }
-    .ap-tabs .is-cur { color: var(--app-text); font-weight: 600; border-bottom: 2px solid var(--ap-color); }
-    .ap-tabs .is-file { color: var(--ap-color); }
-    .ap-ribbon { flex: none; height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 12px; background: var(--app-chrome); border-bottom: 1px solid var(--app-line); overflow: hidden; }
-    .ap-ribbon i { display: block; width: 18px; height: 18px; border-radius: 3px; background: var(--app-chrome2); flex: none; }
-    .ap-ribbon i.w { width: 70px; height: 20px; border: 1px solid var(--app-line); background: var(--app-bg); }
-    .ap-ribbon b { width: 1px; height: 20px; background: var(--app-line); margin: 0 4px; flex: none; }
-    /* Wordの紙 */
-    .ap-canvas { flex: 1; min-height: 0; background: var(--app-canvas); padding: 14px 0 0; display: flex; justify-content: center; overflow: hidden; }
-    .ap-paper { width: min(440px, 86%); background: var(--app-paper); box-shadow: 0 1px 3px rgba(0,0,0,.18); padding: 26px 36px; font-size: 11px; line-height: 1.75; color: var(--app-text); }
-    .opened h4 { font-family: var(--font-sans); }
-    .ap-paper h4 { margin: 0 0 8px; font-size: 16px; font-weight: 700; text-align: center; letter-spacing: 0.05em; }
-    .ap-paper p { margin: 0; }
-    .ap-paper .r { text-align: right; color: var(--app-text2); }
-    .ap-paper .h { font-weight: 700; margin-top: 6px; }
-    .ap-status { flex: none; height: 22px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; background: var(--ap-color); color: #fff; font-size: 11px; }
-    /* PowerPointの最初の画面 */
-    .ap-start { flex: 1; min-height: 0; display: flex; }
-    .ap-nav { width: 92px; flex: none; background: var(--ap-color); color: #fff; padding: 14px 0; display: grid; align-content: start; gap: 2px; font-size: 12px; }
-    .ap-nav span { padding: 6px 14px; }
-    .ap-nav .is-cur { background: rgba(0,0,0,.18); }
-    .ap-main { flex: 1; min-width: 0; padding: 16px 20px; display: grid; align-content: start; gap: 10px; overflow: hidden; }
-    .ap-main h4 { margin: 0; font-size: 17px; font-weight: 600; }
-    .ap-cap { font-size: 12px; color: var(--app-text2); }
-    .ap-thumbs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-    .ap-thumb { display: grid; gap: 4px; font-size: 11px; color: var(--app-text2); min-width: 0; }
-    .ap-thumb div { aspect-ratio: 16 / 9; border: 1px solid var(--app-line); border-radius: 3px; background: var(--app-paper); display: grid; place-items: center; font-size: 10px; color: var(--app-text3); overflow: hidden; }
-    .ap-thumb span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ap-list { display: grid; font-size: 12px; }
-    .ap-list div { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--app-line); }
-    .ap-list span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ap-list small { color: var(--app-text3); font-size: 11px; }
-    /* ブラウザー */
-    .ap-btabs { flex: none; height: 34px; display: flex; align-items: end; gap: 4px; padding: 0 8px; background: var(--app-chrome2); font-size: 12px; }
-    .ap-btab { height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--app-bg); border-radius: 8px 8px 0 0; color: var(--app-text); white-space: nowrap; max-width: 200px; overflow: hidden; }
-    .ap-btab i { width: 12px; height: 12px; border-radius: 50%; background: var(--app-text); flex: none; }
-    .ap-bplus { height: 28px; display: grid; place-items: center; width: 24px; color: var(--app-text3); }
-    .ap-addr { flex: none; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; background: var(--app-bg); border-bottom: 1px solid var(--app-line); font-size: 12px; color: var(--app-text3); }
-    .ap-addr__box { flex: 1; min-width: 0; height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: 13px; background: var(--app-chrome); color: var(--app-text2); white-space: nowrap; overflow: hidden; }
-    .ap-addr__box b { font-weight: 400; color: var(--app-text); }
-    .ap-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px 0 10px; overflow: hidden; }
-    .ap-chat__flow { flex: 1; min-height: 0; width: min(520px, 90%); margin: 0 auto; display: grid; align-content: start; gap: 12px; font-size: 13px; line-height: 1.6; overflow: hidden; }
-    .ap-user { justify-self: end; max-width: 78%; background: var(--app-bubble); border-radius: 16px; padding: 8px 14px; }
-    .ap-user .h { font-weight: 700; font-size: 14px; }
-    .ap-user ul { margin: 2px 0 0; padding-left: 1.2em; }
-    .ap-bot p { margin: 0 0 6px; }
-    .ap-bot pre { margin: 0 0 6px; background: var(--app-code); border-radius: 8px; padding: 8px 12px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; }
-    .ap-bot code { font-family: var(--font-mono); font-size: 12px; background: var(--app-code); border-radius: 4px; padding: 0 4px; }
-    .ap-dots { display: flex; gap: 4px; padding: 4px 0; }
-    .ap-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--app-text3); animation: ap-dot 1s infinite ease-in-out; }
-    .ap-dots i:nth-child(2) { animation-delay: .15s; } .ap-dots i:nth-child(3) { animation-delay: .3s; }
-    @keyframes ap-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
-    @media (prefers-reduced-motion: reduce) { .ap-dots i { animation: none; opacity: .6; } }
-    .ap-ask { flex: none; width: min(520px, 90%); margin: 8px auto 0; height: 38px; border: 1px solid var(--app-line); border-radius: 19px; display: flex; align-items: center; padding: 0 16px; font-size: 13px; color: var(--app-text3); }
-
-    /* 押したキー */
-    .keycap {
-      position: absolute; z-index: 3; left: 50%; bottom: var(--space-48); transform: translateX(-50%);
-      font-size: var(--key-fs); font-weight: var(--weight-medium); color: var(--gray-950); background: var(--gray-000);
-      border: 1px solid var(--gray-300); border-bottom-width: 3px; border-radius: var(--radius-sm); padding: var(--space-8) var(--space-16);
-      transition: opacity 120ms var(--ease), transform 80ms var(--ease);
-    }
-    .keycap[hidden] { display: block !important; opacity: 0; }
-    .keycap.is-down { transform: translateX(-50%) translateY(2px); border-bottom-width: 1px; }
-
-    .demo-caption { min-height: 3.5em; color: var(--text-secondary); }
-    .demo-caption strong { color: var(--text); }
-
-    @media (max-width: 767px) {
-      :root { --desk-h: 400px; --win-input-fs: 17px; --win-name-fs: 14px; --win-pad-x: 14px; }
-      .compose__band .keys { display: none; }
-    }
 
     /* ---- 違い ---- */
     .diff .card__title { font-size: var(--fs-h5); }
@@ -1109,16 +1129,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
     <section class="container" aria-labelledby="demo-title">
       <h2 id="demo-title" class="sr-only">動くデモ</h2>
-      <div class="demo">
-        <div class="demo-tabs" role="tablist" aria-label="デモの場面"></div>
-        <div class="desk" aria-live="off">
-          <div class="opened" hidden></div>
-          <div class="win" hidden></div>
-          <div class="keycap" hidden></div>
-          <span class="desk__note">ブラウザーで再現したデモです</span>
-        </div>
-        <p class="demo-caption"></p>
-      </div>
+      <div class="demo" data-scenes="all"></div>
     </section>
 
     <section id="why" class="section section--subtle">
@@ -1146,7 +1157,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
           </article>
           <article class="card">
             <h3 class="card__title">進数とRFの計算を, その場で</h3>
-            <p class="card__body"><code>0x1F</code>で10進数と2進数, <code>10dBm</code>でWと電圧, <code>vswr 1.5</code>でリターンロス, <code>10nH@2.4G</code>でリアクタンス. <kbd>Enter</kbd>で結果をコピーします.</p>
+            <p class="card__body"><code>=</code>と空白で計算のモードに入り, <code>0x1F</code>で10進数と2進数, <code>10dBm</code>でWと電圧, <code>vswr 1.5</code>でリターンロス, <code>rffe 6 1C 38</code>でMIPI RFFEのフレーム. <kbd>Enter</kbd>で結果をコピーします.</p>
           </article>
           <article class="card">
             <h3 class="card__title">Windowsのダークモードに合わせる</h3>
@@ -1154,7 +1165,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
           </article>
           <article class="card">
             <h3 class="card__title">軽い. exe 1つで動く</h3>
-            <p class="card__body">約4MBのexe 1つで, インストールも管理者権限も要りません. 作者のPC(約1万6千ファイル)では, メモリ約20MB, 1回の検索は1ms以下でした.</p>
+            <p class="card__body">約6MBのexe 1つで, インストールも管理者権限も要りません. 作者のPC(約1万6千ファイル)では, メモリ約20MB, 1回の検索は1ms以下でした.</p>
           </article>
         </div>
         <p class="notice">ほかに, ChromeとEdgeのブックマーク, Windowsの設定, Box Drive(<code>bx </code>), WSLのホーム(<code>w </code>), プロセスのkill(<code>k </code>)も同じ入力欄から使えます. 詳しくは<a href="manual.html">マニュアル</a>.</p>
@@ -1197,294 +1208,328 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   </footer>
 
   <script>
-  (() => {
-    // ---------- アイコン(架空の形. 本物のアプリのアイコンは使わない) ----------
-    const C = { clay: "#d97757", sky: "#6a9bcc", olive: "#788c5d", fig: "#c46686", sand: "#e3c59a", gray: "#9a9890", ink: "#3d3d3a" };
-    const ICONS = {
-      app: (color, ch) => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="6" fill="${C[color]}"/><text x="14" y="19" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" font-family="Noto Sans JP, sans-serif">${ch}</text></svg>`,
-      doc: (color) => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="5" y="2" width="19" height="24" rx="3" fill="#fff" stroke="#d1cfc5"/><rect x="2" y="13" width="14" height="10" rx="2" fill="${C[color]}"/><path d="M18 8h3M18 12h3M18 16h3" stroke="#d1cfc5"/></svg>`,
-      folder: () => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="2" y="6" width="11" height="6" rx="2" fill="#d9b06c"/><rect x="2" y="9" width="24" height="16" rx="3" fill="${C.sand}"/></svg>`,
-      chat: () => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="2.8" y="4.8" width="22.4" height="15.4" rx="5.5" fill="none" stroke="${C.ink}" stroke-width="1.6"/><path d="M8 20v6l6-6z" fill="${C.ink}"/><circle cx="9.8" cy="12.8" r="1.3" fill="${C.ink}"/><circle cx="14.8" cy="12.8" r="1.3" fill="${C.ink}"/><circle cx="19.8" cy="12.8" r="1.3" fill="${C.ink}"/></svg>`,
-      calc: () => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="4.8" y="2.8" width="18.4" height="22.4" rx="4" fill="none" stroke="${C.ink}" stroke-width="1.6"/><rect x="8" y="6" width="12" height="5" fill="${C.ink}"/><g fill="${C.ink}"><rect x="8" y="14" width="2.6" height="2.6"/><rect x="12.6" y="14" width="2.6" height="2.6"/><rect x="17.2" y="14" width="2.6" height="2.6"/><rect x="8" y="19" width="2.6" height="2.6"/><rect x="12.6" y="19" width="2.6" height="2.6"/><rect x="17.2" y="19" width="2.6" height="2.6"/></g></svg>`,
-    };
-    const icon = (spec) => { const [k, ...a] = spec.split(":"); return ICONS[k](...a); };
+// 動くデモ. <div class="demo" data-scenes="all"></div>に6つの場面(タブ付き)を,
+// data-scenes="calc"のように場面の名前(app, romaji, path, chat, long, calc)を書くと, その場面だけを繰り返す.
+(() => {
+  // ---------- アイコン(架空の形. 本物のアプリのアイコンは使わない) ----------
+  const C = { clay: "#d97757", sky: "#6a9bcc", olive: "#788c5d", fig: "#c46686", sand: "#e3c59a", gray: "#9a9890", ink: "#3d3d3a" };
+  const ICONS = {
+    app: (color, ch) => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="6" fill="${C[color]}"/><text x="14" y="19" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" font-family="Noto Sans JP, sans-serif">${ch}</text></svg>`,
+    doc: (color) => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="5" y="2" width="19" height="24" rx="3" fill="#fff" stroke="#d1cfc5"/><rect x="2" y="13" width="14" height="10" rx="2" fill="${C[color]}"/><path d="M18 8h3M18 12h3M18 16h3" stroke="#d1cfc5"/></svg>`,
+    folder: () => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="2" y="6" width="11" height="6" rx="2" fill="#d9b06c"/><rect x="2" y="9" width="24" height="16" rx="3" fill="${C.sand}"/></svg>`,
+    chat: () => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="2.8" y="4.8" width="22.4" height="15.4" rx="5.5" fill="none" stroke="${C.ink}" stroke-width="1.6"/><path d="M8 20v6l6-6z" fill="${C.ink}"/><circle cx="9.8" cy="12.8" r="1.3" fill="${C.ink}"/><circle cx="14.8" cy="12.8" r="1.3" fill="${C.ink}"/><circle cx="19.8" cy="12.8" r="1.3" fill="${C.ink}"/></svg>`,
+    calc: () => `<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="4.8" y="2.8" width="18.4" height="22.4" rx="4" fill="none" stroke="${C.ink}" stroke-width="1.6"/><rect x="8" y="6" width="12" height="5" fill="${C.ink}"/><g fill="${C.ink}"><rect x="8" y="14" width="2.6" height="2.6"/><rect x="12.6" y="14" width="2.6" height="2.6"/><rect x="17.2" y="14" width="2.6" height="2.6"/><rect x="8" y="19" width="2.6" height="2.6"/><rect x="12.6" y="19" width="2.6" height="2.6"/><rect x="17.2" y="19" width="2.6" height="2.6"/></g></svg>`,
+  };
+  const icon = (spec) => { const [k, ...a] = spec.split(":"); return ICONS[k](...a); };
 
-    // ---------- 行 ----------
-    const DOCS = "C:\\Users\\me\\Documents";
-    const row = (iconSpec, name, sub, tag, bold = []) => ({ icon: iconSpec, name, sub, tag, bold });
-    // 飛び飛びの文字の一致(前から順に拾う). Hikidashiの並び順はもっと賢いが, デモにはこれで足りる
-    const fuzzy = (q, name) => {
-      const out = []; let j = 0; const n = name.toLowerCase();
-      for (const ch of q.toLowerCase()) { j = n.indexOf(ch, j); if (j < 0) return null; out.push(j++); }
-      return out;
-    };
-    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  // ---------- 行 ----------
+  const DOCS = "C:\\Users\\me\\Documents";
+  const row = (iconSpec, name, sub, tag, bold = []) => ({ icon: iconSpec, name, sub, tag, bold });
+  // 飛び飛びの文字の一致(前から順に拾う). Hikidashiの並び順はもっと賢いが, デモにはこれで足りる
+  const fuzzy = (q, name) => {
+    const out = []; let j = 0; const n = name.toLowerCase();
+    for (const ch of q.toLowerCase()) { j = n.indexOf(ch, j); if (j < 0) return null; out.push(j++); }
+    return out;
+  };
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-    // ---------- 場面(台本) ----------
-    const APPS = [
-      row("app:clay:P", "PowerPoint", "", "app"),
-      row("app:sky:A", "Power Automate", "", "app"),
-      row("app:ink:S", "PowerShell", "", "app"),
-      row("doc:clay", "提案_PowerPoint用テンプレート.potx", DOCS + "\\テンプレート", "file"),
-    ];
-    const kai = [
-      row("doc:clay", "会議資料_11月.pptx", DOCS + "\\プロジェクトA", "file", [0]),
-      row("doc:sky", "定例会議_議事録.docx", DOCS + "\\会議", "file", [2]),
-      row("doc:olive", "開発計画.xlsx", DOCS + "\\プロジェクトA", "file", [0]),
-      row("folder", "会議", DOCS, "folder", [0]),
-    ];
-    const kaigi = [
-      row("doc:sky", "定例会議_議事録.docx", DOCS + "\\会議", "file", [2, 3]),
-      row("doc:clay", "会議資料_11月.pptx", DOCS + "\\プロジェクトA", "file", [0, 1]),
-      row("folder", "会議", DOCS, "folder", [0, 1]),
-    ];
-    const chatRow = (q) => row("chat", q, "No results · Ctrl+Alt+Enter for Google", "ChatGPT");
-    const calc = (v, note) => row("calc", v, note, "copy");
+  // ---------- 場面(台本) ----------
+  const APPS = [
+    row("app:clay:P", "PowerPoint", "", "app"),
+    row("app:sky:A", "Power Automate", "", "app"),
+    row("app:ink:S", "PowerShell", "", "app"),
+    row("doc:clay", "提案_PowerPoint用テンプレート.potx", DOCS + "\\テンプレート", "file"),
+  ];
+  const kai = [
+    row("doc:clay", "会議資料_11月.pptx", DOCS + "\\プロジェクトA", "file", [0]),
+    row("doc:sky", "定例会議_議事録.docx", DOCS + "\\会議", "file", [2]),
+    row("doc:olive", "開発計画.xlsx", DOCS + "\\プロジェクトA", "file", [0]),
+    row("folder", "会議", DOCS, "folder", [0]),
+  ];
+  const kaigi = [
+    row("doc:sky", "定例会議_議事録.docx", DOCS + "\\会議", "file", [2, 3]),
+    row("doc:clay", "会議資料_11月.pptx", DOCS + "\\プロジェクトA", "file", [0, 1]),
+    row("folder", "会議", DOCS, "folder", [0, 1]),
+  ];
+  const chatRow = (q) => row("chat", q, "No results · Ctrl+Alt+Enter for Google", "ChatGPT");
+  const calc = (v, note) => row("calc", v, note, "copy");
 
-    const SCENES = [
-      {
-        tab: "アプリ",
-        caption: "<strong>飛び飛びの文字で探す.</strong> <code>pwpt</code>でPowerPoint. 前に開いたものは上に出ます.",
-        steps: [{ type: "pwpt", rows: (q) => APPS.filter((r) => q.length >= 2 || r.tag === "app").map((r) => ({ ...r, bold: fuzzy(q, r.name) })).filter((r) => r.bold) }, { key: "Enter" }, { open: { kind: "ppt" } }],
-      },
-      {
-        tab: "ローマ字で日本語",
-        caption: "<strong>日本語入力を切り替えずに, 日本語の名前を探す.</strong> <code>kaigi</code>で「会議」. 打ちかけの<code>kai</code>から, 会, 開なども広げて探します.",
-        steps: [{ type: "kaigi", rows: (q) => (q.length < 3 ? [] : q === "kai" ? kai : kaigi) }, { key: "Enter" }, { open: { kind: "word", file: "定例会議_議事録.docx", doc: "minutes" } }],
-      },
-      {
-        tab: "パスを貼る",
-        caption: "<strong>受け取ったパスを, 貼ってそのまま開く.</strong> 引用符付きでも, <code>/mnt/c/...</code>や<code>%APPDATA%\\...</code>の形でも開けます.",
-        steps: [{ key: "Ctrl+V" }, { paste: '"' + DOCS + '\\報告書.docx"', rows: [row("doc:sky", "報告書.docx", DOCS, "file")] }, { wait: 900 }, { key: "Enter" }, { open: { kind: "word", file: "報告書.docx", doc: "report" } }],
-      },
-      {
-        tab: "ChatGPTに聞く",
-        caption: "<strong>見つからなければ, そのままChatGPTへ.</strong> 一致がなければ, 打った文を送ります. Googleは<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd>.",
-        steps: [{ type: "how to rename a git branch", fast: true, rows: (q) => (q.length < 3 ? [] : [chatRow(q)]) }, { key: "Enter" }, { open: { kind: "chat", q: "how to rename a git branch" } }],
-      },
-      {
-        tab: "長い質問",
-        caption: "<strong>長い質問は, 整えて見ながら書く.</strong> <code>c </code>か<kbd>Shift</kbd>+<kbd>Enter</kbd>で書く窓. Markdownの印は, 書き終えた行から隠れて整います.",
-        steps: [{ type: "c", rows: () => [] }, { key: "Space" }, { compose: ["## LNAの選び方", "2.4GHz帯で使う**LNA**を探しています.", "- NFは1dB以下", "- 電源は`3.3V`"] }, { key: "Enter" }, { open: { kind: "chat", long: true } }],
-      },
-      {
-        tab: "計算",
-        caption: "<strong>進数とRFの計算を, その場で.</strong> 16進数と2進数, dBmとW, VSWR, リアクタンス. <kbd>Enter</kbd>で結果をコピーします.",
-        steps: [
-          { type: "0x1F", rows: (q) => (q === "0x1F" ? [calc("31", "dec"), calc("0001 1111", "bin")] : []) }, { wait: 1300 }, { clear: true },
-          { type: "10dBm", rows: (q) => (q === "10dBm" ? [calc("10 mW", "Power"), calc("1 V", "Peak voltage at 50 Ω · Vrms 707.1 mV · Vpp 2 V")] : []) }, { wait: 1300 }, { clear: true },
-          { type: "vswr 1.5", rows: (q) => (q === "vswr 1.5" ? [calc("13.98 dB", "Return loss"), calc("0.200", "|Γ| reflection coefficient"), calc("4.00 %", "Reflected power")] : []) }, { wait: 1300 }, { clear: true },
-          { type: "10nH@2.4G", rows: (q) => (q === "10nH@2.4G" ? [calc("150.8 Ω", "XL = 2πfL")] : []) }, { wait: 1300 }, { key: "Enter" },
-        ],
-      },
-    ];
+  // 計算のモードに入ったときの例(Hikidashiでは7行. デモは5行)
+  const CALC_HINTS = [["0x1F", "Hex to decimal and binary"], ["(12+3)*4", "Calculator: + - * / ^ ( ) %"], ["10dBm", "dBm to watts and volts"], ["vswr 1.5", "VSWR to return loss and reflection"], ["10nH 2.4G", "Capacitance that resonates with 10 nH at 2.4 GHz"]].map(([v, n]) => calc(v, "Example · " + n));
+  const CALC_NONE = CALC_HINTS;
 
-    // ---------- 描く ----------
-    const desk = document.querySelector(".desk");
-    const win = desk.querySelector(".win");
-    const opened = desk.querySelector(".opened");
-    const keycap = desk.querySelector(".keycap");
-    const tabs = document.querySelector(".demo-tabs");
-    const caption = document.querySelector(".demo-caption");
+  const ALL = [
+    {
+      id: "app",
+      tab: "アプリ",
+      caption: "<strong>飛び飛びの文字で探す.</strong> <code>pwpt</code>でPowerPoint. 前に開いたものは上に出ます.",
+      steps: [{ type: "pwpt", rows: (q) => APPS.filter((r) => q.length >= 2 || r.tag === "app").map((r) => ({ ...r, bold: fuzzy(q, r.name) })).filter((r) => r.bold) }, { key: "Enter" }, { open: { kind: "ppt" } }],
+    },
+    {
+      id: "romaji",
+      tab: "ローマ字で日本語",
+      caption: "<strong>日本語入力を切り替えずに, 日本語の名前を探す.</strong> <code>kaigi</code>で「会議」. 打ちかけの<code>kai</code>から, 会, 開なども広げて探します.",
+      steps: [{ type: "kaigi", rows: (q) => (q.length < 3 ? [] : q === "kai" ? kai : kaigi) }, { key: "Enter" }, { open: { kind: "word", file: "定例会議_議事録.docx", doc: "minutes" } }],
+    },
+    {
+      id: "path",
+      tab: "パスを貼る",
+      caption: "<strong>受け取ったパスを, 貼ってそのまま開く.</strong> 引用符付きでも, <code>/mnt/c/...</code>や<code>%APPDATA%\\...</code>の形でも開けます.",
+      steps: [{ key: "Ctrl+V" }, { paste: '"' + DOCS + '\\報告書.docx"', rows: [row("doc:sky", "報告書.docx", DOCS, "file")] }, { wait: 900 }, { key: "Enter" }, { open: { kind: "word", file: "報告書.docx", doc: "report" } }],
+    },
+    {
+      id: "chat",
+      tab: "ChatGPTに聞く",
+      caption: "<strong>見つからなければ, そのままChatGPTへ.</strong> 一致がなければ, 打った文を送ります. Googleは<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd>.",
+      steps: [{ type: "how to rename a git branch", fast: true, rows: (q) => (q.length < 3 ? [] : [chatRow(q)]) }, { key: "Enter" }, { open: { kind: "chat", q: "how to rename a git branch" } }],
+    },
+    {
+      id: "long",
+      tab: "長い質問",
+      caption: "<strong>長い質問は, 整えて見ながら書く.</strong> <code>c </code>か<kbd>Shift</kbd>+<kbd>Enter</kbd>で書く窓. Markdownの印は, 書き終えた行から隠れて整います.",
+      steps: [{ type: "c", rows: () => [] }, { key: "Space" }, { compose: ["## LNAの選び方", "2.4GHz帯で使う**LNA**を探しています.", "- NFは1dB以下", "- 電源は`3.3V`"] }, { key: "Enter" }, { open: { kind: "chat", long: true } }],
+    },
+    {
+      id: "calc",
+      tab: "計算",
+      caption: "<strong>計算のモードで, 進数もRFも.</strong> <code>=</code>と空白で計算のモード. 16進数, dBm, VSWR, 共振, MIPI RFFEのフレーム. <kbd>Enter</kbd>で結果をコピーします.",
+      steps: [
+        { type: "=", short: true, rows: () => [] }, { mode: "calc", rows: CALC_HINTS },
+        { type: "0x1F", rows: (q) => (q === "0x1F" ? [calc("31", "dec"), calc("0001 1111", "bin")] : CALC_NONE) }, { clear: true },
+        { type: "10dBm", rows: (q) => (q === "10dBm" ? [calc("10 mW", "Power"), calc("1 V", "Peak voltage at Z0 = 50 Ω · Vrms 707.1 mV · Vpp 2 V")] : CALC_NONE) }, { clear: true },
+        { type: "vswr 1.5", rows: (q) => (q === "vswr 1.5" ? [calc("13.98 dB", "Return loss"), calc("0.200", "|Γ| reflection coefficient"), calc("4.00 %", "Reflected power"), calc("0.1773 dB", "Mismatch loss")] : CALC_NONE) }, { clear: true },
+        { type: "10nH 2.4G", rows: (q) => (q === "10nH 2.4G" ? [calc("0.4398 pF", "Capacitance C = 1/(ω²L) for resonance")] : CALC_NONE) }, { clear: true },
+        { type: "rffe 6 1C 38", rows: (q) => (q === "rffe 6 1C 38" ? [calc("0110 010 11100 1 00111000 0", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000")] : CALC_NONE) }, { key: "Enter" },
+      ],
+    },
+  ];
 
-    const nameHtml = (name, bold) => [...name].map((c, i) => (bold && bold.includes(i) ? `<b>${esc(c)}</b>` : esc(c))).join("");
-    const rowsHtml = (rows) => rows.map((r, i) => `<li class="row${i === 0 ? " is-sel" : ""}"><span class="icon">${icon(r.icon)}</span><span>` +
-      `<div class="row__name">${nameHtml(r.name, r.bold)}</div>${r.sub ? `<div class="row__sub">${esc(r.sub)}</div>` : ""}</span>` +
-      `<span class="row__tag">${esc(r.tag)}</span></li>`).join("");
+  // ---------- 1つのデモ ----------
+  function start(root, SCENES) {
+  // ---------- 描く ----------
+  root.innerHTML = `<div class="demo-tabs" role="tablist" aria-label="デモの場面"></div><div class="desk" aria-live="off"><div class="opened" hidden></div><div class="win" hidden></div><div class="keycap" hidden></div><span class="desk__note">ブラウザーで再現したデモです</span></div><p class="demo-caption"></p>`;
+  const desk = root.querySelector(".desk");
+  const win = desk.querySelector(".win");
+  const opened = desk.querySelector(".opened");
+  const keycap = desk.querySelector(".keycap");
+  const tabs = root.querySelector(".demo-tabs");
+  const caption = root.querySelector(".demo-caption");
 
-    function showLauncher(text, rows, glow) {
-      win.className = "win";
-      win.innerHTML = `<div class="win__input${glow ? " is-glow" : ""}">` +
-        (text ? `<span class="win__text">${esc(text)}</span>` : `<span class="win__placeholder">Search apps, files, bookmarks, or paste a path</span>`) +
-        `<span class="caret" aria-hidden="true"></span></div><ul class="win__rows">${rowsHtml(rows)}</ul>`;
-      win.hidden = false;
-      if (glow) requestAnimationFrame(() => requestAnimationFrame(() => win.querySelector(".win__input")?.classList.remove("is-glow")));
+  const nameHtml = (name, bold) => [...name].map((c, i) => (bold && bold.includes(i) ? `<b>${esc(c)}</b>` : esc(c))).join("");
+  const rowsHtml = (rows) => rows.map((r, i) => `<li class="row${i === 0 ? " is-sel" : ""}"><span class="icon">${icon(r.icon)}</span><span>` +
+    `<div class="row__name">${nameHtml(r.name, r.bold)}</div>${r.sub ? `<div class="row__sub">${esc(r.sub)}</div>` : ""}</span>` +
+    `<span class="row__tag">${esc(r.tag)}</span></li>`).join("");
+
+  function showLauncher(text, rows, glow, chip) {
+    win.className = "win";
+    win.innerHTML = `<div class="win__input${glow ? " is-glow" : ""}">` + (chip ? `<span class="win__chip">${chip}</span>` : "") +
+      (text ? `<span class="win__text">${esc(text)}</span>` : chip ? "" : `<span class="win__placeholder">Search apps, files, bookmarks, or paste a path</span>`) +
+      `<span class="caret" aria-hidden="true"></span></div><ul class="win__rows">${rowsHtml(rows)}</ul>`;
+    win.hidden = false;
+    if (glow) requestAnimationFrame(() => requestAnimationFrame(() => win.querySelector(".win__input")?.classList.remove("is-glow")));
+  }
+
+  // Markdownの1行. 書いている行は印をそのまま(薄く)見せ, 書き終えた行は印を隠して整える(Hikidashiと同じ)
+  function mdLine(line, active) {
+    if (active) {
+      const html = esc(line).replace(/^(## |- )/, '<span class="mark">$1</span>').replace(/(\*\*|`)/g, '<span class="mark">$1</span>');
+      return `<p>${html}<span class="caret" aria-hidden="true"></span></p>`;
     }
+    let cls = "", body = line;
+    if (line.startsWith("## ")) { cls = "h2"; body = line.slice(3); }
+    else if (line.startsWith("- ")) { cls = "li"; body = line.slice(2); }
+    const html = esc(body).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`(.+?)`/g, "<code>$1</code>");
+    return `<p class="${cls}">${html}</p>`;
+  }
+  function showCompose(lines, current) {
+    const n = lines.join("\n").replace(/\*\*|`|^## |^- /gm, "").length + current.length;
+    win.className = "win";
+    win.innerHTML = `<div class="compose__band"><span class="win__chip">ChatGPT</span><span class="keys">Enter  Send     Shift+Enter  New line     Esc  Back</span></div>` +
+      `<div class="compose__body">${lines.map((l) => mdLine(l, false)).join("")}${mdLine(current, true)}</div>` +
+      `<div class="compose__status"><span>Ctrl+↑  Earlier questions</span><span>${n} chars</span></div>`;
+    win.hidden = false;
+  }
 
-    // Markdownの1行. 書いている行は印をそのまま(薄く)見せ, 書き終えた行は印を隠して整える(Hikidashiと同じ)
-    function mdLine(line, active) {
-      if (active) {
-        const html = esc(line).replace(/^(## |- )/, '<span class="mark">$1</span>').replace(/(\*\*|`)/g, '<span class="mark">$1</span>');
-        return `<p>${html}<span class="caret" aria-hidden="true"></span></p>`;
-      }
-      let cls = "", body = line;
-      if (line.startsWith("## ")) { cls = "h2"; body = line.slice(3); }
-      else if (line.startsWith("- ")) { cls = "li"; body = line.slice(2); }
-      const html = esc(body).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`(.+?)`/g, "<code>$1</code>");
-      return `<p class="${cls}">${html}</p>`;
+  // 開いた先の窓. 実際のアプリやブラウザーの形に寄せた架空の画面(ロゴは描かない)
+  const CTL = `<span class="ap-title__ctl"><span>&#x2500;</span><span>&#x25A2;</span><span>&#x2715;</span></span>`;
+  const titleBar = (tile, color, name) => `<div class="ap-title"><span class="ap-tile" style="background:${color}">${tile}</span><span class="ap-title__name">${esc(name)}</span>${CTL}</div>`;
+  const ribbon = (tabs) => `<div class="ap-tabs">${tabs.map((t, i) => `<span class="${i === 0 ? "is-file" : i === 1 ? "is-cur" : ""}">${t}</span>`).join("")}</div>` +
+    `<div class="ap-ribbon"><i></i><i></i><b></b><i class="w"></i><i class="w" style="width:34px"></i><b></b><i></i><i></i><i></i><i></i><b></b><i></i><i></i><i></i><b></b><i style="width:46px"></i><i style="width:46px"></i></div>`;
+  const DOCS_TEXT = {
+    minutes: `<h4>定例会議 議事録</h4><p class="r">2026年11月20日(金) 10:00〜11:00 · 会議室B</p>` +
+      `<p class="h">出席</p><p>開発チーム 5名</p>` +
+      `<p class="h">1. 先週の課題</p><p>試作基板の電源ノイズは, フィルターの定数を変えて対策済み. 再測定の結果は次回に報告する.</p>` +
+      `<p class="h">2. 日程</p><p>評価用の試作は12月第2週に届く予定. 受け入れの確認は届いた週のうちに行う.</p>` +
+      `<p class="h">3. 次回</p><p>11月27日(金) 10:00〜</p>`,
+    report: `<h4>報告書</h4><p class="r">2026年11月18日</p>` +
+      `<p class="h">件名</p><p>試作基板の評価結果について</p>` +
+      `<p class="h">1. 目的</p><p>試作した基板について, 電源の安定性と通信の品質を確かめる.</p>` +
+      `<p class="h">2. 結果</p><p>電源の変動は規定の範囲に収まった. 通信のエラーは, 1万回の送受信で0回だった.</p>` +
+      `<p class="h">3. 今後</p><p>温度を変えた評価を12月に行う.</p>`,
+  };
+  const OFFICE_TABS = { word: ["ファイル", "ホーム", "挿入", "描画", "デザイン", "レイアウト", "参考資料", "差し込み文書", "校閲", "表示"] };
+
+  function openedHtml(o) {
+    if (o.kind === "word") {
+      return `<div style="display:contents;--ap-color:var(--app-word)">` + titleBar("W", "var(--app-word)", o.file + " - Word") + ribbon(OFFICE_TABS.word) +
+        `<div class="ap-canvas"><div class="ap-paper">${DOCS_TEXT[o.doc]}</div></div>` +
+        `<div class="ap-status"><span>1/1 ページ  ·  日本語</span><span>100%</span></div></div>`;
     }
-    function showCompose(lines, current) {
-      const n = lines.join("\n").replace(/\*\*|`|^## |^- /gm, "").length + current.length;
-      win.className = "win";
-      win.innerHTML = `<div class="compose__band"><span class="win__chip">ChatGPT</span><span class="keys">Enter  Send     Shift+Enter  New line     Esc  Back</span></div>` +
-        `<div class="compose__body">${lines.map((l) => mdLine(l, false)).join("")}${mdLine(current, true)}</div>` +
-        `<div class="compose__status"><span>Ctrl+↑  Earlier questions</span><span>${n} chars</span></div>`;
-      win.hidden = false;
+    if (o.kind === "ppt") {
+      const thumbs = [["新しいプレゼンテーション", ""], ["ツアーを開始", "ツアー"], ["シンプル", "タイトル"], ["ビジネス", "タイトル"]];
+      const recent = [["会議資料_11月.pptx", "ドキュメント » プロジェクトA", "昨日"], ["提案_PowerPoint用テンプレート.potx", "ドキュメント » テンプレート", "11月12日"], ["製品紹介_2026.pptx", "ドキュメント", "10月30日"]];
+      return `<div style="display:contents;--ap-color:var(--app-ppt)">` + titleBar("P", "var(--app-ppt)", "PowerPoint") +
+        `<div class="ap-start"><div class="ap-nav"><span class="is-cur">ホーム</span><span>新規</span><span>開く</span></div><div class="ap-main">` +
+        `<h4>こんにちは</h4><div class="ap-thumbs">${thumbs.map(([n, t]) => `<div class="ap-thumb"><div>${t}</div><span>${n}</span></div>`).join("")}</div>` +
+        `<div class="ap-cap">最近使ったアイテム</div><div class="ap-list">${recent.map(([n, p, d]) => `<div><span class="ap-tile" style="background:var(--app-ppt)">P</span><span>${esc(n)}<br><small>${esc(p)}</small></span><small>${d}</small></div>`).join("")}</div>` +
+        `</div></div></div>`;
     }
+    // ChatGPT(ブラウザー)
+    // アドレス欄は, ブラウザーと同じく日本語や空白をそのまま見せる(長い質問も?q=で開く. K22)
+    const q = o.long ? "## LNAの選び方 2.4GHz帯で使う**LNA**を探しています. - NFは1dB以下 - 電源は`3.3V`" : o.q;
+    const url = "chatgpt.com/?q=" + q;
+    const user = o.long
+      ? `<div class="ap-user"><div class="h">LNAの選び方</div>2.4GHz帯で使う<strong>LNA</strong>を探しています.<ul><li>NFは1dB以下</li><li>電源は<code>3.3V</code></li></ul></div>`
+      : `<div class="ap-user">${esc(o.q)}</div>`;
+    const bot = o.long
+      ? `<div class="ap-bot"><p>2.4GHz帯で, NFが1dB以下, 3.3Vで動くLNAを選ぶときは, 次の3点を比べると絞りやすいです.</p><div class="ap-dots"><i></i><i></i><i></i></div></div>`
+      : `<div class="ap-bot"><p>To rename the branch you're on:</p><pre>git branch -m new-name</pre><p>To rename another branch, give both names: <code>git branch -m old new</code>.</p></div>`;
+    return `<div class="ap-btabs"><div class="ap-btab"><i></i>ChatGPT</div><div class="ap-bplus">+</div><span style="flex:1"></span>${CTL.replace("ap-title__ctl", "ap-title__ctl")}</div>` +
+      `<div class="ap-addr"><span>&#x2190;</span><span>&#x2192;</span><span>&#x21BB;</span><div class="ap-addr__box"><b>${esc(url.split("/?")[0])}</b>${esc("/?" + url.split("/?")[1])}</div></div>` +
+      `<div class="ap-chat"><div class="ap-chat__flow">${user}${bot}</div><div class="ap-ask">Ask anything</div></div>`;
+  }
+  function showOpened(o) {
+    opened.innerHTML = openedHtml(o);
+    opened.hidden = false;
+  }
 
-    // 開いた先の窓. 実際のアプリやブラウザーの形に寄せた架空の画面(ロゴは描かない)
-    const CTL = `<span class="ap-title__ctl"><span>&#x2500;</span><span>&#x25A2;</span><span>&#x2715;</span></span>`;
-    const titleBar = (tile, color, name) => `<div class="ap-title"><span class="ap-tile" style="background:${color}">${tile}</span><span class="ap-title__name">${esc(name)}</span>${CTL}</div>`;
-    const ribbon = (tabs) => `<div class="ap-tabs">${tabs.map((t, i) => `<span class="${i === 0 ? "is-file" : i === 1 ? "is-cur" : ""}">${t}</span>`).join("")}</div>` +
-      `<div class="ap-ribbon"><i></i><i></i><b></b><i class="w"></i><i class="w" style="width:34px"></i><b></b><i></i><i></i><i></i><i></i><b></b><i></i><i></i><i></i><b></b><i style="width:46px"></i><i style="width:46px"></i></div>`;
-    const DOCS_TEXT = {
-      minutes: `<h4>定例会議 議事録</h4><p class="r">2026年11月20日(金) 10:00〜11:00 · 会議室B</p>` +
-        `<p class="h">出席</p><p>開発チーム 5名</p>` +
-        `<p class="h">1. 先週の課題</p><p>試作基板の電源ノイズは, フィルターの定数を変えて対策済み. 再測定の結果は次回に報告する.</p>` +
-        `<p class="h">2. 日程</p><p>評価用の試作は12月第2週に届く予定. 受け入れの確認は届いた週のうちに行う.</p>` +
-        `<p class="h">3. 次回</p><p>11月27日(金) 10:00〜</p>`,
-      report: `<h4>報告書</h4><p class="r">2026年11月18日</p>` +
-        `<p class="h">件名</p><p>試作基板の評価結果について</p>` +
-        `<p class="h">1. 目的</p><p>試作した基板について, 電源の安定性と通信の品質を確かめる.</p>` +
-        `<p class="h">2. 結果</p><p>電源の変動は規定の範囲に収まった. 通信のエラーは, 1万回の送受信で0回だった.</p>` +
-        `<p class="h">3. 今後</p><p>温度を変えた評価を12月に行う.</p>`,
-    };
-    const OFFICE_TABS = { word: ["ファイル", "ホーム", "挿入", "描画", "デザイン", "レイアウト", "参考資料", "差し込み文書", "校閲", "表示"] };
+  // ---------- 再生 ----------
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let run = 0, current = 0, seen = false;
+  class Stop extends Error {}
+  const wait = (ms, id) => new Promise((ok, ng) => setTimeout(() => (id === run ? ok() : ng(new Stop())), reduce ? 0 : ms));
 
-    function openedHtml(o) {
-      if (o.kind === "word") {
-        return `<div style="display:contents;--ap-color:var(--app-word)">` + titleBar("W", "var(--app-word)", o.file + " - Word") + ribbon(OFFICE_TABS.word) +
-          `<div class="ap-canvas"><div class="ap-paper">${DOCS_TEXT[o.doc]}</div></div>` +
-          `<div class="ap-status"><span>1/1 ページ  ·  日本語</span><span>100%</span></div></div>`;
-      }
-      if (o.kind === "ppt") {
-        const thumbs = [["新しいプレゼンテーション", ""], ["ツアーを開始", "ツアー"], ["シンプル", "タイトル"], ["ビジネス", "タイトル"]];
-        const recent = [["会議資料_11月.pptx", "ドキュメント » プロジェクトA", "昨日"], ["提案_PowerPoint用テンプレート.potx", "ドキュメント » テンプレート", "11月12日"], ["製品紹介_2026.pptx", "ドキュメント", "10月30日"]];
-        return `<div style="display:contents;--ap-color:var(--app-ppt)">` + titleBar("P", "var(--app-ppt)", "PowerPoint") +
-          `<div class="ap-start"><div class="ap-nav"><span class="is-cur">ホーム</span><span>新規</span><span>開く</span></div><div class="ap-main">` +
-          `<h4>こんにちは</h4><div class="ap-thumbs">${thumbs.map(([n, t]) => `<div class="ap-thumb"><div>${t}</div><span>${n}</span></div>`).join("")}</div>` +
-          `<div class="ap-cap">最近使ったアイテム</div><div class="ap-list">${recent.map(([n, p, d]) => `<div><span class="ap-tile" style="background:var(--app-ppt)">P</span><span>${esc(n)}<br><small>${esc(p)}</small></span><small>${d}</small></div>`).join("")}</div>` +
-          `</div></div></div>`;
-      }
-      // ChatGPT(ブラウザー)
-      // アドレス欄は, ブラウザーと同じく日本語や空白をそのまま見せる(長い質問も?q=で開く. K22)
-      const q = o.long ? "## LNAの選び方 2.4GHz帯で使う**LNA**を探しています. - NFは1dB以下 - 電源は`3.3V`" : o.q;
-      const url = "chatgpt.com/?q=" + q;
-      const user = o.long
-        ? `<div class="ap-user"><div class="h">LNAの選び方</div>2.4GHz帯で使う<strong>LNA</strong>を探しています.<ul><li>NFは1dB以下</li><li>電源は<code>3.3V</code></li></ul></div>`
-        : `<div class="ap-user">${esc(o.q)}</div>`;
-      const bot = o.long
-        ? `<div class="ap-bot"><p>2.4GHz帯で, NFが1dB以下, 3.3Vで動くLNAを選ぶときは, 次の3点を比べると絞りやすいです.</p><div class="ap-dots"><i></i><i></i><i></i></div></div>`
-        : `<div class="ap-bot"><p>To rename the branch you're on:</p><pre>git branch -m new-name</pre><p>To rename another branch, give both names: <code>git branch -m old new</code>.</p></div>`;
-      return `<div class="ap-btabs"><div class="ap-btab"><i></i>ChatGPT</div><div class="ap-bplus">+</div><span style="flex:1"></span>${CTL.replace("ap-title__ctl", "ap-title__ctl")}</div>` +
-        `<div class="ap-addr"><span>&#x2190;</span><span>&#x2192;</span><span>&#x21BB;</span><div class="ap-addr__box"><b>${esc(url.split("/?")[0])}</b>${esc("/?" + url.split("/?")[1])}</div></div>` +
-        `<div class="ap-chat"><div class="ap-chat__flow">${user}${bot}</div><div class="ap-ask">Ask anything</div></div>`;
-    }
-    function showOpened(o) {
-      opened.innerHTML = openedHtml(o);
-      opened.hidden = false;
-    }
+  async function press(label, id) {
+    keycap.textContent = label;
+    keycap.hidden = false;
+    await wait(260, id);
+    keycap.classList.add("is-down");
+    await wait(140, id);
+    keycap.classList.remove("is-down");
+  }
 
-    // ---------- 再生 ----------
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let run = 0, current = 0, seen = false;
-    class Stop extends Error {}
-    const wait = (ms, id) => new Promise((ok, ng) => setTimeout(() => (id === run ? ok() : ng(new Stop())), reduce ? 0 : ms));
-
-    async function press(label, id) {
-      keycap.textContent = label;
-      keycap.hidden = false;
-      await wait(260, id);
-      keycap.classList.add("is-down");
-      await wait(140, id);
-      keycap.classList.remove("is-down");
-    }
-
-    async function play(k, id) {
-      const sc = SCENES[k];
-      caption.innerHTML = sc.caption;
-      [...tabs.children].forEach((t, i) => t.setAttribute("aria-selected", String(i === k)));
-      opened.hidden = true; win.hidden = true; keycap.hidden = true;
-      await wait(500, id);
-      await press("Alt+Space", id);
-      showLauncher("", [], false);
-      await wait(450, id);
-      keycap.hidden = true;
-      let text = "", rows = [];
-      for (const st of sc.steps) {
-        if (st.type) {
-          const chunks = [...st.type];
-          for (const ch of chunks) {
-            text += ch;
-            rows = st.rows(text);
-            showLauncher(text, rows, true);
-            await wait(st.fast ? 55 : 150, id);
+  async function play(k, id) {
+    const sc = SCENES[k];
+    root.dataset.scene = sc.id;
+    caption.innerHTML = sc.caption;
+    [...tabs.children].forEach((t, i) => t.setAttribute("aria-selected", String(i === k)));
+    opened.hidden = true; win.hidden = true; keycap.hidden = true;
+    await wait(500, id);
+    await press("Alt+Space", id);
+    showLauncher("", [], false);
+    await wait(450, id);
+    keycap.hidden = true;
+    let text = "", rows = [], chip = "";
+    for (const st of sc.steps) {
+      if (st.type) {
+        const chunks = [...st.type];
+        for (const ch of chunks) {
+          text += ch;
+          rows = st.rows(text);
+          showLauncher(text, rows, true, chip);
+          await wait(st.fast ? 55 : 150, id);
+        }
+        await wait(st.short ? 250 : 1400, id);
+      } else if (st.mode) {
+        await press("Space", id);
+        keycap.hidden = true;
+        chip = st.mode; text = ""; rows = st.rows;
+        showLauncher(text, rows, true, chip);
+        await wait(1100, id);
+      } else if (st.paste) {
+        text = st.paste; rows = st.rows;
+        showLauncher(text, rows, true, chip);
+        keycap.hidden = true;
+      } else if (st.clear) {
+        await press("Ctrl+A", id);
+        keycap.hidden = true;
+        text = ""; rows = chip ? CALC_HINTS : [];
+      } else if (st.wait) {
+        await wait(st.wait, id);
+      } else if (st.key === "Space") {
+        await press("Space", id);
+        keycap.hidden = true;
+        showCompose([], "");
+        await wait(500, id);
+      } else if (st.compose) {
+        const done = [];
+        for (let li = 0; li < st.compose.length; li++) {
+          const line = st.compose[li];
+          for (let i = 1; i <= line.length; i++) {
+            showCompose(done, line.slice(0, i));
+            await wait(line.length > 14 ? 55 : 80, id);
           }
-          await wait(1400, id);
-        } else if (st.paste) {
-          text = st.paste; rows = st.rows;
-          showLauncher(text, rows, true);
-          keycap.hidden = true;
-        } else if (st.clear) {
-          await press("Ctrl+A", id);
-          keycap.hidden = true;
-          text = ""; rows = [];
-        } else if (st.wait) {
-          await wait(st.wait, id);
-        } else if (st.key === "Space") {
-          await press("Space", id);
-          keycap.hidden = true;
-          showCompose([], "");
           await wait(500, id);
-        } else if (st.compose) {
-          const done = [];
-          for (let li = 0; li < st.compose.length; li++) {
-            const line = st.compose[li];
-            for (let i = 1; i <= line.length; i++) {
-              showCompose(done, line.slice(0, i));
-              await wait(line.length > 14 ? 55 : 80, id);
-            }
-            await wait(500, id);
-            if (li + 1 < st.compose.length) {
-              await press("Shift+Enter", id);
-              keycap.hidden = true;
-              done.push(line);
-              showCompose(done, "");
-              await wait(250, id);
-            } else {
-              done.push(line);
-            }
+          if (li + 1 < st.compose.length) {
+            await press("Shift+Enter", id);
+            keycap.hidden = true;
+            done.push(line);
+            showCompose(done, "");
+            await wait(250, id);
+          } else {
+            done.push(line);
           }
-          showCompose(done.slice(0, -1), done[done.length - 1]);
-          await wait(1200, id);
-        } else if (st.key) {
-          await press(st.key, id);
-          if (st.key === "Enter") { win.hidden = true; }
-          keycap.hidden = true;
-        } else if (st.open) {
-          await wait(350, id);
-          showOpened(st.open);
-          await wait(2400, id);
         }
-      }
-      await wait(900, id);
-    }
-
-    async function loop(start) {
-      const id = ++run;
-      try {
-        for (let k = start; ; k = (k + 1) % SCENES.length) {
-          current = k;
-          await play(k, id);
-          if (reduce) return;
-        }
-      } catch (e) {
-        if (!(e instanceof Stop)) throw e;
+        showCompose(done.slice(0, -1), done[done.length - 1]);
+        await wait(1200, id);
+      } else if (st.key) {
+        await press(st.key, id);
+        if (st.key === "Enter") { win.hidden = true; }
+        keycap.hidden = true;
+      } else if (st.open) {
+        await wait(350, id);
+        showOpened(st.open);
+        await wait(2400, id);
       }
     }
+    await wait(900, id);
+  }
 
-    SCENES.forEach((sc, i) => {
-      const b = document.createElement("button");
-      b.type = "button"; b.className = "demo-tab"; b.setAttribute("role", "tab"); b.textContent = sc.tab;
-      b.addEventListener("click", () => loop(i));
-      tabs.append(b);
-    });
-    // 見えたときに始める(見えないうちは動かさない)
-    const io = new IntersectionObserver((es) => {
-      if (es.some((e) => e.isIntersecting) && !seen) { seen = true; loop(0); }
-    });
-    io.observe(desk);
-  })();
-  </script>
+  async function loop(start) {
+    const id = ++run;
+    try {
+      for (let k = start; ; k = (k + 1) % SCENES.length) {
+        current = k;
+        await play(k, id);
+        if (reduce) return;
+      }
+    } catch (e) {
+      if (!(e instanceof Stop)) throw e;
+    }
+  }
+
+  SCENES.forEach((sc, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "demo-tab"; b.setAttribute("role", "tab"); b.textContent = sc.tab;
+    b.addEventListener("click", () => loop(i));
+    tabs.append(b);
+  });
+  if (SCENES.length < 2) tabs.hidden = true;
+  // 見えている間だけ動かす(1ページにいくつも置くため)
+  const io = new IntersectionObserver((es) => {
+    const on = es[es.length - 1].isIntersecting;
+    if (on && !seen) { seen = true; loop(current); }
+    else if (!on && seen) { seen = false; run++; }
+  });
+  io.observe(desk);
+  }
+
+  document.querySelectorAll(".demo").forEach((root) => {
+    const want = (root.dataset.scenes || "all").split(" ");
+    start(root, ALL.filter((sc) => want[0] === "all" || want.includes(sc.id)));
+  });
+})();
+
+</script>
 </body>
 </html>

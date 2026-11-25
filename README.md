@@ -2,9 +2,16 @@
 
 **アプリ, ファイル, ブックマーク, 窓, プロセスを1つの入力欄から探して開く**Windows用のランチャー.
 
-<a href="https://maonthemoon.github.io/hikidashi/"><img src="docs/images/hikidashi.png" alt="Hikidashiの紹介のページ: kaigiと打つと「会議」の付くファイルが出るデモ" width="720"></a>
+<a href="https://maonthemoon.github.io/hikidashi/">
+  <picture>
+    <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="docs/images/demo-narrow-dark.webp">
+    <source media="(max-width: 767px)" srcset="docs/images/demo-narrow-light.webp">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/demo-dark.webp">
+    <img src="docs/images/demo-light.webp" alt="Hikidashiの動くデモ: アプリ, ローマ字で日本語, パスを貼る, ChatGPTに聞く, 長い質問, 計算">
+  </picture>
+</a>
 
-[maonthemoon.github.io/hikidashi](https://maonthemoon.github.io/hikidashi/)で, アプリ, ローマ字で日本語, パスを貼る, ChatGPTに聞く, 長い質問, 計算の6つの場面を動くデモで見られます.
+[紹介のページ](https://maonthemoon.github.io/hikidashi/)では, 6つの場面をタブで選んで見られます.
 
 ホットキーで入力欄を出し, 名前の一部を打って`Enter`を押すと開きます. 飛び飛びの文字やローマ字でも探せて, パスを貼ればそのまま開き, 見つからなければChatGPTに聞けます. キーボードだけで, アプリもファイルもWebも開きたい人に向いています.
 
@@ -18,10 +25,10 @@ Windowsのスタートメニューの検索や, PowerToys Runなどのランチ�
 | メールやチャットで受け取ったパスを開きたい | 引用符付きのパス, `/mnt/c/...`, `\\wsl.localhost\...`, `%APPDATA%\...`を貼って`Enter`で開きます. エクスプローラーのアドレス欄に貼り直す必要はありません |
 | 探しても見つからなかったので, ChatGPTに聞きたい | 一致がなければ, 打った文がそのままChatGPTに送られます. ブラウザーを開いて入力欄に貼り直す必要はありません |
 | ChatGPTに長い質問を, 整理して書いてから送りたい | `Shift+Enter`で書く窓が開きます. `#`の見出し, `-`の箇条書き, `**太字**`, `` `コード` ``などのMarkdownは, 印を隠して整えた形で見せるので, 送る前に読み返しやすくなります. 書きかけは残り, `Ctrl+↑`で前に送った質問も呼び出せます |
-| 16進数や2進数, dBmなどをさっと換算したい | `0x1F`で10進数と2進数, `10dBm`でWと50Ωでの電圧, `vswr 1.5`でリターンロスなどが出ます. リアクタンス(`10nH@2.4G`)や共振周波数(`10nH 1pF`)も計算でき, `Enter`で結果をコピーします. 電卓を開く必要はありません |
+| 16進数や2進数, dBmなどをさっと換算したい | `=`と空白で計算のモードに入り, `0x1F`で10進数と2進数, `10dBm`でWと50Ωでの電圧, `vswr 1.5`でリターンロスなどが出ます. リアクタンス(`10nH@2.4G`)や共振周波数(`10nH 1pF`)も計算でき, `Enter`で結果をコピーします. 電卓を開く必要はありません |
 | Box DriveやWSLの中のファイルも同じ場所から探したい | `bx `でBox, `w `でWSLのホームを探します. Box Driveは手元のデータを読むので, 何万件あってもすぐ出ます. BoxのファイルのURLを貼ると, 手元のファイルとして開きます |
 | Windowsをダークモードで使っている | ランチャーの窓, 書く窓, 設定画面も, Windowsのアプリのモードに合わせてダークになります. 設定でいつもライト, いつもダークにもできます |
-| 常駐させるものは軽くしたい | exe 1つ(約4MB)で, インストールも管理者権限も要りません. 作者のPC(約1万6千ファイル)では, メモリ約20MB, 1回の検索は1ms以下でした |
+| 常駐させるものは軽くしたい | exe 1つ(約6MB)で, インストールも管理者権限も要りません. 作者のPC(約1万6千ファイル)では, メモリ約20MB, 1回の検索は1ms以下でした |
 
 ## できること
 
@@ -30,7 +37,7 @@ Windowsのスタートメニューの検索や, PowerToys Runなどのランチ�
 - **パスを貼って開く**: `C:\...`, `\\server\...`, `/mnt/c/...`, 引用符の付いたパスもそのまま読めます. `https://`のURLを貼ればブラウザーで開きます.
 - **見つからなければChatGPT**: 一致がなければ, 打った文字をChatGPTに送ります. 一致があっても`Ctrl+Enter`でChatGPT. Google検索は`g `のあとに打つか`Ctrl+Alt+Enter`.
 - **WSLとkill**: `w `でWSLのホームのファイルを探し, `k `でプロセスをすぐ終わらせます.
-- **計算**: 16進数と2進数, dBmとW, VSWR, リアクタンスなどを打つだけで出します.
+- **計算**: 16進数と2進数, dBmとW, VSWR, リアクタンス, MIPI RFFEなど. `=`と空白で計算のモードに入ります.
 - **軽い**: exe 1つで動き, 管理者権限もインストールも要りません.
 
 ## はじめかた
@@ -95,7 +102,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 
 ### 計算
 
-進数は, 打った進数以外の2つを出します: `0x1F`(16進数), `0b111011`(2進数), `1187`(10進数). RFは, `10dBm`(Wと50Ωでの電圧), `100mW`(dBm), `3dB`, `x2`, `vswr 1.5`, `rl 20`, `vswr 10 il 2dB`(損失を通して入力から見たVSWR), `10nH@2.4G`, `1pF@100M`, `10nH 1pF`(共振周波数). `Enter`で結果をコピーします.
+`=`と空白を打つと計算のモードになります. 進数は, 打った進数以外の2つを出します: `0x1F`(16進数), `0b111011`(2進数), `1187`(10進数). RFは, `10dBm`(Wと50Ωでの電圧), `100mW`(dBm), `3dB`, `x2`, `vswr 1.5`, `rl 20`, `vswr 10 il 2dB`(損失を通して入力から見たVSWR), `10nH@2.4G`, `1pF@100M`, `10nH 1pF`(共振周波数). `Enter`で結果をコピーします.
 
 ### タスクトレイ
 
@@ -134,7 +141,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 - **リリース**: `v`で始まるタグ(例: `v0.1.0`)をpushすると, GitHub ActionsがビルドとテストをしてZIPを作り, Releasesに置きます. あわせて, `bin/Hikidashi.exe`をそのexeに差し替えます. `bin/Hikidashi.exe`は手で更新しません.
 - **マニュアル**: `docs/manual.html`(1つのHTML). トレイの`Manual`で開きます. ZIPにも`docs\manual.html`として入れます. 書体も埋め込み, 開いてもWebを見にいきません(`tools/embed-fonts.py`). 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
 - **アイコン**: `uv run tools/make-icon.py`で`assets/hikidashi.ico`を作り直します.
-- **紹介のページ**: GitHub Pagesのトップ(`docs/index.html`)は, 窓をHTMLで作り直した動くデモのページです. `./tools/build-manual.sh`でマニュアル(`docs/manual.html`)と一緒に作ります. READMEの静止画は`uv run tools/make-screenshot.py`でそのページから撮ります(Playwrightのchromiumを使う).
+- **紹介のページ**: GitHub Pagesのトップ(`docs/index.html`)は, 窓をHTMLで作り直した動くデモのページです. `./tools/build-manual.sh`でマニュアル(`docs/manual.html`)と一緒に作ります. デモの元は紹介のページとマニュアルで同じです. READMEの動く画像は, `uv run tools/make-demo.py`でそのデモを`docs/images/demo-*.webp`に書き出します(ライトとダーク, 広い幅と狭い幅の4枚. Playwrightのchromiumを使う).
 - **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, 別のファイルとして`bin/`に置き, ZIPにも入れます. 新しくするときは`./tools/update-dict.sh`で[skk-dev/dict](https://github.com/skk-dev/dict)から取ってきてcommitします. exeの隣に辞書がなければ, 起動したときにネットから取ってきます.
 
 ## ライセンス
