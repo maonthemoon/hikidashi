@@ -32,6 +32,8 @@ STATE = "() => { const r = document.querySelector('.demo'), o = []; for (const s
 def record(browser, name):
     theme, width, dpr = VARIANTS[name]
     pg = browser.new_page(viewport={"width": width, "height": 1100}, device_scale_factor=dpr, color_scheme=theme, reduced_motion="no-preference")
+    errors = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
     pg.clock.install()
     pg.goto((ROOT / "docs" / "index.html").as_uri())
     pg.wait_for_load_state('networkidle')  # 書体の読み込み
@@ -43,6 +45,8 @@ def record(browser, name):
     clip = pg.evaluate("() => { const b = document.querySelector('.demo').parentElement.getBoundingClientRect(); return { x: 0, y: 0, width: innerWidth, height: Math.ceil(b.bottom) }; }")
     frames, durations, last, seen_last = [], [], None, False
     while True:
+        if errors:
+            sys.exit(f"{name}: デモがエラーで止まりました: {errors[0]}")
         scene, state = pg.evaluate(STATE)
         if scene == "calc":
             seen_last = True

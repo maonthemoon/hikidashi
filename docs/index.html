@@ -1294,7 +1294,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       tab: "計算",
       caption: "<strong>計算のモードで, 進数もRFも.</strong> <code>=</code>と空白で計算のモード. 16進数, dBm, VSWR, 共振, MIPI RFFEのビット列と値. <kbd>Enter</kbd>で結果をコピーします.",
       steps: [
-        { type: "=", short: true, rows: () => [] }, { mode: "calc", rows: () => [] },
+        { type: "=", short: true, rows: () => [] }, { mode: "calc", rows: [] },
         { type: "0x1F", rows: (q) => (q === "0x1F" ? [calc("31", "dec"), calc("0001 1111", "bin")] : CALC_NONE) }, { clear: true },
         { type: "10dBm", rows: (q) => (q === "10dBm" ? [calc("10 mW", "Power"), calc("1 V", "Peak voltage at Z0 = 50 Ω · Vrms 707.1 mV · Vpp 2 V")] : CALC_NONE) }, { clear: true },
         { type: "vswr 1.5", rows: (q) => (q === "vswr 1.5" ? [calc("13.98 dB", "Return loss"), calc("0.200", "|Γ| reflection coefficient"), calc("4.00 %", "Reflected power"), calc("0.1773 dB", "Mismatch loss")] : CALC_NONE) }, { clear: true },
