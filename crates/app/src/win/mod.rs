@@ -131,6 +131,8 @@ pub struct App {
     dict: Arc<OnceLock<Dict>>,
     pub config: Config,
     pub config_error: Option<String>,
+    /// 塗ってある色がダークか
+    themed_dark: bool,
     apps: Catalog,
     bookmarks: Catalog,
     /// ChromeとEdgeのBookmarksの更新日時(変わったときだけ読み直す)
@@ -666,6 +668,7 @@ impl App {
     /// `select_all`なら前回の入力を全選択で残す(A3). 選んだ文字や`--query`の文字を入れて出すときは, カーソルを末尾に置く
     fn show_inner(&mut self, select_all: bool) {
         let _d = diag::doing("show the window");
+        self.sync_theme();
         let t0 = self.stats.hotkey_at.take().unwrap_or_else(Instant::now);
         unsafe {
             let mut pt = POINT::default();
@@ -825,8 +828,16 @@ impl App {
         });
     }
 
+    /// 塗ってある色と今のテーマが違えば塗り直す
+    fn sync_theme(&mut self) {
+        if self.themed_dark != theme::is_dark() {
+            self.apply_theme();
+        }
+    }
+
     /// ライトとダークが変わったとき(K39): 枠, 書く窓, 入力欄を塗り直す
     fn apply_theme(&mut self) {
+        self.themed_dark = theme::is_dark();
         set_border_color(self.hwnd);
         settings::apply_theme();
         if let Some(c) = &mut self.compose {
@@ -839,11 +850,8 @@ impl App {
     }
 
     fn reload_config(&mut self) {
-        let was_dark = theme::is_dark();
         let (cfg, err) = storage::load_config();
-        if theme::is_dark() != was_dark {
-            self.apply_theme();
-        }
+        self.sync_theme();
         let files_changed = cfg.files != self.config.files || cfg.wsl != self.config.wsl || cfg.apps != self.config.apps;
         self.config_error = err.map(|e| e.0);
         self.config = cfg.clone();
@@ -1940,6 +1948,13 @@ impl App {
                 self.paste_clip(*id);
                 return;
             }
+            // 使い方の例: 入力欄に入れる(モードはそのまま)
+            Action::Fill(t) => {
+                let t = t.clone();
+                self.set_edit_text(&t);
+                self.refresh();
+                return;
+            }
             // スクリプト: 窓は閉じずに動かして, 出力を行にする
             Action::ScriptRun { script, arg } => {
                 self.start_script(*script, arg.clone());
@@ -2043,7 +2058,7 @@ impl App {
             }
             Action::BoxUrl { url, .. } => actions::open_url(url, &cfg),
             Action::Copy(s) | Action::ScriptLine(s) => actions::copy_text(hwnd, s),
-            Action::Clip(_) | Action::ScriptRun { .. } => Ok(()),
+            Action::Clip(_) | Action::ScriptRun { .. } | Action::Fill(_) => Ok(()),
             Action::ChatGpt(q) => actions::ask_chatgpt(hwnd, q, &cfg),
             Action::Google(q) => actions::google(q, &cfg),
             Action::OpenUrl(u) => actions::open_url(u, &cfg),
@@ -2189,7 +2204,7 @@ impl App {
                 items.push(mi("Copy", g::COPY, MenuAct::ClipCopy(*id)));
                 items.push(mi("Delete from history", g::KILL, MenuAct::ClipDelete(*id)));
             }
-            Action::ScriptRun { .. } => {}
+            Action::ScriptRun { .. } | Action::Fill(_) => {}
             Action::BoxUrl { url, .. } => {
                 items.push(mi("Open in browser", g::GLOBE, MenuAct::Open));
                 items.push(mi("Copy URL", g::COPY, MenuAct::CopyText(url.clone())));
@@ -2901,8 +2916,9 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             WM_SETTINGCHANGE => {
                 // Windowsのアプリのモード(ライト/ダーク)が変わった. 設定が「自動」なら追いかける(K39)
                 let what = if lparam.0 != 0 { unsafe { PCWSTR(lparam.0 as *const u16).to_string().unwrap_or_default() } } else { String::new() };
-                if what == "ImmersiveColorSet" && theme::set_theme(&app.config.ui.theme) {
-                    app.apply_theme();
+                if what == "ImmersiveColorSet" {
+                    theme::set_theme(&app.config.ui.theme);
+                    app.sync_theme();
                 }
                 None
             }
@@ -2913,9 +2929,6 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             }
             m if m == app.taskbar_msg && m != 0 => {
                 system::tray_add(hwnd);
-        // フォルダーを移したときは, 自動起動の登録先を今の場所に直す
-        system::fix_autostart(&app.exe_path);
-        std::thread::spawn(storage::remove_old_copy);
                 Some(LRESULT(0))
             }
             WM_DESTROY => {
@@ -3311,6 +3324,7 @@ pub fn run() {
         favicons_at: None,
         config,
         config_error: err.map(|e| e.0),
+        themed_dark: theme::is_dark(),
         apps: Catalog::new(vec![]),
         bookmarks: Catalog::new(vec![]),
         bookmarks_mtime: vec![],
@@ -3359,6 +3373,9 @@ pub fn run() {
     with_app(|app| {
         app.set_dpi(96);
         system::tray_add(hwnd);
+        // フォルダーを移したときは, 自動起動の登録先を今の場所に直す
+        system::fix_autostart(&app.exe_path);
+        std::thread::spawn(storage::remove_old_copy);
         indexer::start(&app.shared, hwnd);
         app.ext.start();
         diag::start(hwnd);

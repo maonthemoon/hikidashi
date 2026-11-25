@@ -97,6 +97,8 @@ pub enum Action {
     BoxUrl { url: String, id: String, folder: bool, local: Option<String> },
     /// 計算の結果をコピー
     Copy(String),
+    /// 入力欄に入れる(使い方の例. K49)
+    Fill(String),
     ChatGpt(String),
     Google(String),
     /// 自作コマンドのURL
@@ -422,14 +424,15 @@ pub fn url_encode(s: &str) -> String {
 }
 
 /// 計算のモードの使い方の例(入力が空のときと, 答えが出ないときに出す)
-const CALC_EXAMPLES: [(&str, &str); 7] = [
+const CALC_EXAMPLES: [(&str, &str); 8] = [
     ("0x1F", "Hex to decimal and binary"),
     ("(12+3)*4", "Calculator: + - * / ^ ( ) %"),
     ("10dBm", "dBm to watts and volts"),
     ("vswr 1.5", "VSWR to return loss and reflection"),
     ("10nH 2.4G", "Capacitance that resonates with 10 nH at 2.4 GHz"),
     ("50+j50@2G", "Impedance to admittance and equivalent circuits"),
-    ("rffe 6 1C 38", "MIPI RFFE frame: SA, address, data (or paste the bits)"),
+    ("rffe", "MIPI RFFE: all commands (write, read, extended)"),
+    ("0110010111001001110000", "MIPI RFFE: bits to mode, SA, address, data"),
 ];
 
 fn calc_hint_rows() -> Vec<Row> {
@@ -438,9 +441,9 @@ fn calc_hint_rows() -> Vec<Row> {
         .map(|(ex, note)| Row {
             name: ex.to_string(),
             sub: format!("Example · {note}"),
-            tag: "copy",
+            tag: "try",
             positions: vec![],
-            action: Action::Copy(ex.to_string()),
+            action: Action::Fill(ex.to_string()),
             learn_key: None,
             warn: false,
             icon: Icon::Calc,

@@ -15,6 +15,7 @@ pub mod boxdrive;
 pub mod search;
 pub mod builtin;
 pub mod config;
+pub mod iconpx;
 pub mod learn;
 pub mod router;
 pub mod hotkey;

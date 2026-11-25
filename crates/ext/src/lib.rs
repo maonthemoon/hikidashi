@@ -3,7 +3,7 @@
 //! 拡張の形:
 //! ```js
 //! export const meta = { title: "MIPI RFFE", keyword: "rffe", clipboard: true };
-//! export function search(query, ctx) { return [{ title: "…", subtitle: "…", copy: "…", url: "…" }]; }
+//! export function search(query, ctx) { return [{ title: "…", subtitle: "…", copy: "…", url: "…", fill: "…" }]; }
 //! ```
 //! `rquickjs`の`Runtime`はスレッドをまたげないので, 専用のスレッドを1本立ててその中で全部行う.
 //! 呼ぶ側は`ExtHost`にメッセージを送り, 結果を`Receiver`で受ける.
@@ -36,6 +36,8 @@ pub struct ExtMeta {
     pub clipboard: bool,
     /// trueなら計算のモード(`= `)の中でも使える
     pub calc: bool,
+    /// 計算のモードで, 0と1(と空白, `_`)だけがこの数以上なら, keywordなしでもこの拡張に渡す(0なら渡さない)
+    pub calc_bits: usize,
 }
 
 /// 結果の1行
@@ -47,12 +49,14 @@ pub struct ExtRow {
     pub copy: String,
     /// あればEnterでURLを開く(Tabのメニューでコピー)
     pub url: Option<String>,
+    /// あればEnterで入力欄に入れる(keywordのあとに)
+    pub fill: Option<String>,
 }
 
 impl ExtRow {
     fn error(name: &str, msg: &str) -> ExtRow {
         let title = format!("{}: {}", name, msg);
-        ExtRow { copy: title.clone(), title, subtitle: String::new(), url: None }
+        ExtRow { copy: title.clone(), title, subtitle: String::new(), url: None, fill: None }
     }
 }
 
@@ -362,7 +366,8 @@ fn load_file(rt: &Runtime, guard: &Guard, name: &str, path: &Path, stamp: Stamp)
         let title = v.get("title").and_then(|x| x.as_str()).unwrap_or(name).to_string();
         let clipboard = v.get("clipboard").and_then(|x| x.as_bool()).unwrap_or(false);
         let calc = v.get("calc").and_then(|x| x.as_bool()).unwrap_or(false);
-        Ok(ExtMeta { name: name.to_string(), keyword, title, clipboard, calc })
+        let calc_bits = v.get("calcBits").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+        Ok(ExtMeta { name: name.to_string(), keyword, title, clipboard, calc, calc_bits })
     });
     guard.disarm();
     Ok(Loaded { meta: r?, stamp, ctx })
@@ -405,7 +410,7 @@ fn rows_from_json(v: &serde_json::Value) -> Vec<ExtRow> {
                 .filter_map(|o| {
                     let title = s(o, "title")?;
                     let copy = s(o, "copy").unwrap_or_else(|| title.clone());
-                    Some(ExtRow { subtitle: s(o, "subtitle").unwrap_or_default(), url: s(o, "url").filter(|u| !u.is_empty()), title, copy })
+                    Some(ExtRow { subtitle: s(o, "subtitle").unwrap_or_default(), url: s(o, "url").filter(|u| !u.is_empty()), fill: s(o, "fill").filter(|u| !u.is_empty()), title, copy })
                 })
                 .take(MAX_ROWS)
                 .collect()

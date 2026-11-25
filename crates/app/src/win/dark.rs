@@ -113,6 +113,11 @@ fn set_theme(h: HWND, dark_name: PCWSTR) {
     }
 }
 
+/// スクロールの帯だけ, 今のテーマにする
+pub fn scroll_bars(h: HWND) {
+    set_theme(h, w!("DarkMode_Explorer"));
+}
+
 extern "system" fn apply_one(h: HWND, _: LPARAM) -> BOOL {
     match class_name(h).as_str() {
         "Edit" => set_theme(h, w!("DarkMode_CFD")),

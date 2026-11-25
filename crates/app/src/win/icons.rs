@@ -4,11 +4,13 @@
 //! 読むのに0.6〜2秒かかり, 入力の途中で画面が止まった). 読めるまでは文字のアイコンを出し, 読めたら描き直す.
 
 use super::util::WStr;
+use hikidashi_core::iconpx::{self, Tone};
 use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc, Mutex};
 use windows::Win32::Foundation::SIZE;
 use windows::Win32::Graphics::Gdi::{
-    AlphaBlend, CreateCompatibleDC, DeleteDC, DeleteObject, GetObjectW, SelectObject, AC_SRC_ALPHA, AC_SRC_OVER, BITMAP, BLENDFUNCTION, HBITMAP, HDC, HGDIOBJ,
+    AlphaBlend, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GdiFlush, GetDIBits, GetObjectW, SelectObject, AC_SRC_ALPHA, AC_SRC_OVER, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    BLENDFUNCTION, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ,
 };
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
 use windows::Win32::UI::Controls::{IImageList, ILD_TRANSPARENT};
@@ -41,10 +43,119 @@ pub mod glyph {
 /// フォルダーのアイコンを引くときの名前
 pub const FOLDER_KEY: &str = ":folder";
 
+/// 描ける形にした絵(透明の値を掛けた`size`四方のビットマップ)
 #[derive(Clone, Copy)]
-enum Img {
-    Bitmap(isize),
-    Icon(isize),
+struct Img {
+    normal: isize,
+    /// 地に溶ける色のとき, 板の上に置いたもの. なければ0
+    plated: isize,
+    tone: Tone,
+}
+
+/// 白いアイコンをライトで, 黒いアイコンをダークで見せるときの板の色
+const PLATE_DARK: u32 = 0x5E5D59;
+const PLATE_LIGHT: u32 = 0xE8E6DC;
+
+fn delete_bitmap(h: isize) {
+    if h != 0 {
+        unsafe {
+            let _ = DeleteObject(HGDIOBJ(h as *mut _));
+        }
+    }
+}
+
+impl Img {
+    fn delete(self) {
+        delete_bitmap(self.normal);
+        delete_bitmap(self.plated);
+    }
+}
+
+/// 画素(透明の値を掛けた`size`四方)から, 描ける形を作る
+fn make_img(px: &[u8], size: i32) -> Option<Img> {
+    let tone = iconpx::tone(px);
+    let normal = bitmap_of(px, size)?;
+    let plated = match tone {
+        Tone::Normal => None,
+        Tone::Light => bitmap_of(&iconpx::on_plate(px, size as usize, PLATE_DARK), size),
+        Tone::Dark => bitmap_of(&iconpx::on_plate(px, size as usize, PLATE_LIGHT), size),
+    };
+    Some(Img { normal, plated: plated.unwrap_or(0), tone })
+}
+
+/// 32ビットの空の絵(上から下). 中の画素の場所も返す
+fn dib(size: i32) -> Option<(HBITMAP, *mut u8)> {
+    let bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: size, biHeight: -size, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() },
+        ..Default::default()
+    };
+    let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+    unsafe {
+        let bmp = CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        if bits.is_null() {
+            let _ = DeleteObject(bmp.into());
+            return None;
+        }
+        Some((bmp, bits as *mut u8))
+    }
+}
+
+fn bitmap_of(px: &[u8], size: i32) -> Option<isize> {
+    let n = (size * size * 4) as usize;
+    if px.len() != n {
+        return None;
+    }
+    let (bmp, bits) = dib(size)?;
+    unsafe { std::ptr::copy_nonoverlapping(px.as_ptr(), bits, n) };
+    Some(bmp.0 as isize)
+}
+
+/// Windowsから得た絵を読み, `size`四方の画素にする
+fn read_bitmap(bmp: HBITMAP, size: i32) -> Option<Vec<u8>> {
+    unsafe {
+        let mut info = BITMAP::default();
+        GetObjectW(bmp.into(), std::mem::size_of::<BITMAP>() as i32, Some(&mut info as *mut _ as *mut _));
+        let (w, h) = (info.bmWidth, info.bmHeight.abs());
+        if w <= 0 || h <= 0 || w > 1024 || h > 1024 {
+            return None;
+        }
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: w, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() },
+            ..Default::default()
+        };
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        let dc = CreateCompatibleDC(None);
+        let n = GetDIBits(dc, bmp, 0, h as u32, Some(px.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
+        let _ = DeleteDC(dc);
+        if n == 0 {
+            return None;
+        }
+        iconpx::premultiply(&mut px);
+        Some(iconpx::resize(&px, w as usize, h as usize, size as usize, size as usize))
+    }
+}
+
+/// `HICON`を, 黒の地と白の地に元の大きさ(48px)で描いて, `size`四方の画素にする
+fn read_icon(icon: HICON, size: i32) -> Option<Vec<u8>> {
+    const N: i32 = 48;
+    let n = (N * N * 4) as usize;
+    let draw = |back: u8| -> Option<Vec<u8>> {
+        let (bmp, bits) = dib(N)?;
+        unsafe {
+            let dc = CreateCompatibleDC(None);
+            let old = SelectObject(dc, bmp.into());
+            std::ptr::write_bytes(bits, back, n);
+            let ok = DrawIconEx(dc, 0, 0, icon, N, N, 0, None, DI_NORMAL).is_ok();
+            let _ = GdiFlush();
+            let px = std::slice::from_raw_parts(bits, n).to_vec();
+            SelectObject(dc, old);
+            let _ = DeleteDC(dc);
+            let _ = DeleteObject(bmp.into());
+            ok.then_some(px)
+        }
+    };
+    let px = iconpx::from_black_white(&draw(0)?, &draw(255)?);
+    Some(iconpx::resize(&px, N as usize, N as usize, size as usize, size as usize))
 }
 
 /// 裏で読んだアイコンを窓に知らせる
@@ -53,7 +164,7 @@ pub const WM_APP_ICONS: u32 = 0x8000 + 31;
 /// 裏で読むアイコン: (覚える名前, パス, 大きさ)
 type Req = (String, String, i32);
 /// 読めたもの: (覚える名前, 大きさ, 絵)
-type Done = (String, i32, Option<isize>);
+type Done = (String, i32, Option<Img>);
 
 pub struct Icons {
     cache: HashMap<String, Option<Img>>,
@@ -111,14 +222,12 @@ impl Icons {
             self.pending.remove(&key);
             if size != self.size {
                 // 拡大率が変わる前の大きさ. 使わない
-                if let Some(h) = img {
-                    unsafe {
-                        let _ = DeleteObject(HGDIOBJ(h as *mut _));
-                    }
+                if let Some(i) = img {
+                    i.delete();
                 }
                 continue;
             }
-            self.cache.insert(key, img.map(Img::Bitmap));
+            self.cache.insert(key, img);
             any = true;
         }
         any
@@ -157,16 +266,8 @@ impl Icons {
         // 裏で読んでいるものは, 大きさが違えば捨てる(`take_loaded`)
         self.pending.clear();
         for (_, v) in self.cache.drain() {
-            unsafe {
-                match v {
-                    Some(Img::Bitmap(h)) => {
-                        let _ = DeleteObject(HGDIOBJ(h as *mut _));
-                    }
-                    Some(Img::Icon(h)) => {
-                        let _ = DestroyIcon(HICON(h as *mut _));
-                    }
-                    None => {}
-                }
+            if let Some(i) = v {
+                i.delete();
             }
         }
     }
@@ -196,7 +297,9 @@ impl Icons {
             }
             let list: IImageList = SHGetImageList(SHIL_EXTRALARGE as i32).ok()?;
             let icon = list.GetIcon(info.iIcon, ILD_TRANSPARENT.0).ok()?;
-            Some(Img::Icon(icon.0 as isize))
+            let img = read_icon(icon, self.size).and_then(|px| make_img(&px, self.size));
+            let _ = DestroyIcon(icon);
+            img
         }
     }
 
@@ -208,7 +311,7 @@ impl Icons {
             Some(v) => *v,
             None => {
                 let Some(png) = png else { return false };
-                let v = decode_png(png, self.size).map(|b| Img::Bitmap(b.0 as isize));
+                let v = decode_png(png, self.size).and_then(|px| make_img(&px, self.size));
                 self.cache.insert(key, v);
                 v
             }
@@ -226,10 +329,8 @@ impl Icons {
     pub fn clear_favicons(&mut self) {
         let keys: Vec<String> = self.cache.keys().filter(|k| k.starts_with("fav:")).cloned().collect();
         for k in keys {
-            if let Some(Some(Img::Bitmap(h))) = self.cache.remove(&k) {
-                unsafe {
-                    let _ = DeleteObject(HGDIOBJ(h as *mut _));
-                }
+            if let Some(Some(i)) = self.cache.remove(&k) {
+                i.delete();
             }
         }
     }
@@ -256,30 +357,22 @@ impl Icons {
     }
 
     fn blit(&self, hdc: HDC, img: Img, x: i32, y: i32) {
+        // 地に溶ける色のものは, 板の上に置いた方を描く
+        let faint = img.tone == if super::theme::is_dark() { Tone::Dark } else { Tone::Light };
+        let h = if faint && img.plated != 0 { img.plated } else { img.normal };
         unsafe {
-            match img {
-                Img::Icon(h) => {
-                    let _ = DrawIconEx(hdc, x, y, HICON(h as *mut _), self.size, self.size, 0, None, DI_NORMAL);
-                }
-                Img::Bitmap(h) => {
-                    let bmp = HBITMAP(h as *mut _);
-                    let mut info = BITMAP::default();
-                    GetObjectW(bmp.into(), std::mem::size_of::<BITMAP>() as i32, Some(&mut info as *mut _ as *mut _));
-                    let mem = CreateCompatibleDC(Some(hdc));
-                    let old = SelectObject(mem, bmp.into());
-                    let bf = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
-                    let _ = AlphaBlend(hdc, x, y, self.size, self.size, mem, 0, 0, info.bmWidth, info.bmHeight.abs(), bf);
-                    SelectObject(mem, old);
-                    let _ = DeleteDC(mem);
-                }
-            }
+            let mem = CreateCompatibleDC(Some(hdc));
+            let old = SelectObject(mem, HBITMAP(h as *mut _).into());
+            let bf = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
+            let _ = AlphaBlend(hdc, x, y, self.size, self.size, mem, 0, 0, self.size, self.size, bf);
+            SelectObject(mem, old);
+            let _ = DeleteDC(mem);
         }
     }
 }
 
-/// PNGを読み, `size`四方の, 透明の値を掛けた32ビットの絵にする(AlphaBlendで描ける形). Windows標準のWICを使う
-fn decode_png(png: &[u8], size: i32) -> Option<HBITMAP> {
-    use windows::Win32::Graphics::Gdi::{CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS};
+/// PNGを読み, `size`四方の, 透明の値を掛けた画素にする. Windows標準のWICを使う
+fn decode_png(png: &[u8], size: i32) -> Option<Vec<u8>> {
     use windows::Win32::Graphics::Imaging::*;
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     unsafe {
@@ -292,31 +385,10 @@ fn decode_png(png: &[u8], size: i32) -> Option<HBITMAP> {
         scaler.Initialize(&frame, size as u32, size as u32, WICBitmapInterpolationModeFant).ok()?;
         let conv = f.CreateFormatConverter().ok()?;
         conv.Initialize(&scaler, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom).ok()?;
-        let bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: size,
-                biHeight: -size,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
-        let bmp = CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
-        if bits.is_null() {
-            let _ = DeleteObject(bmp.into());
-            return None;
-        }
         let stride = size as u32 * 4;
-        let buf = std::slice::from_raw_parts_mut(bits as *mut u8, (stride * size as u32) as usize);
-        if conv.CopyPixels(std::ptr::null(), stride, buf).is_err() {
-            let _ = DeleteObject(bmp.into());
-            return None;
-        }
-        Some(bmp)
+        let mut px = vec![0u8; (stride * size as u32) as usize];
+        conv.CopyPixels(std::ptr::null(), stride, &mut px).ok()?;
+        Some(px)
     }
 }
 
@@ -327,11 +399,13 @@ impl Drop for Icons {
 }
 
 /// アプリなどのアイコン(パスのものを読む). 裏のスレッドで呼ぶ(時間がかかることがある)
-fn load_by_path(path: &str, size: i32) -> Option<isize> {
+fn load_by_path(path: &str, size: i32) -> Option<Img> {
     unsafe {
         let p = WStr::new(path);
         let f: IShellItemImageFactory = SHCreateItemFromParsingName(p.pcwstr(), None).ok()?;
         let bmp = f.GetImage(SIZE { cx: size, cy: size }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK).ok()?;
-        Some(bmp.0 as isize)
+        let px = read_bitmap(bmp, size);
+        let _ = DeleteObject(bmp.into());
+        make_img(&px?, size)
     }
 }

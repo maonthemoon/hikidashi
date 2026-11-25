@@ -52,6 +52,9 @@ struct Decos {
     /// 最後の行など, 次の行から高さを測れないときの1行の高さ(ピクセル)
     line_h: i32,
     dpi: u32,
+    /// 整えたときの文字の数とカーソル. 変換中など, 整える前に文字が増減したら, カーソルより後ろの絵をその分ずらす
+    len: usize,
+    at: usize,
 }
 
 thread_local! {
@@ -145,6 +148,8 @@ impl Compose {
             SendMessageW(hwnd, EM_SETEDITSTYLE, Some(WPARAM(SES_EXTENDBACKCOLOR as usize)), Some(LPARAM(SES_EXTENDBACKCOLOR as isize)));
             // 外から文書や画像を落とされないようにする(貼り付けも字だけにする)
             let _ = windows::Win32::System::Ole::RevokeDragDrop(hwnd);
+            // スクロールの帯もダークに合わせる
+            super::dark::scroll_bars(hwnd);
             let mut raw: *mut core::ffi::c_void = std::ptr::null_mut();
             SendMessageW(hwnd, EM_GETOLEINTERFACE, Some(WPARAM(0)), Some(LPARAM(&mut raw as *mut _ as isize)));
             let doc = if raw.is_null() { None } else { IUnknown::from_raw(raw).cast::<ITextDocument>().ok() };
@@ -285,6 +290,7 @@ impl Compose {
         unsafe {
             SendMessageW(self.hwnd, EM_SETBKGNDCOLOR, Some(WPARAM(0)), Some(LPARAM(rgb(pal().bg).0 as isize)));
         }
+        super::dark::scroll_bars(self.hwnd);
         self.restyle();
         unsafe {
             let _ = InvalidateRect(Some(self.hwnd), None, true);
@@ -323,6 +329,7 @@ impl Compose {
         let mut decos = Vec::new();
         let h = self.hwnd;
         unsafe {
+            let shown = GetWindowLongW(h, GWL_STYLE) as u32 & WS_VISIBLE.0 != 0;
             let mask = SendMessageW(h, EM_SETEVENTMASK, Some(WPARAM(0)), Some(LPARAM(0)));
             if let Some(d) = &self.doc {
                 let _ = d.Undo(tomSuspend.0);
@@ -355,6 +362,10 @@ impl Compose {
             self.set_sel(s0, s1);
             SendMessageW(h, EM_SETSCROLLPOS, Some(WPARAM(0)), Some(LPARAM(&scroll as *const _ as isize)));
             SendMessageW(h, WM_SETREDRAW, Some(WPARAM(1)), Some(LPARAM(0)));
+            // WM_SETREDRAWは, 隠れている窓を見える状態にしてしまう(検索の窓を覆っていた)
+            if !shown {
+                let _ = ShowWindow(h, SW_HIDE);
+            }
             if let Some(d) = &self.doc {
                 let _ = d.Undo(tomResume.0);
             }
@@ -363,7 +374,7 @@ impl Compose {
         let line_h = m.line_h();
         drop(m);
         let dpi = self.dpi;
-        DECOS.with(|d| *d.borrow_mut() = Decos { items: decos, line_h, dpi });
+        DECOS.with(|d| *d.borrow_mut() = Decos { items: decos, line_h, dpi, len: text.encode_utf16().count(), at: s0 });
         unsafe {
             let _ = InvalidateRect(Some(h), None, true);
         }
@@ -545,6 +556,12 @@ fn pos(hwnd: HWND, i: usize) -> (i32, i32) {
     (p.x, p.y)
 }
 
+/// 中の文字の数(段落の区切りは1つ)
+fn text_len(hwnd: HWND) -> usize {
+    let g = GETTEXTLENGTHEX { flags: GTL_PRECISE | GTL_NUMCHARS, codepage: 1200 };
+    unsafe { SendMessageW(hwnd, EM_GETTEXTLENGTHEX, Some(WPARAM(&g as *const _ as usize)), Some(LPARAM(0))).0.max(0) as usize }
+}
+
 /// その字がある画面の行の高さ(次の行の頭との差. 最後の行は`fallback`)
 fn line_h(hwnd: HWND, i: usize, fallback: i32) -> i32 {
     unsafe {
@@ -583,8 +600,16 @@ pub fn paint_decos(hwnd: HWND) {
             let mut client = RECT::default();
             let _ = GetClientRect(hwnd, &mut client);
             let visible = |top: i32, bottom: i32| bottom >= client.top && top <= client.bottom;
+            let diff = text_len(hwnd) as isize - d.len as isize;
+            let sh = |i: usize| if i > d.at { (i as isize + diff).max(0) as usize } else { i };
             for item in &d.items {
-                match *item {
+                let item = match *item {
+                    Deco::Dot(i) => Deco::Dot(sh(i)),
+                    Deco::Bar(i, a, b) => Deco::Bar(sh(i), sh(a), sh(b)),
+                    Deco::Check(i, v) => Deco::Check(sh(i), v),
+                    Deco::Rule(i) => Deco::Rule(sh(i)),
+                };
+                match item {
                     Deco::Dot(i) => {
                         let (x0, y) = pos(hwnd, i);
                         let x1 = pos(hwnd, i + 1).0;

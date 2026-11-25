@@ -72,6 +72,12 @@ fn log_errors(host: &ExtHost, logged: &Mutex<HashSet<String>>) {
     }
 }
 
+/// 0と1(と空白, `_`)だけで`min`桁以上か. 1000000000000のような数と分けるため, 1が3つ以上あるもの
+fn is_bits(text: &str, min: usize) -> bool {
+    let t: Vec<char> = text.chars().filter(|c| !c.is_whitespace() && *c != '_').collect();
+    min > 0 && t.len() >= min && t.iter().all(|c| matches!(c, '0' | '1')) && t.iter().filter(|c| **c == '1').count() >= 3
+}
+
 /// 開いてよいURLか(`https://`と`http://`だけ)
 pub fn url_ok(u: &str) -> bool {
     let l = u.trim_start().to_ascii_lowercase();
@@ -144,9 +150,13 @@ impl Ext {
             if taken.contains(&kw) || (calc && !m.calc) {
                 return None;
             }
+            // 計算のモードでは, 長いビット列をそのまま受け, keywordだけでも使い方を出す
+            if calc && is_bits(text, m.calc_bits) {
+                return Some((m.clone(), text.trim().to_string()));
+            }
             let head = text.get(..m.keyword.len())?;
             let rest = text.get(m.keyword.len()..)?;
-            if head.to_lowercase() == kw && rest.starts_with(char::is_whitespace) {
+            if head.to_lowercase() == kw && (rest.starts_with(char::is_whitespace) || calc && rest.is_empty()) {
                 Some((m.clone(), rest.trim().to_string()))
             } else {
                 None
@@ -233,9 +243,10 @@ impl Ext {
 
 /// 拡張の1行. urlが開けるものは`url`(Enterでブラウザー), それ以外は`copy`(Enterでコピー). 学習には残さない
 fn make_row(r: &ExtRow) -> Row {
-    let (tag, action, icon) = match r.url.as_deref().filter(|u| url_ok(u)) {
-        Some(u) => ("url", Action::OpenUrl(u.trim().to_string()), Icon::Web),
-        None => ("copy", Action::Copy(r.copy.clone()), Icon::Calc),
+    let (tag, action, icon) = match (r.url.as_deref().filter(|u| url_ok(u)), &r.fill) {
+        (_, Some(t)) => ("try", Action::Fill(t.clone()), Icon::Calc),
+        (Some(u), None) => ("url", Action::OpenUrl(u.trim().to_string()), Icon::Web),
+        (None, None) => ("copy", Action::Copy(r.copy.clone()), Icon::Calc),
     };
     Row { name: r.title.clone(), sub: r.subtitle.clone(), tag, positions: vec![], action, learn_key: None, warn: false, icon, score: 0 }
 }

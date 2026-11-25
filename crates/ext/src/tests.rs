@@ -58,7 +58,13 @@ fn rffeの値とビット列とパリティ() {
         // 値から作ったビット列を読み解くとパリティが合う
         let back = run(&h, "rffe", &rows[0].copy, None);
         assert_eq!(back[0].subtitle, format!("{} · parity OK", want));
-        assert_eq!(back[0].copy, rows[0].copy);
+        assert_eq!(back[0].title, "Register Write");
+        assert_eq!(back[1].title, "SA 0x6");
+        assert_eq!(back[2].title, "Address 0x1C PM_TRIG");
+        assert_eq!(back[3].title, format!("Data 0x{:02X}", d));
+        assert_eq!(back[3].subtitle, format!("{:08b} · {}", d, text));
+        assert_eq!(back[4].title, "Parity OK");
+        assert_eq!(back[5].copy, rows[0].copy);
         // 末尾のBPの0とスペース, _は無視
         let spaced = format!("{} 0", rows[0].title.replace(' ', "_"));
         let back2 = run(&h, "rffe", &spaced, None);
@@ -95,10 +101,50 @@ fn rffeのほかの形() {
     // 分からないコマンド
     let back = run(&h, "rffe", "011000010000000000", None);
     assert!(back[0].subtitle.contains("unknown command"), "{}", back[0].subtitle);
-    // 使い方
+    // 使い方(Enterで入力欄に入る)
     let r = run(&h, "rffe", "", None);
-    assert_eq!(r.len(), 1);
-    assert!(r[0].title.contains("rffe 6 1C 38"));
+    assert_eq!(r.len(), 8);
+    assert_eq!(r[1].fill.as_deref(), Some("rffe w 6 1C 38"));
+    // 使い方の例は, どれも読める
+    for row in &r {
+        let q = row.fill.as_deref().unwrap().strip_prefix("rffe ").unwrap();
+        let rows = run(&h, "rffe", q, None);
+        assert!(rows.iter().all(|x| !x.title.is_empty() && x.fill.is_none()), "{q}: {rows:?}");
+    }
+}
+
+#[test]
+fn rffeのモード() {
+    let h = rffe_host();
+    // モードを書いて作り, ビット列を読み解くと同じモードになる
+    for (q, mode, addr) in [
+        ("w 6 1C 38", "Register Write", "Address 0x1C PM_TRIG"),
+        ("r 6 1C", "Register Read", "Address 0x1C PM_TRIG"),
+        ("ew 6 40 12 34", "Extended Register Write", "Address 0x40"),
+        ("er 6 40 2", "Extended Register Read", "Address 0x40"),
+        ("ewl 6 1234 AB", "Extended Register Write Long", "Address 0x1234"),
+        ("erl 6 1234 2", "Extended Register Read Long", "Address 0x1234"),
+        ("w0 6 38", "Register 0 Write", "Address 0x00"),
+        ("WRITE 0x6 0x1C 0x38", "Register Write", "Address 0x1C PM_TRIG"),
+    ] {
+        let r = run(&h, "rffe", q, None);
+        assert!(r[0].subtitle.contains(mode), "{q}: {r:?}");
+        let back = run(&h, "rffe", &r[0].copy, None);
+        assert_eq!(back[0].title, mode, "{q}");
+        assert_eq!(back[2].title, addr, "{q}");
+        assert!(back.iter().any(|x| x.title == "Parity OK"), "{q}: {back:?}");
+    }
+    // モードを書かなければ, 使えるものを全部
+    let t = |q: &str| run(&h, "rffe", q, None).into_iter().map(|r| r.subtitle).collect::<Vec<_>>();
+    let v = t("6 1C 38");
+    assert_eq!(v.len(), 3);
+    assert!(v[0].contains("Register Write ·") && v[1].contains("Extended Register Write ·") && v[2].contains("Write Long"), "{v:?}");
+    let v = t("6 1C");
+    assert!(v[0].contains("Register Read") && v[1].contains("Register 0 Write") && v.len() == 4, "{v:?}");
+    // 足りない, 範囲の外
+    assert!(run(&h, "rffe", "w", None)[0].title.contains("SA ADDRESS DATA"));
+    assert!(run(&h, "rffe", "w 6 40 12", None)[0].title.contains("up to 0x1F"));
+    assert!(run(&h, "rffe", "w 16 1C 38", None)[0].title.contains("SA is"));
 }
 
 fn frame_rows(byte: u8) -> Vec<u8> {
@@ -132,18 +178,18 @@ fn rffeの表を読む() {
     assert_eq!(rows[1].title, "LOW_POW");
     assert_eq!(rows[1].subtitle, "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x80 · Low Power, mask 000, trig 000 · parity OK");
     assert_eq!(rows[2].title, "Empty");
-    assert_eq!(rows[2].subtitle, "コマンドなし");
+    assert_eq!(rows[2].subtitle, "No command");
     // 見出しだけ大文字小文字が違っても読む. SSCがない列, ビットが足りない列
     let t2 = "sclk\tA\tB\n0\t1\t0\n1\t1\t0\n0\t1\t0\n1\t1\t0\n";
     let rows = run(&h, "rffe", "", Some(t2));
-    assert!(rows[0].subtitle.contains("SSCが見つからない"), "{:?}", rows);
-    assert_eq!(rows[1].subtitle, "コマンドなし");
+    assert!(rows[0].subtitle.contains("SSC not found"), "{:?}", rows);
+    assert_eq!(rows[1].subtitle, "No command");
     let t3 = "SCLK\tA\n0\t1\n0\t0\n1\t0\n0\t0\n1\t1\n0\t1\n";
     let rows = run(&h, "rffe", "", Some(t3));
-    assert!(rows[0].subtitle.contains("ビットが足りない"), "{:?}", rows);
+    assert!(rows[0].subtitle.contains("Not enough bits"), "{:?}", rows);
     // 表でないクリップボードは使い方
     let rows = run(&h, "rffe", "", Some("hello"));
-    assert!(rows[0].title.contains("rffe 6 1C 38"));
+    assert_eq!(rows[1].fill.as_deref(), Some("rffe w 6 1C 38"));
 }
 
 #[test]
@@ -158,7 +204,7 @@ export function search(q,c){ if(q==="arr") return "str"; if(q==="ok") return [{t
     let r = run(&h, "bad", "arr", None);
     assert!(r[0].title.starts_with("Bad: "), "{}", r[0].title);
     let r = run(&h, "bad", "ok", None);
-    assert_eq!(r[0], ExtRow { title: "t".into(), subtitle: "".into(), copy: "t".into(), url: None });
+    assert_eq!(r[0], ExtRow { title: "t".into(), subtitle: "".into(), copy: "t".into(), url: None, fill: None });
     assert!(run(&h, "none", "x", None).is_empty());
 }
 

@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Sans+Mono:wght@400;700&display=swap">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='14' fill='%23141413'/%3E%3Cg fill='none' stroke='%23D97757' stroke-linecap='round'%3E%3Ccircle cx='27' cy='27' r='12.5' stroke-width='5'/%3E%3Cpath d='M37 37 49.5 49.5' stroke-width='9'/%3E%3C/g%3E%3C/svg%3E">
   <style>
 
 
@@ -763,7 +764,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   --win-faint: var(--gray-200);
   --win-accent: var(--clay);
   --win-accent-text: var(--clay-deep);
-  --desk-h: 420px;
+  --desk-h: 440px;
   --key-fs: 15px;
 }
 @media (prefers-color-scheme: dark) {
@@ -941,7 +942,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .demo-caption strong { color: var(--text); }
 
 @media (max-width: 767px) {
-  :root { --desk-h: 400px; --win-input-fs: 17px; --win-name-fs: 14px; --win-pad-x: 14px; }
+  :root { --desk-h: 420px; --win-input-fs: 17px; --win-name-fs: 14px; --win-pad-x: 14px; }
   .compose__band .keys { display: none; }
 }
 
@@ -1103,7 +1104,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   <header class="site-header">
     <div class="container site-header__inner">
       <a class="brand" href="#">
-        <svg class="brand__mark" viewBox="0 0 24 24" role="img" aria-label="Hikidashiのアイコン"><rect x="3" y="4" width="18" height="16" rx="4" fill="currentColor"/><rect x="7" y="10" width="10" height="7" rx="1.5" fill="none" stroke="var(--bg)" stroke-width="1.6"/><rect x="10" y="12.6" width="4" height="1.8" rx=".9" fill="var(--bg)"/></svg>
+        <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="14" fill="#141413" style="stroke: var(--border)" stroke-width="1.5"/><g fill="none" stroke="#D97757" stroke-linecap="round"><circle cx="27" cy="27" r="12.5" stroke-width="5"/><path d="M37 37 49.5 49.5" stroke-width="9"/></g></svg>
         Hikidashi
       </a>
       <nav class="site-nav" aria-label="グローバル">
@@ -1157,7 +1158,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
           </article>
           <article class="card">
             <h3 class="card__title">進数とRFの計算を, その場で</h3>
-            <p class="card__body"><code>=</code>と空白で計算のモードに入り, <code>0x1F</code>で10進数と2進数, <code>10dBm</code>でWと電圧, <code>vswr 1.5</code>でリターンロス, <code>rffe 6 1C 38</code>でMIPI RFFEのフレーム. <kbd>Enter</kbd>で結果をコピーします.</p>
+            <p class="card__body"><code>=</code>と空白で計算のモードに入り, <code>0x1F</code>で10進数と2進数, <code>10dBm</code>でWと電圧, <code>vswr 1.5</code>でリターンロス, MIPI RFFEはビット列を打つとモード, SA, アドレス, データに分けます. <kbd>Enter</kbd>で結果をコピーします.</p>
           </article>
           <article class="card">
             <h3 class="card__title">Windowsのダークモードに合わせる</h3>
@@ -1255,7 +1256,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   const calc = (v, note) => row("calc", v, note, "copy");
 
   // 計算のモードに入ったときの例(Hikidashiでは7行. デモは5行)
-  const CALC_HINTS = [["0x1F", "Hex to decimal and binary"], ["(12+3)*4", "Calculator: + - * / ^ ( ) %"], ["10dBm", "dBm to watts and volts"], ["vswr 1.5", "VSWR to return loss and reflection"], ["10nH 2.4G", "Capacitance that resonates with 10 nH at 2.4 GHz"]].map(([v, n]) => calc(v, "Example · " + n));
+  const CALC_HINTS = [["0x1F", "Hex to decimal and binary"], ["(12+3)*4", "Calculator: + - * / ^ ( ) %"], ["10dBm", "dBm to watts and volts"], ["vswr 1.5", "VSWR to return loss and reflection"], ["10nH 2.4G", "Capacitance that resonates with 10 nH at 2.4 GHz"]].map(([v, n]) => ({ ...calc(v, "Example · " + n), tag: "try" }));
   const CALC_NONE = CALC_HINTS;
 
   const ALL = [
@@ -1292,14 +1293,15 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     {
       id: "calc",
       tab: "計算",
-      caption: "<strong>計算のモードで, 進数もRFも.</strong> <code>=</code>と空白で計算のモード. 16進数, dBm, VSWR, 共振, MIPI RFFEのフレーム. <kbd>Enter</kbd>で結果をコピーします.",
+      caption: "<strong>計算のモードで, 進数もRFも.</strong> <code>=</code>と空白で計算のモード. 16進数, dBm, VSWR, 共振, MIPI RFFEのビット列と値. <kbd>Enter</kbd>で結果をコピーします.",
       steps: [
         { type: "=", short: true, rows: () => [] }, { mode: "calc", rows: CALC_HINTS },
         { type: "0x1F", rows: (q) => (q === "0x1F" ? [calc("31", "dec"), calc("0001 1111", "bin")] : CALC_NONE) }, { clear: true },
         { type: "10dBm", rows: (q) => (q === "10dBm" ? [calc("10 mW", "Power"), calc("1 V", "Peak voltage at Z0 = 50 Ω · Vrms 707.1 mV · Vpp 2 V")] : CALC_NONE) }, { clear: true },
         { type: "vswr 1.5", rows: (q) => (q === "vswr 1.5" ? [calc("13.98 dB", "Return loss"), calc("0.200", "|Γ| reflection coefficient"), calc("4.00 %", "Reflected power"), calc("0.1773 dB", "Mismatch loss")] : CALC_NONE) }, { clear: true },
         { type: "10nH 2.4G", rows: (q) => (q === "10nH 2.4G" ? [calc("0.4398 pF", "Capacitance C = 1/(ω²L) for resonance")] : CALC_NONE) }, { clear: true },
-        { type: "rffe 6 1C 38", rows: (q) => (q === "rffe 6 1C 38" ? [calc("0110 010 11100 1 00111000 0", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000")] : CALC_NONE) }, { key: "Enter" },
+        { type: "0110010111001001110000", fast: true, rows: (q) => (q.length >= 22 ? [calc("Register Write", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000 · parity OK"), calc("SA 0x6", "Slave address · 0110"), calc("Address 0x1C PM_TRIG", "11100"), calc("Data 0x38", "00111000 · Active, mask 111, trig 000"), calc("Parity OK", "Odd parity · cmd OK · data OK")] : q.length >= 13 ? [calc("Register Write", `Not enough bits (${q.length})`)] : CALC_NONE) }, { clear: true },
+        { type: "rffe w 6 1C 38", fast: true, rows: (q) => (q === "rffe w 6 1C 38" ? [calc("0110 010 11100 1 00111000 0", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000")] : CALC_NONE) }, { key: "Enter" },
       ],
     },
   ];
