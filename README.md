@@ -40,7 +40,7 @@ Windowsのスタートメニューの検索や, PowerToys Runなどのランチ�
 3. ホットキーを聞かれたら, 使いたいキー(例: `Alt+Space`)を押します. 次に, Windowsと一緒に起動するかを聞かれます.
 4. ホットキーを押して, 名前の一部を打ち, `Enter`で開きます.
 
-ZIPの中は, `Hikidashi.exe`, ローマ字で日本語の名前を探すための辞書`SKK-JISYO.L`とそのライセンス, `LICENSE.txt`, `THIRD-PARTY-NOTICES.txt`, `Manual.html`です. インストーラーも管理者権限も要りません.
+ZIPの中は, `Hikidashi.exe`, ローマ字で日本語の名前を探すための辞書`SKK-JISYO.L`とそのライセンス, `LICENSE.txt`, `THIRD-PARTY-NOTICES.txt`, `docs\manual.html`(マニュアル)です. インストーラーも管理者権限も要りません.
 
 - 「スマート アプリ コントロールが安全でない可能性のあるアプリをブロックしました」と出たら, Windowsセキュリティ →「アプリとブラウザーコントロール」→「スマートアプリコントロールの設定」で「オフ」にします. 署名のないexeは個別に許可できません.
 
@@ -120,7 +120,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 
 ## マニュアル
 
-詳しい使い方は, トレイの右クリックのメニューの`Manual`で開きます(exeに埋め込んだマニュアルを`%LOCALAPPDATA%\Hikidashi\manual.html`に書き出して, ブラウザーで開く). ZIPの`Manual.html`も同じものです.
+詳しい使い方は, トレイの右クリックのメニューの`Manual`で開きます. 必ず, exeと一緒に配られた`docs\manual.html`(ZIPではexeの隣, gitではリポジトリの`docs`)が開き, Webは見にいきません.
 
 ## 動作環境
 
@@ -132,7 +132,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 - **作り**: Rust + Win32. `crates/core`は検索, 並び順, 計算など, Windowsに依存しない部分(`cargo test`で確かめる). `crates/app`は画面とOSの部分.
 - **ビルド**: Raspberry PiなどのLinuxで, `x86_64-pc-windows-gnu`向けにクロスコンパイルします(mingw-w64と, Rustのそのターゲットが要ります). `./tools/build-exe.sh`でテストを通し, exeを作ります. 開発中のexeは`out/`に出ます. `bin/Hikidashi.exe`はリリースした版なので上書きしません.
 - **リリース**: `v`で始まるタグ(例: `v0.1.0`)をpushすると, GitHub ActionsがビルドとテストをしてZIPを作り, Releasesに置きます. あわせて, `bin/Hikidashi.exe`をそのexeに差し替えます. `bin/Hikidashi.exe`は手で更新しません.
-- **マニュアル**: `docs/manual.html`(1つのHTML). exeに埋め込み, トレイの`Manual`で開きます. 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
+- **マニュアル**: `docs/manual.html`(1つのHTML). トレイの`Manual`で開きます. ZIPにも`docs\manual.html`として入れます. 書体も埋め込み, 開いてもWebを見にいきません(`tools/embed-fonts.py`). 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
 - **アイコン**: `uv run tools/make-icon.py`で`assets/hikidashi.ico`を作り直します.
 - **紹介のページ**: GitHub Pagesのトップ(`docs/index.html`)は, 窓をHTMLで作り直した動くデモのページです. `./tools/build-manual.sh`でマニュアル(`docs/manual.html`)と一緒に作ります. READMEの静止画は`uv run tools/make-screenshot.py`でそのページから撮ります(Playwrightのchromiumを使う).
 - **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, 別のファイルとして`bin/`に置き, ZIPにも入れます. 新しくするときは`./tools/update-dict.sh`で[skk-dev/dict](https://github.com/skk-dev/dict)から取ってきてcommitします. exeの隣に辞書がなければ, 初めて起動したときにネットから取ってきます.

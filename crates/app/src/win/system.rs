@@ -177,6 +177,17 @@ pub fn pick_font(names: &[&str]) -> String {
     names.iter().find(|n| font_exists(n)).map(|n| n.to_string()).unwrap_or_else(|| names.last().unwrap().to_string())
 }
 
+/// 知らせるだけの窓. 画面のスレッドを止めないよう, 別のスレッドで出す
+pub fn notice(text: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK, MB_SETFOREGROUND};
+    super::storage::log(&format!("notice: {text}"));
+    let t = super::i18n::tr(text);
+    std::thread::spawn(move || {
+        let (t, c) = (WStr::new(&t), WStr::new("Hikidashi"));
+        unsafe { MessageBoxW(None, t.pcwstr(), c.pcwstr(), MB_OK | MB_ICONWARNING | MB_SETFOREGROUND) };
+    });
+}
+
 pub fn message_box_yes_no(hwnd: HWND, text: &str, title: &str) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONQUESTION, MB_YESNO};
     let t = WStr::new(&super::i18n::tr(text));

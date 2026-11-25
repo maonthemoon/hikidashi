@@ -50,7 +50,9 @@ jobs:
           cp target/x86_64-pc-windows-gnu/release/hikidashi.exe "dist/$name/Hikidashi.exe"
           cp LICENSE "dist/$name/LICENSE.txt"
           cp THIRD-PARTY-NOTICES.txt "dist/$name/"
-          cp docs/manual.html "dist/$name/Manual.html"
+          # トレイのManualはexeの隣のdocs/manual.htmlを開く(K46)
+          mkdir "dist/$name/docs"
+          cp docs/manual.html "dist/$name/docs/manual.html"
           # 辞書(GPL)はexeとは別のファイルとして同梱する(K35). bin/に置いたものを使う(tools/update-dict.sh)
           cp bin/SKK-JISYO.L bin/SKK-JISYO.L-COPYING.txt "dist/$name/"
           (cd dist && zip -r "$name.zip" "$name")

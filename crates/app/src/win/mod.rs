@@ -77,8 +77,6 @@ const QUERY_MAGIC: usize = 0x4B51_0001;
 /// ファイルの結果を待つ時間. これより遅ければ先にほかの結果を出す
 const QUICK_MS: u32 = 60;
 
-/// マニュアル(`docs/manual.html`). トレイの`Manual`で書き出して開く(K14).
-static MANUAL_HTML: &[u8] = include_bytes!("../../../../docs/manual.html");
 
 /// Tabのメニューの1行
 #[derive(Clone)]
@@ -2289,8 +2287,6 @@ impl App {
         }
     }
 
-    /// exeに埋め込んだマニュアルを`%LOCALAPPDATA%\Hikidashi\manual.html`に書き出して, 既定のブラウザーで開く.
-    /// exeは写して動くので, exeの隣のファイルを開く形(wakudori)は使わない.
     /// 設定画面(K16)
     fn settings_args(&self) -> settings::OpenArgs {
         let mut apps: Vec<String> = self.apps.items.iter().map(|i| i.name.clone()).collect();
@@ -2309,18 +2305,14 @@ impl App {
         settings::open(self.settings_args());
     }
 
+    /// `docs\manual.html`を既定のブラウザーで開く. Webのマニュアルは見にいかない(K46)
     fn open_manual(&mut self) {
-        let path = storage::install_dir().join("manual.html");
-        let same = std::fs::read(&path).map(|b| b == MANUAL_HTML).unwrap_or(false);
-        if !same {
-            let _ = std::fs::create_dir_all(storage::install_dir());
-            if let Err(e) = std::fs::write(&path, MANUAL_HTML) {
-                self.fail(format!("Cannot write the manual: {e}"));
-                return;
-            }
-        }
+        let Some(path) = storage::manual_path() else {
+            system::notice("The manual was not found. The docs folder (docs\\manual.html) that comes with Hikidashi.exe is needed. Start Hikidashi.exe again from the folder that has it.");
+            return;
+        };
         if let Err(e) = actions::shell("open", &path.to_string_lossy(), "", "", false) {
-            self.fail(format!("Cannot open the manual: {e}"));
+            system::notice(&format!("Cannot open the manual: {e}"));
         }
     }
 
@@ -3154,6 +3146,7 @@ fn relocate() -> bool {
         return false;
     }
     dict::copy_bundled(&exe);
+    storage::remember_source(&exe);
     let args: Vec<String> = std::env::args().skip(1).collect();
     std::process::Command::new(&target).args(args).arg("--updated").spawn().is_ok()
 }

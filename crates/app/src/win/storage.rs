@@ -36,6 +36,37 @@ pub fn data_dir() -> PathBuf {
     p.join("Hikidashi")
 }
 
+/// 写す前のexeの場所を書いておくファイル(マニュアルの`docs`を探すため. K46)
+fn source_file() -> PathBuf {
+    install_dir().join("source.txt")
+}
+
+/// 写す前の場所を覚え, そこの`docs\manual.html`も写す(展開したフォルダーを消しても開けるように)
+pub fn remember_source(exe: &std::path::Path) {
+    let Some(dir) = exe.parent() else { return };
+    if let Err(e) = std::fs::write(source_file(), dir.to_string_lossy().as_bytes()) {
+        log(&format!("manual: could not write source.txt ({e})"));
+    }
+    // 前の版がexeから書き出していたもの
+    let _ = std::fs::remove_file(install_dir().join("manual.html"));
+    let Some(src) = hikidashi_core::manual::near(dir).into_iter().find(|p| p.is_file()) else {
+        log(&format!("manual: docs\\manual.html is not near {}", dir.display()));
+        return;
+    };
+    let docs = install_dir().join("docs");
+    let r = std::fs::create_dir_all(&docs).and_then(|_| std::fs::copy(&src, docs.join("manual.html")));
+    if let Err(e) = r {
+        log(&format!("manual: could not copy {} ({e})", src.display()));
+    }
+}
+
+/// マニュアル(`docs\manual.html`)の場所. なければNone
+pub fn manual_path() -> Option<PathBuf> {
+    let source = std::fs::read_to_string(source_file()).ok().map(|t| PathBuf::from(t.trim())).filter(|p| p.is_absolute());
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    hikidashi_core::manual::candidates(source.as_deref(), &exe_dir, &install_dir()).into_iter().find(|p| p.is_file())
+}
+
 pub fn config_path() -> PathBuf {
     data_dir().join("config.toml")
 }

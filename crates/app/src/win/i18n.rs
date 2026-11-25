@@ -262,5 +262,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("Rebuild index", "索引を作り直す"),
     ("Settings", "設定"),
     ("Manual", "マニュアル"),
+    ("The manual was not found. The docs folder (docs\\manual.html) that comes with Hikidashi.exe is needed. Start Hikidashi.exe again from the folder that has it.", "マニュアルが見つかりません. Hikidashi.exeと一緒に配ったdocsフォルダー(docs\\manual.html)が要ります. docsのあるフォルダーのHikidashi.exeを, もう一度起動してください."),
+    ("Cannot open the manual: {}", "マニュアルを開けません: {0}"),
     ("Quit", "終了"),
 ];

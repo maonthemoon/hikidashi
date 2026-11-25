@@ -6,6 +6,7 @@ pub mod fuzzy;
 pub mod calc;
 pub mod pathlike;
 pub mod prompt;
+pub mod manual;
 pub mod migemo;
 pub mod romaji;
 pub mod catalog;

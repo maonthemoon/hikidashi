@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")/.."
 CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
 "$CARGO" test -q
-# マニュアルはexeに埋め込む(K14). 元のファイルの方が新しければ作り直す
+# トレイのManualはdocs/manual.htmlを開く(K46). 元のファイルの方が新しければ作り直す
 if [ -f dev/docs/manual-src/index.html ] && [ dev/docs/manual-src/index.html -nt docs/manual.html ]; then
   ./tools/build-manual.sh
 fi
@@ -18,5 +18,9 @@ cp target/x86_64-pc-windows-gnu/release/hikidashi.exe "$OUT/Hikidashi.exe"
 # 辞書はexeとは別のファイルとして隣に置く(ZIPと同じ形. K35). 開発用の文書にUTF-8版があれば使う
 if [ -f dev/dict/SKK-JISYO.L.utf8 ]; then
   cmp -s dev/dict/SKK-JISYO.L.utf8 "$OUT/SKK-JISYO.L" || cp dev/dict/SKK-JISYO.L.utf8 "$OUT/SKK-JISYO.L"
+fi
+# 会社PCなどはdev(hikidashi-dev)をcloneしてbin\Hikidashi.exeで確かめるので, 1つ上のdocsにもマニュアルを置く
+if [ "$OUT" = dev/bin ]; then
+  cmp -s docs/manual.html dev/docs/manual.html || cp docs/manual.html dev/docs/manual.html
 fi
 ls -l "$OUT/Hikidashi.exe"
