@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>マニュアル | Hikidashi</title>
-  <meta name="description" content="Hikidashi(引き出し)の使い方. 日本語の名前も, もらったパスも, すぐ開くWindows用ランチャー.">
+  <meta name="description" content="Hikidashi(引き出し)の使い方. 日本語のファイルも, もらったパスも, すぐ開くWindows用ランチャー.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='14' fill='%23141413'/%3E%3Cg fill='none' stroke='%23D97757' stroke-linecap='round'%3E%3Ccircle cx='27' cy='27' r='12.5' stroke-width='5'/%3E%3Cpath d='M37 37 49.5 49.5' stroke-width='9'/%3E%3C/g%3E%3C/svg%3E">
   <style>
 
@@ -1194,7 +1194,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       <header class="docs-page-header">
         <p class="docs-eyebrow">Hikidashi 0.1.0</p>
         <h1>Hikidashiのマニュアル</h1>
-        <p class="docs-desc">日本語の名前も, もらったパスも, すぐ開くWindows用ランチャーの使い方です.</p>
+        <p class="docs-desc">日本語のファイルも, もらったパスも, すぐ開くWindows用ランチャーの使い方です.</p>
       </header>
 
       <article class="prose">
@@ -1203,7 +1203,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         <h2 id="about">Hikidashiとは</h2>
         <p>ホットキーで入力欄を出し, 名前の一部を打って<kbd>Enter</kbd>で開くランチャーです. 日本語の仕事で挟まる変換, 貼り直し, 探し直しを減らします.</p>
         <ul>
-          <li><strong>変換しないで, 日本語の名前を探す</strong>: <code>kaigi</code>と打つと「会議」の付くファイルが出ます. 窓を出すと日本語入力はオフになります(<a href="#match">一致のしかた</a>).</li>
+          <li><strong>変換しないで, 日本語のファイルやフォルダーを探す</strong>: <code>kaigi</code>と打つと「会議」の付くファイルが出ます. 窓を出すと日本語入力はオフになります(<a href="#match">一致のしかた</a>).</li>
           <li><strong>もらったパスを, 貼ってそのまま開く</strong>: 引用符付きでも, <code>/mnt/c/...</code>でも, BoxのファイルのURLでも開きます(<a href="#paste">パスを貼って開く</a>).</li>
           <li><strong>見つからなければ, そのままChatGPTへ</strong>: いつものブラウザーのChatGPTに送ります(<a href="#web">ChatGPT</a>). 長い質問は, 整えて見ながら書けます(<a href="#longq">長い質問</a>).</li>
           <li><strong>BoxもWSLも, 同じ入力欄で</strong>: <code>bx </code>でBox Drive, <code>w </code>でWSLのホームを探します(<a href="#prefix">種類を絞る</a>).</li>
@@ -1755,7 +1755,7 @@ export function search(query) {
         <h2 id="faq">よくある質問</h2>
 
         <h3 id="faq-other">PowerToysやRaycastなどと一緒に使える?</h3>
-        <p>使えます. ホットキーを別のキーにしてください. 日本語の名前ともらったパスはHikidashi, 拡張や窓の整列, 中身の検索はほかのランチャーと分けられます. <kbd>Alt</kbd>+<kbd>Space</kbd>をHikidashiで使うときは, 先に相手の設定で外します(<a href="#faq-alt-space">引き継ぐ</a>).</p>
+        <p>使えます. ホットキーを別のキーにしてください. 日本語のファイルともらったパスはHikidashi, 拡張や窓の整列, 中身の検索はほかのランチャーと分けられます. <kbd>Alt</kbd>+<kbd>Space</kbd>をHikidashiで使うときは, 先に相手の設定で外します(<a href="#faq-alt-space">引き継ぐ</a>).</p>
 
         <h3 id="faq-network">打った文字や使い方を, どこかに送る?</h3>
         <p>検索, 学習, 履歴, クリップボードは手元だけで扱い, 利用状況も送りません. Hikidashiが自分から通信するのは, 辞書が見つからず, 取ってくるときだけです(<a href="#faq-romaji">ローマ字</a>). ChatGPTへの質問とGoogle検索は, ブラウザーで開くので, 打った文字がそのサイトに渡ります. 一致がないときの<kbd>Enter</kbd>もChatGPTに送るので, 送りたくない文字を打ったときは<kbd>Esc</kbd>で閉じてください.</p>
@@ -1892,7 +1892,7 @@ export function search(query) {
     {
       id: "romaji",
       tab: "ローマ字で日本語",
-      caption: "<strong>日本語入力を切り替えずに, 日本語の名前を探す.</strong> <code>kaigi</code>で「会議」. 打ちかけの<code>kai</code>から, 会, 開なども広げて探します.",
+      caption: "<strong>日本語入力を切り替えずに, 日本語のファイルを探す.</strong> <code>kaigi</code>で「会議」. 打ちかけの<code>kai</code>から, 会, 開なども広げて探します.",
       steps: [{ type: "kaigi", rows: (q) => (q.length < 3 ? [] : q === "kai" ? kai : kaigi) }, { key: "Enter" }, { open: { kind: "word", file: "定例会議_議事録.docx", doc: "minutes" } }],
     },
     {
