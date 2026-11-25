@@ -2308,7 +2308,7 @@ impl App {
     /// `docs\manual.html`を既定のブラウザーで開く. Webのマニュアルは見にいかない(K46)
     fn open_manual(&mut self) {
         let Some(path) = storage::manual_path() else {
-            system::notice("The manual was not found. The docs folder (docs\\manual.html) that comes with Hikidashi.exe is needed. Start Hikidashi.exe again from the folder that has it.");
+            system::notice("The manual was not found. The docs folder (docs\\manual.html) that comes with Hikidashi.exe is needed. If you moved only the exe, move the docs folder next to it.");
             return;
         };
         if let Err(e) = actions::shell("open", &path.to_string_lossy(), "", "", false) {
@@ -2913,6 +2913,9 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             }
             m if m == app.taskbar_msg && m != 0 => {
                 system::tray_add(hwnd);
+        // フォルダーを移したときは, 自動起動の登録先を今の場所に直す
+        system::fix_autostart(&app.exe_path);
+        std::thread::spawn(storage::remove_old_copy);
                 Some(LRESULT(0))
             }
             WM_DESTROY => {
@@ -3109,46 +3112,28 @@ fn set_border_color(hwnd: HWND) {
     }
 }
 
-/// リポジトリなどから起動されたら, `%LOCALAPPDATA%\Hikidashi`に写して, そちらを起動する.
-/// 動いているものがあれば終わらせてから置き換える(更新). 動かしたまま`git pull`できるように.
-fn relocate() -> bool {
+/// 別の場所の(または前の版が写した)Hikidashiが動いていたら, 終わってもらう(K47). 終わらせたらtrue.
+/// 同じexeなら何もしない(動いている方の窓を出す)
+fn take_over() -> bool {
     let Ok(exe) = std::env::current_exe() else { return false };
-    let dir = storage::install_dir();
-    let target = dir.join("Hikidashi.exe");
-    let same = exe.parent().map(|p| p.to_string_lossy().to_lowercase()) == Some(dir.to_string_lossy().to_lowercase());
-    if same || std::env::args().any(|a| a == "--here") {
-        return false;
-    }
     unsafe {
-        // 動いているものに終わってもらう
-        if let Ok(h) = FindWindowW(CLASS, PCWSTR::null()) {
-            let _ = PostMessageW(Some(h), WM_APP_QUIT, WPARAM(0), LPARAM(0));
-            for _ in 0..50 {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                if FindWindowW(CLASS, PCWSTR::null()).is_err() {
-                    break;
-                }
+        let Ok(h) = FindWindowW(CLASS, PCWSTR::null()) else { return false };
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        let other = winlist::process_path(pid);
+        if other.is_empty() || other.eq_ignore_ascii_case(&exe.to_string_lossy()) {
+            return false;
+        }
+        storage::log(&format!("taking over from {other}"));
+        let _ = PostMessageW(Some(h), WM_APP_QUIT, WPARAM(0), LPARAM(0));
+        for _ in 0..50 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if FindWindowW(CLASS, PCWSTR::null()).is_err() {
+                return true;
             }
-            std::thread::sleep(std::time::Duration::from_millis(300));
         }
     }
-    let _ = std::fs::create_dir_all(&dir);
-    let mut copied = false;
-    for _ in 0..20 {
-        if std::fs::copy(&exe, &target).is_ok() {
-            copied = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    }
-    if !copied {
-        storage::log("could not copy the exe; running from the original place");
-        return false;
-    }
-    dict::copy_bundled(&exe);
-    storage::remember_source(&exe);
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    std::process::Command::new(&target).args(args).arg("--updated").spawn().is_ok()
+    false
 }
 
 /// 動いているHikidashiの窓に`--query`の文字を`WM_COPYDATA`で送る. 送れたらtrue
@@ -3175,9 +3160,8 @@ pub fn run() {
             return;
         }
     }
-    if relocate() {
-        return;
-    }
+    // 置いた場所のexeがそのまま動く(K47. wakudoriと同じ)
+    let updated = take_over();
     unsafe {
         let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -3190,10 +3174,10 @@ pub fn run() {
             first = true;
             break;
         }
-        if !std::env::args().any(|a| a == "--updated") {
+        if !updated {
             break;
         }
-        // 更新のときは前のものが終わるのを待つ
+        // 前のものが終わるのを待つ
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     if !first {
@@ -3212,7 +3196,6 @@ pub fn run() {
         return;
     }
     let autostart = std::env::args().any(|a| a == "--autostart");
-    let updated = std::env::args().any(|a| a == "--updated");
 
     let hinst = unsafe { GetModuleHandleW(None).unwrap_or_default() };
     let wc = WNDCLASSEXW {

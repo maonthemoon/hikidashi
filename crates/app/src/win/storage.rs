@@ -36,35 +36,41 @@ pub fn data_dir() -> PathBuf {
     p.join("Hikidashi")
 }
 
-/// 写す前のexeの場所を書いておくファイル(マニュアルの`docs`を探すため. K46)
-fn source_file() -> PathBuf {
-    install_dir().join("source.txt")
-}
-
-/// 写す前の場所を覚え, そこの`docs\manual.html`も写す(展開したフォルダーを消しても開けるように)
-pub fn remember_source(exe: &std::path::Path) {
-    let Some(dir) = exe.parent() else { return };
-    if let Err(e) = std::fs::write(source_file(), dir.to_string_lossy().as_bytes()) {
-        log(&format!("manual: could not write source.txt ({e})"));
-    }
-    // 前の版がexeから書き出していたもの
-    let _ = std::fs::remove_file(install_dir().join("manual.html"));
-    let Some(src) = hikidashi_core::manual::near(dir).into_iter().find(|p| p.is_file()) else {
-        log(&format!("manual: docs\\manual.html is not near {}", dir.display()));
-        return;
-    };
-    let docs = install_dir().join("docs");
-    let r = std::fs::create_dir_all(&docs).and_then(|_| std::fs::copy(&src, docs.join("manual.html")));
-    if let Err(e) = r {
-        log(&format!("manual: could not copy {} ({e})", src.display()));
-    }
-}
-
 /// マニュアル(`docs\manual.html`)の場所. なければNone
 pub fn manual_path() -> Option<PathBuf> {
-    let source = std::fs::read_to_string(source_file()).ok().map(|t| PathBuf::from(t.trim())).filter(|p| p.is_absolute());
-    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    hikidashi_core::manual::candidates(source.as_deref(), &exe_dir, &install_dir()).into_iter().find(|p| p.is_file())
+    let exe = std::env::current_exe().ok()?;
+    hikidashi_core::manual::near(exe.parent()?).into_iter().find(|p| p.is_file())
+}
+
+/// 前の版が`%LOCALAPPDATA%\Hikidashi`に写したexeと, 一緒に置いたものを消す(K47). 名前を決めたものだけ.
+/// ここで動いているときは消さない
+pub fn remove_old_copy() {
+    let dir = install_dir();
+    let Ok(exe) = std::env::current_exe() else { return };
+    if exe.parent().is_some_and(|d| d.to_string_lossy().eq_ignore_ascii_case(&dir.to_string_lossy())) || !dir.join("Hikidashi.exe").is_file() {
+        return;
+    }
+    // 終わったばかりのexeは, 少しの間消せないことがある
+    for _ in 0..20 {
+        if std::fs::remove_file(dir.join("Hikidashi.exe")).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    for f in ["manual.html", "source.txt", r"docs\manual.html"] {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
+    // 空のときだけ消える
+    let _ = std::fs::remove_dir(dir.join("docs"));
+    // 写した辞書は, exeの隣に同じ大きさのものがあるときだけ
+    let dict = dir.join("SKK-JISYO.L");
+    let size = |p: &std::path::Path| std::fs::metadata(p).map(|m| m.len()).ok();
+    if let (Some(a), Some(b)) = (size(&dict), exe.parent().and_then(|d| size(&d.join("SKK-JISYO.L")))) {
+        if a == b {
+            let _ = std::fs::remove_file(&dict);
+        }
+    }
+    log("removed the old copy in LOCALAPPDATA");
 }
 
 pub fn config_path() -> PathBuf {

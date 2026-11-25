@@ -61,14 +61,30 @@ fn open_run(access: windows::Win32::System::Registry::REG_SAM_FLAGS) -> Option<H
 
 /// 自動起動が登録されているか
 pub fn autostart_enabled() -> bool {
-    let Some(key) = open_run(KEY_READ) else { return false };
+    autostart_value().is_some()
+}
+
+/// 自動起動に登録している文字
+fn autostart_value() -> Option<String> {
+    let key = open_run(KEY_READ)?;
     let mut buf = [0u16; 1024];
     let mut len = (buf.len() * 2) as u32;
     let ok = unsafe { RegQueryValueExW(key, RUN_NAME, None, None, Some(buf.as_mut_ptr() as *mut u8), Some(&mut len)).is_ok() };
     unsafe {
         let _ = RegCloseKey(key);
     }
-    ok && !from_wide(&buf).is_empty()
+    Some(from_wide(&buf)).filter(|v| ok && !v.is_empty())
+}
+
+fn autostart_command(exe: &str) -> String {
+    format!("\"{exe}\" --autostart")
+}
+
+/// 自動起動の登録先が別の場所なら, 今のexeに直す(登録していなければ何もしない)
+pub fn fix_autostart(exe: &str) {
+    if autostart_value().is_some_and(|v| !v.eq_ignore_ascii_case(&autostart_command(exe))) {
+        set_autostart(true, exe);
+    }
 }
 
 /// 自動起動を登録する(HKCUのRunキー. 管理者権限は不要)
@@ -76,7 +92,7 @@ pub fn set_autostart(on: bool, exe: &str) {
     let Some(key) = open_run(KEY_SET_VALUE) else { return };
     unsafe {
         if on {
-            let v = wide(&format!("\"{exe}\" --autostart"));
+            let v = wide(&autostart_command(exe));
             let bytes = std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2);
             let _ = RegSetValueExW(key, RUN_NAME, Some(0), REG_SZ, Some(bytes));
         } else {

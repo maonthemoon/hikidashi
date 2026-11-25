@@ -24,20 +24,6 @@ pub fn path() -> PathBuf {
     storage::install_dir().join(FILE_NAME)
 }
 
-/// exeの隣に同梱した辞書があれば, 写す先(`%LOCALAPPDATA%\Hikidashi`)へ写す. 大きさが同じなら写さない
-pub fn copy_bundled(exe: &std::path::Path) {
-    let Some(src) = exe.parent().map(|d| d.join(FILE_NAME)) else { return };
-    let Ok(meta) = std::fs::metadata(&src) else { return };
-    let dst = path();
-    if std::fs::metadata(&dst).map(|m| m.len() == meta.len()).unwrap_or(false) {
-        return;
-    }
-    match std::fs::read(&src) {
-        Ok(bytes) => save(&dst, &bytes),
-        Err(e) => storage::log(&format!("dictionary: could not read {} ({e})", src.display())),
-    }
-}
-
 /// 裏で辞書を読む. なければ取ってきて保存する. 済んだら窓に知らせる(漢字でも探し直す)
 pub fn start(hwnd: HWND, shared: Arc<Shared>, dict: Arc<OnceLock<Dict>>) {
     let h = hwnd.0 as isize;
@@ -51,9 +37,9 @@ pub fn start(hwnd: HWND, shared: Arc<Shared>, dict: Arc<OnceLock<Dict>>) {
 
 fn prepare(shared: &Shared) -> Option<Dict> {
     let p = path();
-    // 写した先, exeの隣(写せずに元の場所で動いているとき)の順に読む
+    // exeの隣(同梱したもの), 前に取ってきたものの順に読む
     let beside = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(FILE_NAME)));
-    for cand in std::iter::once(p.clone()).chain(beside.filter(|b| *b != p)) {
+    for cand in beside.into_iter().chain(std::iter::once(p.clone())) {
         let Ok(bytes) = std::fs::read(&cand) else { continue };
         match load(&bytes) {
             Ok(d) => {

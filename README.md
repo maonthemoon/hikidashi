@@ -57,9 +57,9 @@ git clone https://github.com/maonthemoon/hikidashi.git
 
 ### 更新する
 
-新しいZIPの`Hikidashi.exe`をダブルクリックするだけです. 動いている古いものが終わり, 新しいものに入れ替わります. gitの場合は, `git pull`して`bin\Hikidashi.exe`をダブルクリックします.
+トレイのメニューの`Quit`で終了し, 新しいZIPを展開して`Hikidashi.exe`を起動します. gitの場合は, `Quit`→`git pull`→`bin\Hikidashi.exe`を起動です(動いている間はexeを上書きできないため).
 
-Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから, そちらで動きます. なので, 動かしたまま新しい版を展開したり`git pull`したりできます. 設定と学習はそのまま残ります.
+置いた場所の`Hikidashi.exe`がそのまま動きます. 別のフォルダーの新しいexeを起動したときは, 動いている古いものが終わって入れ替わり, 自動起動の登録先も新しい場所に直ります. 設定と学習はそのまま残ります.
 
 ## 操作
 
@@ -112,7 +112,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 | `%APPDATA%\Hikidashi\history.txt` | 入力の履歴 |
 | `%APPDATA%\Hikidashi\state.txt` | ホットキー |
 | `%APPDATA%\Hikidashi\hikidashi.log` | 索引の件数と時間, エラー |
-| `%LOCALAPPDATA%\Hikidashi\Hikidashi.exe` | 動いているexe |
+| `%LOCALAPPDATA%\Hikidashi` | 同梱の拡張の写しと, ネットから取ってきた辞書(exeの隣に辞書がないときだけ) |
 
 社内のURLやパスなど, 人に見せたくない値は`config.toml`にだけ書きます.
 
@@ -135,7 +135,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 - **マニュアル**: `docs/manual.html`(1つのHTML). トレイの`Manual`で開きます. ZIPにも`docs\manual.html`として入れます. 書体も埋め込み, 開いてもWebを見にいきません(`tools/embed-fonts.py`). 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
 - **アイコン**: `uv run tools/make-icon.py`で`assets/hikidashi.ico`を作り直します.
 - **紹介のページ**: GitHub Pagesのトップ(`docs/index.html`)は, 窓をHTMLで作り直した動くデモのページです. `./tools/build-manual.sh`でマニュアル(`docs/manual.html`)と一緒に作ります. READMEの静止画は`uv run tools/make-screenshot.py`でそのページから撮ります(Playwrightのchromiumを使う).
-- **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, 別のファイルとして`bin/`に置き, ZIPにも入れます. 新しくするときは`./tools/update-dict.sh`で[skk-dev/dict](https://github.com/skk-dev/dict)から取ってきてcommitします. exeの隣に辞書がなければ, 初めて起動したときにネットから取ってきます.
+- **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, 別のファイルとして`bin/`に置き, ZIPにも入れます. 新しくするときは`./tools/update-dict.sh`で[skk-dev/dict](https://github.com/skk-dev/dict)から取ってきてcommitします. exeの隣に辞書がなければ, 起動したときにネットから取ってきます.
 
 ## ライセンス
 
