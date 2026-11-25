@@ -1,4 +1,5 @@
-//! Windows標準の部品をダークの見た目にする(K43. 設定画面とトレイのメニュー).
+//! Windows標準の部品をダークの見た目にする(K43. 設定画面の一覧とスクロールの帯, トレイのメニュー).
+//! ほかの部品は`parts.rs`が自分で描く(K44).
 //! 部品のダークは, 公開されていない`uxtheme.dll`の番号の関数で入れる(Notepad++なども使っている形).
 //! Windows 10の1809(17763)より古いものや, 関数がないときは何もしない.
 
@@ -6,14 +7,13 @@ use super::theme::is_dark;
 use super::theme::pal;
 use super::util::rgb;
 use std::sync::OnceLock;
-use windows::core::{s, w, BOOL, PCSTR, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::core::{s, w, BOOL, PCSTR, PCWSTR};
+use windows::Win32::Foundation::{HWND, LPARAM};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWINDOWATTRIBUTE};
-use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
-use windows::Win32::UI::Controls::*;
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows::Win32::UI::Controls::SetWindowTheme;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 type AllowWindowFn = unsafe extern "system" fn(HWND, BOOL) -> BOOL;
@@ -116,134 +116,8 @@ fn set_theme(h: HWND, dark_name: PCWSTR) {
 extern "system" fn apply_one(h: HWND, _: LPARAM) -> BOOL {
     match class_name(h).as_str() {
         "Edit" => set_theme(h, w!("DarkMode_CFD")),
-        "ComboBox" => {
-            set_theme(h, w!("DarkMode_CFD"));
-            // 開いたときの一覧(スクロールの帯)
-            let mut info = COMBOBOXINFO { cbSize: std::mem::size_of::<COMBOBOXINFO>() as u32, ..Default::default() };
-            if unsafe { GetComboBoxInfo(h, &mut info) }.is_ok() && !info.hwndList.is_invalid() {
-                set_theme(info.hwndList, w!("DarkMode_Explorer"));
-            }
-        }
-        "ListBox" | "Button" | "HikidashiPanel" => set_theme(h, w!("DarkMode_Explorer")),
-        "SysListView32" => {
-            set_theme(h, w!("DarkMode_Explorer"));
-            let (bg, fg) = (rgb(pal().field).0 as isize, rgb(pal().text).0 as isize);
-            unsafe {
-                SendMessageW(h, LVM_SETBKCOLOR, None, Some(LPARAM(bg)));
-                SendMessageW(h, LVM_SETTEXTBKCOLOR, None, Some(LPARAM(bg)));
-                SendMessageW(h, LVM_SETTEXTCOLOR, None, Some(LPARAM(fg)));
-                let head = HWND(SendMessageW(h, LVM_GETHEADER, None, None).0 as *mut _);
-                set_theme(head, w!("DarkMode_ItemsView"));
-                // 見出しの文字は標準では黒のままなので, 自分で描く
-                let _ = SetWindowSubclass(h, Some(list_proc), 3, 0);
-            }
-        }
+        "ListBox" | "HikidashiPanel" => set_theme(h, w!("DarkMode_Explorer")),
         _ => {}
     }
     BOOL(1)
-}
-
-fn fill(hdc: HDC, rc: &RECT, color: u32) {
-    unsafe {
-        let b = CreateSolidBrush(rgb(color));
-        FillRect(hdc, rc, b);
-        let _ = DeleteObject(b.into());
-    }
-}
-
-/// 表の見出しをダークで描く
-extern "system" fn list_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
-    if msg == WM_NOTIFY && is_dark() && lparam.0 != 0 {
-        unsafe {
-            let hdr = std::ptr::read_unaligned(lparam.0 as *const NMHDR);
-            let head = HWND(SendMessageW(hwnd, LVM_GETHEADER, None, None).0 as *mut _);
-            if hdr.code == NM_CUSTOMDRAW && hdr.hwndFrom == head {
-                let cd = std::ptr::read_unaligned(lparam.0 as *const NMCUSTOMDRAW);
-                if cd.dwDrawStage == CDDS_PREPAINT {
-                    let mut rc = RECT::default();
-                    let _ = GetClientRect(head, &mut rc);
-                    fill(cd.hdc, &rc, pal().bg_muted);
-                    return LRESULT(CDRF_NOTIFYITEMDRAW as isize);
-                }
-                if cd.dwDrawStage == CDDS_ITEMPREPAINT {
-                    draw_header_item(head, &cd);
-                    return LRESULT(CDRF_SKIPDEFAULT as isize);
-                }
-            }
-        }
-    }
-    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
-}
-
-unsafe fn draw_header_item(head: HWND, cd: &NMCUSTOMDRAW) {
-    fill(cd.hdc, &cd.rc, pal().bg_muted);
-    let line = RECT { left: cd.rc.right - 1, ..cd.rc };
-    fill(cd.hdc, &line, pal().border);
-    let mut buf = [0u16; 128];
-    let mut it = HDITEMW { mask: HDI_TEXT, pszText: PWSTR(buf.as_mut_ptr()), cchTextMax: buf.len() as i32, ..Default::default() };
-    SendMessageW(head, HDM_GETITEMW, Some(WPARAM(cd.dwItemSpec)), Some(LPARAM(&mut it as *mut _ as isize)));
-    let n = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
-    let font = HFONT(SendMessageW(head, WM_GETFONT, None, None).0 as *mut _);
-    let old = SelectObject(cd.hdc, font.into());
-    SetBkMode(cd.hdc, TRANSPARENT);
-    SetTextColor(cd.hdc, rgb(pal().text_secondary));
-    let mut rc = RECT { left: cd.rc.left + 6, right: cd.rc.right - 4, ..cd.rc };
-    DrawTextW(cd.hdc, &mut buf[..n], &mut rc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS | DT_NOPREFIX);
-    SelectObject(cd.hdc, old);
-}
-
-/// チェックボックスをダークで描く(標準のものは文字が黒のままになる). 扱ったらSome
-pub fn check_custom_draw(lparam: LPARAM) -> Option<LRESULT> {
-    if !is_dark() || lparam.0 == 0 {
-        return None;
-    }
-    unsafe {
-        let hdr = std::ptr::read_unaligned(lparam.0 as *const NMHDR);
-        if hdr.code != NM_CUSTOMDRAW || class_name(hdr.hwndFrom) != "Button" {
-            return None;
-        }
-        let cd = std::ptr::read_unaligned(lparam.0 as *const NMCUSTOMDRAW);
-        if cd.dwDrawStage != CDDS_PREPAINT {
-            return None;
-        }
-        let h = hdr.hwndFrom;
-        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(h).max(96) as i32;
-        let px = |v: i32| v * dpi / 96;
-        let has = |f: NMCUSTOMDRAW_DRAW_STATE_FLAGS| cd.uItemState.0 & f.0 != 0;
-        let on = SendMessageW(h, BM_GETCHECK, None, None).0 as u32 == BST_CHECKED.0;
-        fill(cd.hdc, &cd.rc, pal().bg);
-        let size = px(14);
-        let top = cd.rc.top + (cd.rc.bottom - cd.rc.top - size) / 2;
-        let left = cd.rc.left + 1;
-        let edge = if has(CDIS_FOCUS) { 0x2C84DB } else if on { pal().accent } else { pal().text_tertiary };
-        let face = if on { pal().accent } else if has(CDIS_HOT) || has(CDIS_SELECTED) { pal().btn_down } else { pal().field };
-        let b = CreateSolidBrush(rgb(face));
-        let p = CreatePen(PS_SOLID, 1, rgb(edge));
-        let ob = SelectObject(cd.hdc, b.into());
-        let op = SelectObject(cd.hdc, p.into());
-        let _ = RoundRect(cd.hdc, left, top, left + size, top + size, px(4), px(4));
-        if on {
-            let mark = CreatePen(PS_SOLID, px(2).max(2), rgb(pal().bg));
-            SelectObject(cd.hdc, mark.into());
-            let _ = MoveToEx(cd.hdc, left + px(3), top + px(7), None);
-            let _ = LineTo(cd.hdc, left + px(6), top + px(10));
-            let _ = LineTo(cd.hdc, left + px(11), top + px(4));
-            SelectObject(cd.hdc, op);
-            let _ = DeleteObject(mark.into());
-        }
-        SelectObject(cd.hdc, ob);
-        SelectObject(cd.hdc, op);
-        let _ = DeleteObject(b.into());
-        let _ = DeleteObject(p.into());
-        let font = HFONT(SendMessageW(h, WM_GETFONT, None, None).0 as *mut _);
-        let old = SelectObject(cd.hdc, font.into());
-        let mut buf = [0u16; 256];
-        let n = GetWindowTextW(h, &mut buf).max(0) as usize;
-        SetBkMode(cd.hdc, TRANSPARENT);
-        SetTextColor(cd.hdc, rgb(pal().text));
-        let mut rc = RECT { left: left + size + px(6), ..cd.rc };
-        DrawTextW(cd.hdc, &mut buf[..n], &mut rc, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
-        SelectObject(cd.hdc, old);
-        Some(LRESULT(CDRF_SKIPDEFAULT as isize))
-    }
 }

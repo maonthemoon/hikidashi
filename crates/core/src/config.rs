@@ -312,11 +312,11 @@ pub struct Files {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Wsl {
-    /// 使うかどうか
+    /// 前の版の「使うかどうか」. 読むだけで使わない(K44. `false`なら`[prefix] wsl`を空にする)
     pub enabled: bool,
-    /// ディストリ名. 空なら既定のディストリ
+    /// ディストリ名. 空なら既定のディストリ. 設定画面には出さない(K44)
     pub distro: String,
-    /// WSL側で除く名前
+    /// 前の版のWSL側で除く名前. 読むだけで使わない(K44. `[files] exclude`に足す)
     pub exclude: Vec<String>,
 }
 
@@ -424,7 +424,7 @@ impl Default for Files {
             roots: vec!["%USERPROFILE%".into()],
             exclude: [
                 // `target`, `obj`は入れない(自分で作った同じ名前のフォルダーまで外れるため. K32)
-                "AppData", "node_modules", ".git", ".svn", ".hg", "__pycache__", ".venv", "venv", ".cache", ".npm", ".cargo", ".rustup",
+                "AppData", "node_modules", ".git", ".svn", ".hg", "__pycache__", ".venv", "venv", ".cache", ".npm", ".cargo", ".rustup", ".local",
                 "$RECYCLE.BIN", "System Volume Information", "NTUSER.DAT", "ntuser.dat.LOG1", "ntuser.dat.LOG2", ".vs",
             ]
             .iter()
@@ -443,10 +443,7 @@ impl Default for Wsl {
         Wsl {
             enabled: true,
             distro: String::new(),
-            exclude: ["node_modules", ".git", ".cache", ".npm", ".cargo", ".rustup", "__pycache__", ".venv", "venv", ".local"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            exclude: vec![],
         }
     }
 }
@@ -509,6 +506,15 @@ impl Config {
 
     /// 前の版の`[chrome]`を`[browser]`に移す. 開くブラウザーは既定のブラウザーのまま(ユーザーの指示)
     fn migrate(&mut self) {
+        // WSLのオンオフはキーワードが空かどうか, 除く名前はWindowsと1つにした(K44)
+        if !std::mem::replace(&mut self.wsl.enabled, true) {
+            self.prefix.wsl.clear();
+        }
+        for n in std::mem::take(&mut self.wsl.exclude) {
+            if !self.files.exclude.iter().any(|x| x.eq_ignore_ascii_case(&n)) {
+                self.files.exclude.push(n);
+            }
+        }
         // 前の版の`[tools] vscode`, `wezterm`を「〜で開く」の一覧に移す
         for (old, kind) in [(std::mem::take(&mut self.tools.vscode), crate::openwith::ToolKind::VsCode), (std::mem::take(&mut self.tools.wezterm), crate::openwith::ToolKind::WezTerm)] {
             if old.trim().is_empty() {
@@ -606,8 +612,8 @@ pub fn to_toml(c: &Config) -> String {
         line("open_with = []");
         line("");
     }
-    line("# Prefixes to search only one kind. Type the letter and a space, e.g. \"f report\".");
-    line("# Box is searched only with its prefix, e.g. \"bx report\" (it has too many files to mix in).");
+    line("# Keywords to search only one kind. Type the letter and a space, e.g. \"f report\". Leave one empty to turn it off.");
+    line("# Box is searched only with its keyword, e.g. \"bx report\" (it has too many files to mix in).");
     line("# wsl searches the home folder in WSL. chatgpt opens the window for a long question right away.");
     line("# clipboard shows the clipboard history.");
     line("# calc is the only place where calculations are shown, e.g. \"= 0x1F\", \"= 10dBm\", \"= (12+3)*4\".");
@@ -665,7 +671,7 @@ pub fn to_toml(c: &Config) -> String {
     line(&format!("roots = {}", list(&c.files.roots)));
     line("# Folders to skip, by place.");
     line(&format!("skip_dirs = {}", list(&c.files.skip_dirs)));
-    line("# Names to skip (folders and files), wherever they are.");
+    line("# Names to skip (folders and files), wherever they are, also in WSL. * matches anything, e.g. \"*.tmp\".");
     line(&format!("exclude = {}", list(&c.files.exclude)));
     line("# Box is read from the data of Box Drive (sync.db), not by scanning the folder.");
     line("# box_dir: the Box folder. Leave empty to find it automatically.");
@@ -673,13 +679,10 @@ pub fn to_toml(c: &Config) -> String {
     line("# box_db: sync.db of Box Drive. Leave empty to find it automatically.");
     line(&format!("box_db = {}", q(&c.files.box_db)));
     line("");
-    line("# WSL is read when you type its prefix (\"w \"), and again if the list is older than 5 minutes.");
+    line("# WSL is read when you type its keyword (\"w \"), and again if the list is older than 5 minutes.");
     line("[wsl]");
-    line(&format!("enabled = {}", c.wsl.enabled));
     line("# Leave empty for the default distro.");
     line(&format!("distro = {}", q(&c.wsl.distro)));
-    line("# Names to skip inside WSL.");
-    line(&format!("exclude = {}", list(&c.wsl.exclude)));
     line("");
     line("[browser]");
     line("# \"default\" uses the default browser of Windows. \"chrome\" or \"edge\" always uses that browser.");
@@ -767,10 +770,10 @@ impl Config {
         let prefixes = [("Apps", &p.app), ("Files", &p.file), ("Bookmarks", &p.bookmark), ("Kill", &p.kill), ("WSL", &p.wsl), ("Box", &p.boxdrive), ("Google", &p.google), ("ChatGPT", &p.chatgpt), ("Clipboard", &p.clipboard), ("Calc", &p.calc)];
         for (i, (label, v)) in prefixes.iter().enumerate() {
             if has_space(v) {
-                return Err(format!("Prefix for {label} cannot contain spaces."));
+                return Err(format!("Keyword for {label} cannot contain spaces."));
             }
             if !v.is_empty() && prefixes[..i].iter().any(|(_, w)| w.eq_ignore_ascii_case(v)) {
-                return Err(format!("Prefix \"{v}\" is used twice."));
+                return Err(format!("Keyword \"{v}\" is used twice."));
             }
         }
         for (k, v) in &self.alias {
@@ -864,8 +867,18 @@ mod tests {
         assert!(c.files.exclude.contains(&"AppData".to_string()));
         // 普通の言葉の名前は初期値に入れない(K32)
         for w in ["target", "obj"] {
-            assert!(!c.files.exclude.iter().chain(&c.wsl.exclude).any(|n| n == w));
+            assert!(!c.files.exclude.iter().any(|n| n == w));
         }
+    }
+
+    #[test]
+    fn old_wsl_settings_are_merged() {
+        // WSLのオンオフと除く名前は, キーワードと`[files] exclude`に移す(K44)
+        let c = Config::parse("[files]\nexclude = ['.git']\n[wsl]\nenabled = false\nexclude = ['.GIT', 'old*']\n").unwrap();
+        assert_eq!(c.prefix.wsl, "");
+        assert_eq!(c.files.exclude, vec![".git", "old*"]);
+        assert!(!c.prefixes().iter().any(|(_, m)| *m == crate::router::Mode::Wsl));
+        assert_eq!(Config::parse(&to_toml(&c)).unwrap(), c);
     }
 
     #[test]
@@ -880,7 +893,7 @@ mod tests {
         c.files.exclude = vec!["it's".into()];
         c.files.box_dir = r"D:\Box".into();
         c.files.box_db = r"%LOCALAPPDATA%\Box\Box\data\sync.db".into();
-        c.wsl.enabled = false;
+        c.prefix.wsl = String::new();
         c.chatgpt.mode = "clipboard".into();
         c.browser.browser = "edge".into();
         c.browser.open_in = "tab".into();

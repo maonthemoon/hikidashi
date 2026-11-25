@@ -26,6 +26,12 @@ pub struct Palette {
     /// 設定画面のボタン, 押したとき
     pub btn: u32,
     pub btn_down: u32,
+    /// 設定画面のカードの地(K44)
+    pub card: u32,
+    /// 設定画面で選んでいる区分と行の地(K44)
+    pub selected: u32,
+    /// 設定画面の外したチェックボックスの枠(K44)
+    pub off: u32,
 }
 
 pub const LIGHT: Palette = Palette {
@@ -45,6 +51,9 @@ pub const LIGHT: Palette = Palette {
     field: 0xFFFFFF,
     btn: 0xFFFFFF,
     btn_down: BG_MUTED,
+    card: 0xFFFFFF,
+    selected: 0xDCD8CA,
+    off: 0x87867F,
 };
 
 /// ダーク(暖かい黒. 紹介のページのダークと同じ系統. K39のQ1)
@@ -65,6 +74,9 @@ pub const DARK: Palette = Palette {
     field: 0x2B2A28,
     btn: 0x30302E,
     btn_down: 0x3D3D3A,
+    card: 0x262624,
+    selected: 0x3D3D3A,
+    off: 0x8A8880,
 };
 
 static DARK_ON: AtomicBool = AtomicBool::new(false);
@@ -125,6 +137,11 @@ pub const TEXT_SECONDARY: u32 = 0x3D3D3A;
 pub const TEXT_TERTIARY: u32 = 0x5E5D59;
 pub const BORDER: u32 = 0xD1CFC5;
 pub const BORDER_FAINT: u32 = 0xE8E6DC;
+/// 塗りのボタンと, 入れたチェックボックス(白い文字を載せる. ライトとダークで同じ)
+pub const FILL: u32 = 0xB85A39;
+pub const FILL_DOWN: u32 = 0xA9472A;
+/// キーボードで選んでいる部品の枠
+pub const FOCUS: u32 = 0x2C84DB;
 /// 入力欄の下の線が光るときの色(J2b)
 pub const ACCENT: u32 = 0xD97757;
 /// killの右端の文字(K9)など, アクセントの文字

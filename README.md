@@ -99,7 +99,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 
 ### タスクトレイ
 
-アイコンのクリックで窓を出します. 右クリックのメニューには, `Show Hikidashi`, `Change hotkey…`, `Start with Windows`, `Rebuild index`, `Settings`, `Manual`, `Quit`があります. 設定画面とこのメニューは, 設定の`Language / 言語`で日本語にできます(初めはWindowsの言語).
+アイコンのクリックで窓を出します. 右クリックのメニューには, `Show Hikidashi`, `Change hotkey…`, `Start with Windows`, `Rebuild index`, `Settings`, `Manual`, `Quit`があります. 設定画面とこのメニューは, 設定の`Language`で日本語にできます(初めはWindowsの言語).
 
 ランチャーの窓, 長い質問を書く窓, 設定画面, このメニューは, Windowsのアプリのモードがダークならダークになります. 設定の`Theme`で, いつもライト, いつもダークにもできます.
 
@@ -107,7 +107,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 
 | 場所 | 中身 |
 |---|---|
-| `%APPDATA%\Hikidashi\config.toml` | 設定. トレイの`Settings`で設定画面が開き, `Save`ですぐ反映される. 接頭辞, アプリの別名, 自作コマンド, 探すフォルダーと外すフォルダー, ブラウザー(既定のブラウザーかChromeかEdge, 新しい窓かタブか)など. 入力欄に`settings`と打っても設定画面が開く. メモ帳で直すこともでき, 書き方はファイルの中のコメントにある |
+| `%APPDATA%\Hikidashi\config.toml` | 設定. トレイの`Settings`で設定画面が開き, `Save`ですぐ反映される. キーワード, エイリアス, 検索するフォルダーと除外するフォルダー, ブラウザー(既定のブラウザーかChromeかEdge, 新しい窓かタブか)など. 入力欄に`settings`と打っても設定画面が開く. メモ帳で直すこともでき, 書き方はファイルの中のコメントにある |
 | `%APPDATA%\Hikidashi\learn.tsv` | 学習(何を打って何を開いたか) |
 | `%APPDATA%\Hikidashi\history.txt` | 入力の履歴 |
 | `%APPDATA%\Hikidashi\state.txt` | ホットキー |

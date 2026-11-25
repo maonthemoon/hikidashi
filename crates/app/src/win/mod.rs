@@ -13,6 +13,7 @@ mod i18n;
 mod indexer;
 mod net;
 mod paint;
+mod parts;
 mod scripts;
 mod searcher;
 mod selection;
@@ -569,9 +570,6 @@ impl App {
         }
         if self.composing() {
             return None;
-        }
-        if self.mode == Mode::Wsl && !self.config.wsl.enabled {
-            return Some(("WSL search is off. Turn it on in Settings > Box and WSL".into(), false));
         }
         let st = self.shared.status.lock().unwrap();
         let parts: Vec<&str> = st.iter().filter(|s| !s.is_empty()).map(String::as_str).collect();

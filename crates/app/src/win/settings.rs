@@ -1,24 +1,25 @@
-//! 設定画面(K16). トレイの`Settings`で開く. 左に区分, 右に中身, 下にSaveとCancel.
-//! 部品はWindows標準(入力欄, リスト, 表, チェックボックス)で, 色だけランチャーに合わせる(Q6).
+//! 設定画面(K16, K44). トレイの`Settings`で開く. 左に区分, 右に中身(カードの並び), 下にSaveとCancel.
+//! 部品の見た目は`parts.rs`でそろえる. 位置はどれも96dpiの値で, 区分を作るときに決める.
 //! Saveで`config.toml`を書き直す(Q7. 手で書いた`#`の行は残らない). 書いたファイルは監視が読み直す.
 
 use super::i18n::tr;
 use super::storage;
 use super::system;
 use super::theme::*;
-use super::util::{from_wide, hiword, loword, rgb, wide, WStr};
-use super::{actions, dark, paint};
+use super::util::{from_wide, hiword, loword, rgb, WStr};
+use super::{actions, dark, paint, parts};
+use parts::{brush, drop_sel, s, set_drop, surface, tint, Btn, Color, Deco, Kind};
 use hikidashi_core::builtin;
-use hikidashi_core::config::{self, parse_enter_key, Command, Config, Files, OpenWith, Wsl, ENTER_KEY_CHOICES};
+use hikidashi_core::config::{self, parse_enter_key, Command, Config, Files, OpenWith, ENTER_KEY_CHOICES};
 use hikidashi_core::pathlike;
 use std::cell::RefCell;
 use std::sync::OnceLock;
-use windows::core::{w, PCWSTR, PWSTR};
+use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_INPROC_SERVER};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::SystemServices::{SS_CENTERIMAGE, SS_LEFT, SS_NOPREFIX};
+use windows::Win32::System::SystemServices::{SS_CENTER, SS_CENTERIMAGE, SS_LEFT, SS_NOPREFIX};
 use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
 use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, GetFocus, SetFocus};
@@ -37,9 +38,18 @@ const CLIENT_H: i32 = 660;
 const SIDE_W: i32 = 168;
 const PAD: i32 = 24;
 const FOOT_H: i32 = 60;
-const ROW_GAP: i32 = 8;
+/// 中身の幅. 右はスクロールの帯の分を空ける
+const BODY_W: i32 = 552;
 const FONT_PX: i32 = 14;
-const HEAD_PX: i32 = 18;
+const HINT_PX: i32 = 13;
+const HEAD_PX: i32 = 20;
+/// 入力欄, プルダウン, ボタンの高さ. 選ぶものの幅
+const CTL_H: i32 = 32;
+const CTL_W: i32 = 220;
+/// 一覧の1行の高さ, 下の帯の高さ, 見出しの高さ
+const ITEM_H: i32 = 30;
+const BAR_H: i32 = 44;
+const LIST_HEAD_H: i32 = 28;
 
 // 部品の番号. 1と2はEnterとEscで押される(IsDialogMessage)
 const ID_SAVE: i32 = 1;
@@ -58,6 +68,7 @@ const ID_SELHK_CLEAR: i32 = 107;
 const ID_RECENT: i32 = 230;
 const ID_CLIPHIST: i32 = 231;
 const ID_PFX: i32 = 110; // 110〜119
+const ID_PFX_EX: i32 = 140; // 140〜149
 const ID_KEYS: i32 = 120; // 120〜124
 const ID_ROOTS: i32 = 200;
 const ID_ROOTS_ADD: i32 = 201;
@@ -70,14 +81,6 @@ const ID_NAME_EDIT: i32 = 221;
 const ID_NAME_ADD: i32 = 222;
 const ID_NAME_DEL: i32 = 223;
 const ID_NAME_RESET: i32 = 224;
-const ID_WSL_ON: i32 = 310;
-const ID_WSL_DISTRO: i32 = 311;
-// WSLの外す名前(K26. 検索の外す名前と同じ形)
-const ID_WSL_NAMES: i32 = 313;
-const ID_WSL_NAME_EDIT: i32 = 314;
-const ID_WSL_NAME_ADD: i32 = 315;
-const ID_WSL_NAME_DEL: i32 = 316;
-const ID_WSL_NAME_RESET: i32 = 317;
 const ID_APPDIRS: i32 = 400;
 const ID_APPDIRS_ADD: i32 = 401;
 const ID_APPDIRS_DEL: i32 = 402;
@@ -88,15 +91,11 @@ const ID_OW_DEL: i32 = 413;
 const ID_TERMINAL: i32 = 414;
 /// Tabのメニューのチェック(K24). 420 + 項目の番号×3 + 種類(アプリ, ファイル, フォルダー)
 const ID_MENU: i32 = 420;
-const ID_CHROME: i32 = 500;
-const ID_CHROME_BROWSE: i32 = 501;
 const ID_PROFILE: i32 = 502;
 const ID_BROWSER: i32 = 503;
 const ID_OPEN_IN: i32 = 504;
 const ID_EDGE_PROFILE: i32 = 505;
 const ID_GPT_MODE: i32 = 510;
-const ID_GPT_URL: i32 = 511;
-const ID_GOOGLE: i32 = 512;
 const ID_GPT_SEND: i32 = 513;
 const ID_GPT_DELAY: i32 = 514;
 const ID_GPT_HIDE: i32 = 515;
@@ -104,10 +103,6 @@ const ID_ALIASES: i32 = 600;
 const ID_ALIAS_ADD: i32 = 601;
 const ID_ALIAS_EDIT: i32 = 602;
 const ID_ALIAS_DEL: i32 = 603;
-const ID_CMDS: i32 = 700;
-const ID_CMD_ADD: i32 = 701;
-const ID_CMD_EDIT: i32 = 702;
-const ID_CMD_DEL: i32 = 703;
 // 項目を直す小さな窓
 const E_NAME: i32 = 10;
 const E_TITLE: i32 = 11;
@@ -115,21 +110,29 @@ const E_KIND: i32 = 12;
 const E_VALUE: i32 = 13;
 const E_ERROR: i32 = 14;
 const E_VALUE_LABEL: i32 = 15;
+const E_APP: i32 = 16;
+const E_APPS: i32 = 17;
+const E_BROWSE: i32 = 18;
 
-const SECTIONS: [&str; 8] = ["General", "Search", "Box and WSL", "Apps", "Tab menu", "Web", "Aliases", "Commands"];
-const PREFIX_LABELS: [&str; 10] = ["Apps", "Files", "Bookmarks", "Kill", "WSL", "Box", "Google", "ChatGPT", "Clipboard", "Calc"];
-/// 言語(K24). どちらの言語でも同じ文字で出す
-const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows / Windowsに合わせる"), ("ja", "日本語"), ("en", "English")];
+const SECTIONS: [&str; 8] = ["General", "Keys", "Keywords", "Search", "Apps", "Tab menu", "Web", "Aliases"];
+const PREFIX_LABELS: [&str; 10] = ["Apps", "Files", "Bookmarks", "End a process", "WSL", "Box", "Google", "ChatGPT", "Clipboard history", "Calculator"];
+/// キーワードのあとに打つ文字の例
+const PREFIX_EXAMPLES: [&str; 10] = ["power", "report", "news", "excel", "report", "design", "weather", "question", "memo", "12*3"];
+const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows"), ("ja", "日本語"), ("en", "English")];
 /// ランチャーの窓, 書く窓, 設定画面, トレイのメニューの色(K39, K43)
-const THEMES: [(&str, &str); 3] = [("auto", "Same as the app mode of Windows"), ("light", "Light"), ("dark", "Dark")];
+const THEMES: [(&str, &str); 3] = [("auto", "Same as Windows"), ("light", "Light"), ("dark", "Dark")];
 /// Tabのメニューの項目(`config::MENU_ITEMS`の順)と種類
-const MENU_LABELS: [&str; 8] = ["Copy file", "Open new window", "Open in … (Open with)", "Open the folder it is in", "Copy path", "Copy WSL path (only with WSL)", "Run as administrator", "Open in Explorer"];
+const MENU_LABELS: [&str; 8] = ["Copy file", "Open new window", "Open in another app", "Open the folder it is in", "Copy path", "Copy WSL path (only with WSL)", "Run as administrator", "Open in Explorer"];
 const MENU_KINDS: [&str; 3] = ["app", "file", "folder"];
 /// Enterに修飾キーを足したときの操作(2026-11-24. 設定の`[keys]`の順)
 const KEY_LABELS: [&str; 5] = ["Ask ChatGPT", "Search Google", "Long question", "Run as admin", "Open in terminal"];
-const BROWSERS: [(&str, &str); 3] = [("default", "Default browser of Windows"), ("chrome", "Chrome"), ("edge", "Edge")];
+const BROWSERS: [(&str, &str); 3] = [("default", "Windows default"), ("chrome", "Chrome"), ("edge", "Edge")];
 const OPEN_IN: [(&str, &str); 2] = [("window", "New window"), ("tab", "New tab")];
-const GPT_MODES: [(&str, &str); 2] = [("url", "Open chatgpt.com/?q= and send the question"), ("clipboard", "Copy the question and open ChatGPT")];
+const GPT_MODES: [(&str, &str); 2] = [("url", "Open with the question"), ("clipboard", "Copy, then open")];
+/// 短い語で開くもの(エイリアス. K44)と, 「別のアプリで開く」の渡し方
+const ALIAS_KINDS: [&str; 3] = ["App", "Web page", "Command"];
+const PASS_KINDS: [&str; 3] = ["The selected item", "Its folder", "Custom"];
+const PASS_FOLDER: &str = "{dir}";
 
 /// 開くときに渡す値
 pub struct OpenArgs {
@@ -142,57 +145,30 @@ pub struct OpenArgs {
 
 // ---------------------------------------------------------------- 並べ方
 
+/// 部品の位置(96dpi)
 #[derive(Clone, Copy)]
-enum W {
-    Px(i32),
-    Fill,
-}
-
-struct It {
-    hwnd: Option<HWND>,
-    w: W,
+struct Pos {
+    hwnd: HWND,
+    x: i32,
+    y: i32,
+    w: i32,
     h: i32,
-    /// コンボボックスの開いたときの高さ(見た目の高さとは別)
-    drop: i32,
 }
 
-struct Row {
-    gap: i32,
-    items: Vec<It>,
+#[derive(Default)]
+struct Section {
+    pos: Vec<Pos>,
+    deco: Vec<Deco>,
+    /// 中身の高さ
+    h: i32,
 }
 
-fn s(v: i32, dpi: u32) -> i32 {
-    (v as i64 * dpi as i64 / 96) as i32
-}
-
-/// 行を上から並べる. `x`と`width`は96dpiの値. 返り値は下の端(96dpi)
-fn place(rows: &[Row], x: i32, y: i32, width: i32, dpi: u32) -> i32 {
-    let mut y = y;
-    for r in rows {
-        y += r.gap;
-        let h = r.items.iter().map(|i| i.h).max().unwrap_or(0);
-        let fixed: i32 = r.items.iter().map(|i| if let W::Px(p) = i.w { p } else { 0 }).sum();
-        let fills = r.items.iter().filter(|i| matches!(i.w, W::Fill)).count() as i32;
-        let gaps = (r.items.len() as i32 - 1).max(0) * ROW_GAP;
-        let fill_w = if fills > 0 { ((width - fixed - gaps) / fills).max(20) } else { 0 };
-        let mut cx = x;
-        for it in &r.items {
-            let iw = match it.w {
-                W::Px(p) => p,
-                W::Fill => fill_w,
-            };
-            if let Some(hwnd) = it.hwnd {
-                let top = y + (h - it.h) / 2;
-                let real_h = if it.drop > 0 { it.drop } else { it.h };
-                unsafe {
-                    let _ = SetWindowPos(hwnd, None, s(cx, dpi), s(top, dpi), s(iw, dpi), s(real_h, dpi), SWP_NOZORDER | SWP_NOACTIVATE);
-                }
-            }
-            cx += iw + ROW_GAP;
+fn place(pos: &[Pos], dx: i32, dy: i32, dpi: u32) {
+    for p in pos {
+        unsafe {
+            let _ = SetWindowPos(p.hwnd, None, s(p.x + dx, dpi), s(p.y + dy, dpi), s(p.w, dpi), s(p.h, dpi), SWP_NOZORDER | SWP_NOACTIVATE);
         }
-        y += h + ROW_GAP;
     }
-    y
 }
 
 // ---------------------------------------------------------------- 部品を作る
@@ -207,6 +183,7 @@ struct Maker {
 const F_BODY: u8 = 0;
 const F_HEAD: u8 = 1;
 const F_BOLD: u8 = 2;
+const F_HINT: u8 = 3;
 
 impl Maker {
     fn raw(&mut self, class: PCWSTR, text: &str, style: u32, ex: WINDOW_EX_STYLE, id: i32, font: u8) -> HWND {
@@ -228,6 +205,7 @@ impl Maker {
             )
             .unwrap_or_default()
         };
+        parts::forget(h);
         self.made.push((h, font));
         h
     }
@@ -237,7 +215,7 @@ impl Maker {
     }
     fn hint(&mut self, text: &str) -> HWND {
         let text = &tr(text);
-        let h = self.raw(w!("STATIC"), text, (SS_LEFT.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), -1, F_BODY);
+        let h = self.raw(w!("STATIC"), text, (SS_LEFT.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), -1, F_HINT);
         tint(h, |p| p.text_tertiary);
         h
     }
@@ -249,74 +227,248 @@ impl Maker {
         let text = &tr(text);
         self.raw(w!("STATIC"), text, (SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), -1, F_BOLD)
     }
-    fn edit(&mut self, id: i32, text: &str, number: bool) -> HWND {
-        let mut st = WS_TABSTOP.0 | ES_AUTOHSCROLL as u32;
-        if number {
-            st |= ES_NUMBER as u32;
-        }
-        self.raw(w!("EDIT"), text, st, WS_EX_CLIENTEDGE, id, F_BODY)
+    /// 枠は`parts.rs`の飾りで描く
+    fn edit(&mut self, id: i32, text: &str, style: i32) -> HWND {
+        self.raw(w!("EDIT"), text, WS_TABSTOP.0 | (ES_AUTOHSCROLL | style) as u32, WINDOW_EX_STYLE(0), id, F_BODY)
     }
     fn button(&mut self, id: i32, text: &str) -> HWND {
         let text = &tr(text);
         self.raw(w!("BUTTON"), text, WS_TABSTOP.0 | BS_OWNERDRAW as u32, WINDOW_EX_STYLE(0), id, F_BODY)
     }
-    fn check(&mut self, id: i32, text: &str, on: bool) -> HWND {
-        let text = &tr(text);
+    fn check(&mut self, id: i32, text: &str, hint: &str, cell: bool, on: bool) -> HWND {
         let h = self.raw(w!("BUTTON"), text, WS_TABSTOP.0 | BS_AUTOCHECKBOX as u32, WINDOW_EX_STYLE(0), id, F_BODY);
+        parts::make_check(h, &tr(hint), cell);
+        surface(h, |p| p.card);
         set_check(h, on);
         h
     }
-    fn list(&mut self, id: i32, items: &[String]) -> HWND {
-        let h = self.raw(w!("LISTBOX"), "", WS_TABSTOP.0 | WS_VSCROLL.0 | (LBS_NOTIFY | LBS_NOINTEGRALHEIGHT) as u32, WS_EX_CLIENTEDGE, id, F_BODY);
+    fn list(&mut self, id: i32, items: &[String], cols: &[i32]) -> HWND {
+        let st = WS_TABSTOP.0 | WS_VSCROLL.0 | (LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS) as u32;
+        let h = self.raw(w!("LISTBOX"), "", st, WINDOW_EX_STYLE(0), id, F_BODY);
+        parts::make_list(h, cols);
         fill_list(h, items);
         h
     }
-    fn combo(&mut self, id: i32, items: &[String], editable: bool) -> HWND {
-        let st = WS_TABSTOP.0 | WS_VSCROLL.0 | if editable { CBS_DROPDOWN | CBS_AUTOHSCROLL } else { CBS_DROPDOWNLIST } as u32;
-        let h = self.raw(w!("COMBOBOX"), "", st, WINDOW_EX_STYLE(0), id, F_BODY);
-        for it in items {
-            // 選ぶだけの一覧は日本語にする. 打てる一覧(アプリの名前など)は中身なのでそのまま
-            let t = WStr::new(&if editable { it.clone() } else { tr(it) });
-            unsafe { SendMessageW(h, CB_ADDSTRING, None, Some(LPARAM(t.pcwstr().0 as isize))) };
-        }
-        h
-    }
-    fn table(&mut self, id: i32, cols: &[(&str, i32)]) -> HWND {
-        let h = self.raw(
-            WC_LISTVIEWW,
-            "",
-            WS_TABSTOP.0 | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_NOSORTHEADER,
-            WS_EX_CLIENTEDGE,
-            id,
-            F_BODY,
-        );
-        unsafe {
-            SendMessageW(h, LVM_SETEXTENDEDLISTVIEWSTYLE, Some(WPARAM(LVS_EX_FULLROWSELECT as usize)), Some(LPARAM(LVS_EX_FULLROWSELECT as isize)));
-            for (i, (name, cx)) in cols.iter().enumerate() {
-                let mut t = wide(&tr(name));
-                let col = LVCOLUMNW { mask: LVCF_TEXT | LVCF_WIDTH, cx: *cx, pszText: PWSTR(t.as_mut_ptr()), ..Default::default() };
-                SendMessageW(h, LVM_INSERTCOLUMNW, Some(WPARAM(i)), Some(LPARAM(&col as *const _ as isize)));
-            }
-        }
+    /// プルダウン. `items`は出す文字のまま
+    fn drop(&mut self, id: i32, items: Vec<String>, sel: usize) -> HWND {
+        let h = self.raw(parts::DROP_CLASS, "", WS_TABSTOP.0, WINDOW_EX_STYLE(0), id, F_BODY);
+        set_drop(h, items, sel);
         h
     }
 }
 
-fn it(h: HWND, w: W, ht: i32) -> It {
-    It { hwnd: Some(h), w, h: ht, drop: 0 }
+fn tr_all(v: &[&str]) -> Vec<String> {
+    v.iter().map(|t| tr(t)).collect()
 }
-fn gap(px: i32) -> It {
-    It { hwnd: None, w: W::Px(px), h: 0, drop: 0 }
+
+/// 決まった言葉から選ぶもの
+fn key_items(keys: &[(&str, &str)], value: &str) -> (Vec<String>, usize) {
+    (keys.iter().map(|(_, l)| tr(l)).collect(), keys.iter().position(|(k, _)| *k == value).unwrap_or(0))
 }
-fn combo_it(h: HWND, w: W) -> It {
-    It { hwnd: Some(h), w, h: 26, drop: 240 }
+
+/// 一覧の下の帯に置くもの
+enum Bar {
+    Button(i32, &'static str),
+    Edit(i32),
 }
-fn row(items: Vec<It>) -> Row {
-    Row { gap: 0, items }
+
+/// ボタンの幅. 文字の長さに合わせる(日本語は2文字分で数える)
+fn button_w(text: &str, min: i32) -> i32 {
+    let n: i32 = tr(text).chars().map(|c| if c.is_ascii() { 8 } else { 14 }).sum();
+    (n + 30).max(min)
 }
-fn row_gap(gap: i32, items: Vec<It>) -> Row {
-    Row { gap, items }
+
+/// 区分の中身を上から並べる
+struct Page<'a> {
+    m: &'a mut Maker,
+    x: i32,
+    w: i32,
+    y: i32,
+    out: Section,
+    /// 今のカードの始まり(飾りの番号, 上の端)
+    card: Option<(usize, i32)>,
 }
+
+impl<'a> Page<'a> {
+    fn new(m: &'a mut Maker, x: i32, y: i32, w: i32) -> Page<'a> {
+        Page { m, x, w, y, out: Section::default(), card: None }
+    }
+    fn at(&mut self, hwnd: HWND, x: i32, y: i32, w: i32, h: i32) {
+        self.out.pos.push(Pos { hwnd, x, y, w, h });
+    }
+    fn deco(&mut self, kind: Kind, x: i32, y: i32, w: i32, h: i32) {
+        self.out.deco.push(Deco { kind, x, y, w, h });
+    }
+    fn title(&mut self, text: &str) {
+        let h = self.m.head(text);
+        self.at(h, self.x, self.y, self.w, 30);
+        self.y += 40;
+    }
+    /// まとまりの名前と説明
+    fn group(&mut self, title: &str, hint: &str) {
+        if !title.is_empty() {
+            let h = self.m.sub(title);
+            self.at(h, self.x, self.y, self.w, 22);
+            self.y += 24;
+        }
+        if !hint.is_empty() {
+            let h = self.m.hint(hint);
+            self.at(h, self.x, self.y, self.w, 20);
+            self.y += 22;
+        }
+        self.y += 4;
+    }
+    fn card(&mut self) {
+        self.card = Some((self.out.deco.len(), self.y));
+    }
+    fn end_card(&mut self) {
+        if let Some((i, top)) = self.card.take() {
+            self.out.deco.insert(i, Deco { kind: Kind::Card, x: self.x, y: top, w: self.w, h: self.y - top });
+        }
+        self.y += 20;
+    }
+    /// カードの行を始める. 返り値は行の上の端
+    fn row(&mut self, h: i32) -> i32 {
+        let y = self.y;
+        if self.card.is_some_and(|(_, top)| y > top) {
+            self.deco(Kind::Line, self.x + 1, y, self.w - 2, 1);
+        }
+        self.y += h;
+        y
+    }
+    /// 名前と説明. 返り値は行の真ん中
+    fn named(&mut self, label: &str, hint: &str, ctl_w: i32) -> i32 {
+        let h = if hint.is_empty() { 50 } else { 58 };
+        let y = self.row(h);
+        let w = self.w - 32 - 16 - ctl_w;
+        let l = self.m.label(label);
+        surface(l, |p| p.card);
+        self.at(l, self.x + 16, if hint.is_empty() { y + 14 } else { y + 8 }, w, 22);
+        if !hint.is_empty() {
+            let t = self.m.hint(hint);
+            surface(t, |p| p.card);
+            self.at(t, self.x + 16, y + 30, w, 20);
+        }
+        y + h / 2
+    }
+    fn right(&self) -> i32 {
+        self.x + self.w - 16
+    }
+    fn check(&mut self, id: i32, label: &str, hint: &str, on: bool) {
+        let h = if hint.is_empty() { 50 } else { 58 };
+        let y = self.row(h);
+        let c = self.m.check(id, &tr(label), hint, false, on);
+        // カードの角にかからないように, 内側に置く
+        self.at(c, self.x + 4, y + 3, self.w - 8, h - 6);
+    }
+    fn select(&mut self, id: i32, label: &str, hint: &str, items: (Vec<String>, usize)) {
+        let cy = self.named(label, hint, CTL_W);
+        let d = self.m.drop(id, items.0, items.1);
+        surface(d, |p| p.card);
+        self.at(d, self.right() - CTL_W, cy - CTL_H / 2, CTL_W, CTL_H);
+    }
+    /// 枠付きの入力欄
+    fn field(&mut self, id: i32, text: &str, style: i32, x: i32, y: i32, w: i32, h: i32) -> HWND {
+        let e = self.m.edit(id, text, style);
+        self.deco(Kind::Field(e), x, y, w, h);
+        let pad = if w < 100 { 6 } else { 10 };
+        self.at(e, x + pad, y + (h - 22) / 2, w - 2 * pad, 22);
+        e
+    }
+    fn number(&mut self, id: i32, label: &str, hint: &str, text: &str) {
+        let cy = self.named(label, hint, 80);
+        self.field(id, text, ES_NUMBER | ES_CENTER, self.right() - 80, cy - CTL_H / 2, 80, CTL_H);
+    }
+    /// ホットキー. 「なし」のボタンがないものも, 位置はそろえる
+    fn hotkey(&mut self, id: i32, label: &str, hint: &str, value: &str, change: i32, clear: Option<i32>) {
+        let (cap, b1, b2) = (150, button_w("Change", 72), button_w("Clear", 64));
+        let cy = self.named(label, hint, cap + b1 + b2 + 16);
+        let y = cy - CTL_H / 2;
+        let x0 = self.right() - b2 - 8 - b1 - 8 - cap;
+        self.deco(Kind::Cap, x0, y, cap, CTL_H);
+        let v = self.m.raw(w!("STATIC"), &tr(value), (SS_CENTER.0 | SS_CENTERIMAGE.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), id, F_BODY);
+        surface(v, |p| p.bg_subtle);
+        self.at(v, x0 + 6, y + 4, cap - 12, CTL_H - 8);
+        let c = self.m.button(change, "Change");
+        surface(c, |p| p.card);
+        self.at(c, x0 + cap + 8, y, b1, CTL_H);
+        if let Some(id) = clear {
+            let c = self.m.button(id, "Clear");
+            surface(c, |p| p.card);
+            self.at(c, self.right() - b2, y, b2, CTL_H);
+        }
+    }
+    /// 枠の中に, 見出し, 一覧, 下の帯(足す, 消すなど)をまとめる
+    #[allow(clippy::too_many_arguments)]
+    fn list(&mut self, id: i32, items: &[String], cols: &[i32], heads: &[&str], rows: i32, bar: Vec<Bar>) {
+        let h = self.m.list(id, items, cols);
+        let (x, y, w) = (self.x, self.y, self.w);
+        let head = if heads.is_empty() { 0 } else { LIST_HEAD_H };
+        let body = rows * ITEM_H + 8;
+        let bar_h = if bar.is_empty() { 0 } else { BAR_H };
+        self.deco(Kind::List { owner: h, head, bar: bar_h }, x, y, w, head + body + bar_h);
+        let mut cx = x + 14;
+        for (i, t) in heads.iter().enumerate() {
+            let cw = cols.get(i).copied().unwrap_or(x + w - 14 - cx);
+            let l = self.m.raw(w!("STATIC"), &tr(t), (SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), -1, F_HINT);
+            tint(l, |p| p.text_tertiary);
+            surface(l, |p| p.bg_subtle);
+            self.at(l, cx, y + 4, cw - 8, head - 6);
+            cx += cw;
+        }
+        self.at(h, x + 2, y + head + 4, w - 4, body - 8);
+        let by = y + head + body + 8;
+        // 入力欄は残りの幅
+        let fixed: i32 = bar.iter().map(|b| if let Bar::Button(_, t) = b { button_w(t, 64) + 8 } else { 0 }).sum();
+        let mut bx = x + 8;
+        for b in &bar {
+            match b {
+                Bar::Button(id, t) => {
+                    let bw = button_w(t, 64);
+                    let c = self.m.button(*id, t);
+                    surface(c, |p| p.bg_subtle);
+                    self.at(c, bx, by, bw, 28);
+                    bx += bw + 8;
+                }
+                Bar::Edit(id) => {
+                    let ew = (w - 16 - fixed).min(200);
+                    self.field(*id, "", 0, bx, by, ew, 28);
+                    bx += ew + 8;
+                }
+            }
+        }
+        self.y = y + head + body + bar_h + 20;
+    }
+    /// 小さな窓の1行(左に名前). 返り値は部品を置く左の端と上の端
+    fn form(&mut self, label: &str) -> (i32, i32) {
+        let y = self.y;
+        let l = self.m.label(label);
+        self.at(l, self.x, y + 5, FORM_L - 8, 22);
+        self.y += CTL_H + 8;
+        (self.x + FORM_L, y)
+    }
+    fn form_edit(&mut self, label: &str, id: i32, text: &str, w: i32) {
+        let (x, y) = self.form(label);
+        self.field(id, text, 0, x, y, w, CTL_H);
+    }
+    fn form_drop(&mut self, label: &str, id: i32, items: Vec<String>, sel: usize) {
+        let (x, y) = self.form(label);
+        let d = self.m.drop(id, items, sel);
+        self.at(d, x, y, CTL_W, CTL_H);
+    }
+    fn form_hint(&mut self, text: &str) {
+        let h = self.m.hint(text);
+        self.at(h, self.x + FORM_L, self.y - 4, self.w - FORM_L, 20);
+        self.y += 22;
+    }
+    fn finish(mut self) -> Section {
+        self.out.h = self.y;
+        self.out
+    }
+}
+
+/// 小さな窓の名前の幅
+const FORM_L: i32 = 110;
 
 // ---------------------------------------------------------------- 小さな道具
 
@@ -332,6 +484,14 @@ pub fn text(h: HWND) -> String {
 /// 文字を出す. 知らせや案内は日本語にする(パスなどの中身は表にないのでそのまま)
 fn set_text(h: HWND, t: &str) {
     let w = WStr::new(&tr(t));
+    unsafe {
+        let _ = SetWindowTextW(h, w.pcwstr());
+    }
+}
+
+/// 日本語にせず, そのまま出す
+fn set_raw_text(h: HWND, t: &str) {
+    let w = WStr::new(t);
     unsafe {
         let _ = SetWindowTextW(h, w.pcwstr());
     }
@@ -355,37 +515,18 @@ fn fill_list(h: HWND, items: &[String]) {
     }
 }
 
+fn list_text(h: HWND, i: usize) -> String {
+    unsafe {
+        let n = SendMessageW(h, LB_GETTEXTLEN, Some(WPARAM(i)), None).0.max(0) as usize;
+        let mut buf = vec![0u16; n + 1];
+        SendMessageW(h, LB_GETTEXT, Some(WPARAM(i)), Some(LPARAM(buf.as_mut_ptr() as isize)));
+        from_wide(&buf)
+    }
+}
+
 fn list_sel(h: HWND) -> Option<usize> {
     let r = unsafe { SendMessageW(h, LB_GETCURSEL, None, None).0 };
     (r >= 0).then_some(r as usize)
-}
-
-fn table_fill(h: HWND, rows: &[Vec<String>]) {
-    unsafe {
-        SendMessageW(h, LVM_DELETEALLITEMS, None, None);
-        for (i, cells) in rows.iter().enumerate() {
-            for (j, c) in cells.iter().enumerate() {
-                let mut t = wide(c);
-                let item = LVITEMW { mask: LVIF_TEXT, iItem: i as i32, iSubItem: j as i32, pszText: PWSTR(t.as_mut_ptr()), ..Default::default() };
-                let msg = if j == 0 { LVM_INSERTITEMW } else { LVM_SETITEMTEXTW };
-                SendMessageW(h, msg, Some(WPARAM(i)), Some(LPARAM(&item as *const _ as isize)));
-            }
-        }
-    }
-}
-
-fn table_sel(h: HWND) -> Option<usize> {
-    let r = unsafe { SendMessageW(h, LVM_GETNEXTITEM, Some(WPARAM(usize::MAX)), Some(LPARAM(LVNI_SELECTED as isize))).0 };
-    (r >= 0).then_some(r as usize)
-}
-
-fn table_select(h: HWND, i: usize) {
-    unsafe {
-        let f = LIST_VIEW_ITEM_STATE_FLAGS(LVIS_SELECTED.0 | LVIS_FOCUSED.0);
-        let item = LVITEMW { stateMask: f, state: f, ..Default::default() };
-        SendMessageW(h, LVM_SETITEMSTATE, Some(WPARAM(i)), Some(LPARAM(&item as *const _ as isize)));
-        SendMessageW(h, LVM_ENSUREVISIBLE, Some(WPARAM(i)), Some(LPARAM(0)));
-    }
 }
 
 /// 設定画面の中の枠. なければ(項目を直す小さな窓など)空
@@ -395,38 +536,6 @@ fn panel_of(hwnd: HWND) -> HWND {
 
 fn item(parent: HWND, id: i32) -> HWND {
     unsafe { GetDlgItem(Some(parent), id).or_else(|_| GetDlgItem(Some(panel_of(parent)), id)).unwrap_or_default() }
-}
-
-fn brush(c: u32) -> HBRUSH {
-    static B: OnceLock<std::sync::Mutex<Vec<(u32, isize)>>> = OnceLock::new();
-    let m = B.get_or_init(|| std::sync::Mutex::new(vec![]));
-    let mut v = m.lock().unwrap();
-    if let Some((_, b)) = v.iter().find(|(k, _)| *k == c) {
-        return HBRUSH(*b as *mut _);
-    }
-    let b = unsafe { CreateSolidBrush(rgb(c)) };
-    v.push((c, b.0 as isize));
-    b
-}
-
-thread_local! {
-    /// 文字の色を変える部品(説明の行, エラー)
-    static TINT: RefCell<Vec<(isize, Color)>> = const { RefCell::new(Vec::new()) };
-}
-
-/// テーマが変わっても付いていくよう, 色そのものではなく選び方で持つ
-type Color = fn(&Palette) -> u32;
-
-fn tint(h: HWND, c: Color) {
-    TINT.with(|t| {
-        let mut t = t.borrow_mut();
-        t.retain(|(k, _)| *k != h.0 as isize);
-        t.push((h.0 as isize, c));
-    });
-}
-
-fn tint_of(h: HWND) -> u32 {
-    TINT.with(|t| t.borrow().iter().find(|(k, _)| *k == h.0 as isize).map(|(_, c)| c(pal())).unwrap_or(pal().text))
 }
 
 /// フォルダーやexeを選ぶ(Windowsの「フォルダーの選択」). 選ばなければNone
@@ -457,18 +566,18 @@ fn short_path(p: &str) -> String {
     pathlike::contract_home(p, &storage::env("USERPROFILE"))
 }
 
-fn fonts_for(dpi: u32) -> [HFONT; 3] {
+fn fonts_for(dpi: u32) -> [HFONT; 4] {
     let face = paint::body_face();
-    [paint::font(face, s(FONT_PX, dpi), 400), paint::font(face, s(HEAD_PX, dpi), 600), paint::font(face, s(FONT_PX, dpi), 600)]
+    [paint::font(face, s(FONT_PX, dpi), 400), paint::font(face, s(HEAD_PX, dpi), 600), paint::font(face, s(FONT_PX, dpi), 600), paint::font(face, s(HINT_PX, dpi), 400)]
 }
 
-fn apply_fonts(made: &[(HWND, u8)], fonts: &[HFONT; 3]) {
+fn apply_fonts(made: &[(HWND, u8)], fonts: &[HFONT; 4]) {
     for (h, f) in made {
         unsafe { SendMessageW(*h, WM_SETFONT, Some(WPARAM(fonts[*f as usize].0 as usize)), Some(LPARAM(1))) };
     }
 }
 
-fn delete_fonts(fonts: &[HFONT; 3]) {
+fn delete_fonts(fonts: &[HFONT; 4]) {
     for f in fonts {
         unsafe {
             let _ = DeleteObject((*f).into());
@@ -524,134 +633,70 @@ fn register_classes() {
             };
             RegisterClassExW(&wc);
         }
-        let icc = INITCOMMONCONTROLSEX { dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32, dwICC: ICC_LISTVIEW_CLASSES };
-        let _ = InitCommonControlsEx(&icc);
+        parts::register_drop(hinst.into());
     });
 }
 
 // ---------------------------------------------------------------- 色と自分で描く部品(両方の窓で使う)
 
-/// 部品の色と, 自分で描くボタン・区分の一覧. 扱ったらSome
-fn common_proc(msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+/// 部品の色と, 自分で描くボタン・一覧. 扱ったらSome
+fn common_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
     unsafe {
         match msg {
             WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
                 let hdc = HDC(wparam.0 as *mut _);
-                let h = HWND(lparam.0 as *mut _);
-                SetTextColor(hdc, rgb(tint_of(h)));
-                SetBkColor(hdc, rgb(pal().bg));
-                Some(LRESULT(brush(pal().bg).0 as isize))
+                let (fg, bg) = parts::colors(HWND(lparam.0 as *mut _));
+                SetTextColor(hdc, rgb(fg));
+                SetBkColor(hdc, rgb(bg));
+                Some(LRESULT(brush(bg).0 as isize))
             }
             WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
                 let hdc = HDC(wparam.0 as *mut _);
                 let h = HWND(lparam.0 as *mut _);
-                if GetDlgCtrlID(h) == ID_SIDE {
-                    SetTextColor(hdc, rgb(pal().text));
-                    SetBkColor(hdc, rgb(pal().bg_subtle));
-                    return Some(LRESULT(brush(pal().bg_subtle).0 as isize));
-                }
+                let bg = if GetDlgCtrlID(h) == ID_SIDE { pal().bg_subtle } else { pal().field };
                 SetTextColor(hdc, rgb(pal().text));
-                SetBkColor(hdc, rgb(pal().field));
-                Some(LRESULT(brush(pal().field).0 as isize))
+                SetBkColor(hdc, rgb(bg));
+                Some(LRESULT(brush(bg).0 as isize))
             }
-            WM_NOTIFY => dark::check_custom_draw(lparam),
             WM_DRAWITEM => {
                 let d = &*(lparam.0 as *const DRAWITEMSTRUCT);
-                if d.CtlType == ODT_BUTTON {
-                    draw_button(d);
-                    Some(LRESULT(1))
-                } else if d.CtlType == ODT_LISTBOX && d.CtlID as i32 == ID_SIDE {
-                    draw_side_item(d);
-                    Some(LRESULT(1))
-                } else {
-                    None
+                match (d.CtlType, d.CtlID as i32) {
+                    (ODT_BUTTON, ID_SAVE) => parts::draw_button(d, Btn::Primary),
+                    (ODT_BUTTON, ID_OPENFILE) => parts::draw_button(d, Btn::Link),
+                    (ODT_BUTTON, _) => parts::draw_button(d, Btn::Normal),
+                    (ODT_LISTBOX, ID_SIDE) => parts::draw_side_item(d, &tr(SECTIONS.get(d.itemID as usize).copied().unwrap_or(""))),
+                    (ODT_LISTBOX, _) => parts::draw_list_item(d),
+                    _ => return None,
                 }
+                Some(LRESULT(1))
+            }
+            WM_LBUTTONDOWN => {
+                parts::click_field(hwnd, loword(lparam.0 as usize) as i16 as i32, hiword(lparam.0 as usize) as i16 as i32, scroll_info(hwnd).nPos);
+                None
+            }
+            WM_COMMAND => {
+                let code = hiword(wparam.0) as u32;
+                if lparam.0 != 0 && [EN_SETFOCUS, EN_KILLFOCUS, LBN_SETFOCUS, LBN_KILLFOCUS].contains(&code) {
+                    parts::focus_changed(hwnd, HWND(lparam.0 as *mut _), scroll_info(hwnd).nPos);
+                }
+                None
             }
             _ => None,
         }
     }
 }
 
-unsafe fn draw_button(d: &DRAWITEMSTRUCT) {
-    let hdc = d.hDC;
-    let r = d.rcItem;
-    let id = d.CtlID as i32;
-    let pressed = (d.itemState.0 & ODS_SELECTED.0) != 0;
-    let focus = (d.itemState.0 & ODS_FOCUS.0) != 0;
-    let disabled = (d.itemState.0 & ODS_DISABLED.0) != 0;
-    FillRect(hdc, &r, brush(pal().bg));
-    let font = HFONT(SendMessageW(d.hwndItem, WM_GETFONT, None, None).0 as *mut _);
-    let old_font = SelectObject(hdc, font.into());
-    let mut buf = [0u16; 128];
-    let n = GetWindowTextW(d.hwndItem, &mut buf) as usize;
-    let mut label = buf[..n].to_vec();
-    SetBkMode(hdc, TRANSPARENT);
-    let mut tr = r;
-    if id == ID_OPENFILE {
-        // リンクの形
-        SetTextColor(hdc, rgb(if pressed { pal().text } else { pal().accent_text }));
-        DrawTextW(hdc, &mut label, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
-        if focus {
-            let mut fr = r;
-            DrawTextW(hdc, &mut label, &mut fr, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_CALCRECT);
-            fr.top = r.bottom - 3;
-            fr.bottom = r.bottom - 1;
-            FillRect(hdc, &fr, brush(pal().accent_text));
-        }
-    } else {
-        let primary = id == ID_SAVE;
-        let (fill, border, fg) = if primary {
-            (if pressed { 0xA9472A } else { 0xB85A39 }, if pressed { 0xA9472A } else { 0xB85A39 }, 0xFFFFFF)
-        } else {
-            (if pressed { pal().btn_down } else { pal().btn }, pal().border, if disabled { pal().text_tertiary } else { pal().text })
-        };
-        let pen = CreatePen(PS_SOLID, 1, rgb(if focus { 0x2C84DB } else { border }));
-        let old_pen = SelectObject(hdc, pen.into());
-        let old_brush = SelectObject(hdc, brush(fill).into());
-        let rad = ((r.bottom - r.top) / 3).max(6);
-        let _ = RoundRect(hdc, r.left, r.top, r.right, r.bottom, rad, rad);
-        if focus {
-            // 枠を2重にして, キーボードで選んでいるのが分かるようにする
-            let _ = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-            let _ = RoundRect(hdc, r.left + 1, r.top + 1, r.right - 1, r.bottom - 1, rad, rad);
-        }
-        SelectObject(hdc, old_brush);
-        SelectObject(hdc, old_pen);
-        let _ = DeleteObject(pen.into());
-        SetTextColor(hdc, rgb(fg));
-        DrawTextW(hdc, &mut label, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+/// 地の色と飾りを描く
+fn paint_surface(hwnd: HWND, dy: i32) {
+    unsafe {
+        let mut ps = PAINTSTRUCT::default();
+        let hdc = BeginPaint(hwnd, &mut ps);
+        parts::buffered(hdc, &ps.rcPaint, |hdc| {
+            parts::fill(hdc, &ps.rcPaint, pal().bg);
+            parts::paint_decos(hwnd, hdc, dy);
+        });
+        let _ = EndPaint(hwnd, &ps);
     }
-    SelectObject(hdc, old_font);
-}
-
-unsafe fn draw_side_item(d: &DRAWITEMSTRUCT) {
-    let hdc = d.hDC;
-    let r = d.rcItem;
-    FillRect(hdc, &r, brush(pal().bg_subtle));
-    if d.itemID == u32::MAX {
-        return;
-    }
-    let sel = (d.itemState.0 & ODS_SELECTED.0) != 0;
-    let dpi = GetDpiForWindow(d.hwndItem).max(96);
-    if sel {
-        let pen = CreatePen(PS_SOLID, 1, rgb(pal().bg_muted));
-        let old_pen = SelectObject(hdc, pen.into());
-        let old_brush = SelectObject(hdc, brush(pal().bg_muted).into());
-        let m = s(4, dpi);
-        let _ = RoundRect(hdc, r.left + m, r.top + 2, r.right - m, r.bottom - 2, s(8, dpi), s(8, dpi));
-        SelectObject(hdc, old_brush);
-        SelectObject(hdc, old_pen);
-        let _ = DeleteObject(pen.into());
-    }
-    let font = HFONT(SendMessageW(d.hwndItem, WM_GETFONT, None, None).0 as *mut _);
-    let old_font = SelectObject(hdc, font.into());
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, rgb(if sel { pal().text } else { pal().text_secondary }));
-    let name = tr(SECTIONS.get(d.itemID as usize).copied().unwrap_or(""));
-    let mut t: Vec<u16> = name.encode_utf16().collect();
-    let mut tr = RECT { left: r.left + s(16, dpi), ..r };
-    DrawTextW(hdc, &mut t, &mut tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
-    SelectObject(hdc, old_font);
 }
 
 // ---------------------------------------------------------------- 設定画面
@@ -659,11 +704,10 @@ unsafe fn draw_side_item(d: &DRAWITEMSTRUCT) {
 struct Settings {
     hwnd: HWND,
     dpi: u32,
-    fonts: [HFONT; 3],
+    fonts: [HFONT; 4],
     made: Vec<(HWND, u8)>,
-    /// 区分ごとの行
-    sections: Vec<Vec<Row>>,
-    footer: Vec<Row>,
+    sections: Vec<Section>,
+    footer: Vec<Pos>,
     side: HWND,
     panel: HWND,
     current: usize,
@@ -681,7 +725,7 @@ struct Settings {
 /// 借りている間にはできないこと(ほかの窓を出すなど). 借りるのをやめてから行う
 enum Task {
     AskClose,
-    Pick { id: i32, folder: bool, title: &'static str },
+    Pick { id: i32, title: &'static str },
     Editor(EditKind),
     ChangeHotkey,
     ChangeSelectionHotkey,
@@ -733,6 +777,7 @@ pub fn open(a: OpenArgs) {
     let mut st = build(hwnd, hinst.into(), a, dpi);
     st.show_section(0);
     dark::apply(hwnd);
+    parts::hide_focus(hwnd);
     let side = st.side;
     SETTINGS.with(|s| *s.borrow_mut() = Some(st));
     unsafe {
@@ -782,7 +827,7 @@ pub fn pre_translate(msg: &MSG) -> bool {
 
 // ---------------------------------------------------------------- 中身のスクロール(K43)
 
-/// 枠のすぐ下の部品(コンボボックスの中の入力欄なら, コンボボックス). 枠の中でなければNone
+/// 枠のすぐ下の部品. 枠の中でなければNone
 fn panel_child(panel: HWND, h: HWND) -> Option<HWND> {
     let mut h = h;
     while !h.is_invalid() {
@@ -836,25 +881,19 @@ fn ensure_visible(panel: HWND, focus: HWND) {
     }
 }
 
-/// ホイール. 中身の上なら中身をスクロールする(閉じたコンボボックスの値は変えない). 扱ったらtrue
+/// ホイール. 中身の上なら中身をスクロールする. 扱ったらtrue
 fn wheel(hwnd: HWND, msg: &MSG) -> bool {
     let panel = panel_of(hwnd);
     if panel.is_invalid() {
         return false;
     }
     unsafe {
-        // 開いているコンボボックスの一覧を動かしている
-        if let Some(f) = panel_child(panel, GetFocus()) {
-            if dark::class_name(f) == "ComboBox" && SendMessageW(f, CB_GETDROPPEDSTATE, None, None).0 != 0 {
-                return false;
-            }
-        }
         let under = WindowFromPoint(msg.pt);
         if under != panel {
             let Some(c) = panel_child(panel, under) else { return false };
-            // 中身が多い一覧と表は, それ自身をスクロールする
+            // 中身が多い一覧は, それ自身をスクロールする
             let own = GetWindowLongPtrW(c, GWL_STYLE) as u32 & WS_VSCROLL.0 != 0;
-            if own && ["ListBox", "SysListView32"].contains(&dark::class_name(c).as_str()) {
+            if own && dark::class_name(c) == "ListBox" {
                 return false;
             }
         }
@@ -873,18 +912,17 @@ extern "system" fn panel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
 }
 
 fn panel_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if let Some(r) = common_proc(msg, wparam, lparam) {
+    if let Some(r) = common_proc(hwnd, msg, wparam, lparam) {
         return r;
     }
     unsafe {
         match msg {
             // 部品からの知らせは設定画面で受ける
-            WM_COMMAND | WM_NOTIFY => SendMessageW(GetAncestor(hwnd, GA_PARENT), msg, Some(wparam), Some(lparam)),
-            WM_ERASEBKGND => {
-                let mut rc = RECT::default();
-                let _ = GetClientRect(hwnd, &mut rc);
-                FillRect(HDC(wparam.0 as *mut _), &rc, brush(pal().bg));
-                LRESULT(1)
+            WM_COMMAND => SendMessageW(GetAncestor(hwnd, GA_PARENT), msg, Some(wparam), Some(lparam)),
+            WM_ERASEBKGND => LRESULT(1),
+            WM_PAINT => {
+                paint_surface(hwnd, scroll_info(hwnd).nPos);
+                LRESULT(0)
             }
             WM_VSCROLL => {
                 let si = scroll_info(hwnd);
@@ -924,20 +962,8 @@ fn local_state_profiles(b: actions::Browser, cfg: &Config) -> Vec<(String, Strin
     v
 }
 
-/// 一覧から選ぶコンボボックスで, 今の値を選ぶ
-fn select_key(h: HWND, keys: &[(&str, &str)], value: &str) {
-    let cur = keys.iter().position(|(k, _)| *k == value).unwrap_or(0);
-    unsafe { SendMessageW(h, CB_SETCURSEL, Some(WPARAM(cur)), None) };
-}
-
 fn selected_key(h: HWND, keys: &[(&str, &str)]) -> String {
-    let i = unsafe { SendMessageW(h, CB_GETCURSEL, None, None).0 };
-    keys.get(i.max(0) as usize).map(|(k, _)| k.to_string()).unwrap_or_else(|| keys[0].0.to_string())
-}
-
-/// プロフィールの表示名からフォルダー名に戻す(打ち込んだときはそのまま)
-fn profile_dir(list: &[(String, String)], text: &str) -> String {
-    list.iter().find(|(d, n)| profile_label(d, n) == text).map(|(d, _)| d.clone()).unwrap_or_else(|| text.to_string())
+    keys.get(drop_sel(h)).unwrap_or(&keys[0]).0.to_string()
 }
 
 fn profile_label(dir: &str, name: &str) -> String {
@@ -948,49 +974,48 @@ fn profile_label(dir: &str, name: &str) -> String {
     }
 }
 
-fn alias_rows(c: &Config) -> Vec<Vec<String>> {
-    c.alias.iter().map(|(k, v)| vec![k.clone(), v.clone()]).collect()
+/// エイリアスの一覧: アプリの呼び名(`[alias]`)のあとに, Webページとコマンド(`[[command]]`)
+fn alias_rows(c: &Config) -> Vec<String> {
+    let apps = c.alias.iter().map(|(k, v)| format!("{k}\t{}\t{v}", tr(ALIAS_KINDS[0])));
+    let cmds = c.command.iter().map(|m| {
+        let (kind, target) = match (&m.url, &m.run) {
+            (Some(u), _) => (1, u.as_str()),
+            (_, Some(r)) => (2, r.as_str()),
+            _ => (1, ""),
+        };
+        let shown = m.title.as_deref().filter(|t| !t.is_empty()).map_or_else(|| target.to_string(), |t| format!("{t} · {target}"));
+        format!("{}\t{}\t{shown}", m.name, tr(ALIAS_KINDS[kind]))
+    });
+    apps.chain(cmds).collect()
 }
 
-fn command_rows(c: &Config) -> Vec<Vec<String>> {
-    c.command
-        .iter()
-        .map(|m| {
-            let what = match (&m.url, &m.run) {
-                (Some(u), _) => format!("Open {u}"),
-                (_, Some(r)) => format!("Run {r}"),
-                _ => String::new(),
-            };
-            vec![m.name.clone(), m.title.clone().unwrap_or_default(), what]
-        })
-        .collect()
-}
-
-fn open_with_rows(c: &Config) -> Vec<Vec<String>> {
+fn open_with_rows(c: &Config) -> Vec<String> {
     c.open_with
         .iter()
         .map(|o| {
             let exe = if o.exe.is_empty() { tr("(find automatically)") } else { o.exe.clone() };
-            let args = if o.args.is_empty() { tr("(usual way)") } else { o.args.clone() };
             let found = if actions::find_exe(o).is_some() { String::new() } else { tr("  · not installed") };
-            vec![format!("{}{found}", o.name), exe, args]
+            format!("{}\t{exe}{found}", o.name)
         })
         .collect()
 }
 
-const TERMINAL_AUTO: &str = "Automatic (WezTerm, then Windows Terminal)";
+const TERMINAL_AUTO: &str = "Automatic";
 
-/// `Alt+Enter`のターミナルの選び(初めは自動, あとは「〜で開く」の名前)
-fn fill_terminals(h: HWND, c: &Config) {
-    unsafe { SendMessageW(h, CB_RESETCONTENT, None, None) };
+/// `Alt+Enter`のターミナルの選び(初めは自動, あとは「別のアプリで開く」の名前)
+fn terminals(c: &Config) -> (Vec<String>, usize) {
     let mut names = vec![tr(TERMINAL_AUTO)];
     names.extend(c.open_with.iter().map(|o| o.name.clone()));
-    for n in &names {
-        let t = WStr::new(n);
-        unsafe { SendMessageW(h, CB_ADDSTRING, None, Some(LPARAM(t.pcwstr().0 as isize))) };
+    (names, c.open_with.iter().position(|o| o.name.eq_ignore_ascii_case(c.tools.terminal.trim())).map_or(0, |i| i + 1))
+}
+
+/// キーワードの使い方の例. 空なら使わないこと
+fn prefix_example(i: usize, v: &str) -> String {
+    if v.trim().is_empty() {
+        tr("Not used")
+    } else {
+        format!("{} {}", v.trim(), tr(PREFIX_EXAMPLES[i]))
     }
-    let cur = c.open_with.iter().position(|o| o.name.eq_ignore_ascii_case(c.tools.terminal.trim())).map_or(0, |i| i + 1);
-    unsafe { SendMessageW(h, CB_SETCURSEL, Some(WPARAM(cur)), None) };
 }
 
 fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, dpi: u32) -> Settings {
@@ -1014,222 +1039,170 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         CreateWindowExW(WS_EX_CONTROLPARENT, PANEL_CLASS, PCWSTR::null(), WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_VSCROLL, 0, 0, 10, 10, Some(hwnd), None, Some(hinst), None).unwrap_or_default()
     };
     m.parent = panel;
-    let mut sections: Vec<Vec<Row>> = vec![];
-    const L: i32 = 110;
+    let mut sections: Vec<Section> = vec![];
+    const TOP: i32 = 16;
 
     // General
     {
-        let mut rows = vec![row(vec![it(m.head("General"), W::Fill, 30)])];
-        let hk = if a.hotkey.is_empty() { "Not set".to_string() } else { a.hotkey.clone() };
-        rows.push(row(vec![it(m.label("Hotkey"), W::Px(L), 26), it(m.label(&hk), W::Px(160), 26), it(m.button(ID_HOTKEY_CHANGE, "Change…"), W::Px(110), 30)]));
-        // 表示用の文字の部品に番号を付け直す
-        if let Some(r) = rows.last() {
-            if let Some(h) = r.items[1].hwnd {
-                unsafe { SetWindowLongPtrW(h, GWLP_ID, ID_HOTKEY as isize) };
-            }
-        }
-        let sel = if c.hotkeys.selection.is_empty() { "Not set".to_string() } else { c.hotkeys.selection.clone() };
-        let sel_label = m.label(&sel);
-        unsafe { SetWindowLongPtrW(sel_label, GWLP_ID, ID_SELHK as isize) };
-        rows.push(row(vec![
-            it(m.label("Selection hotkey"), W::Px(L), 26),
-            it(sel_label, W::Px(160), 26),
-            it(m.button(ID_SELHK_CHANGE, "Change…"), W::Px(110), 30),
-            it(m.button(ID_SELHK_CLEAR, "Clear"), W::Px(80), 30),
-        ]));
-        rows.push(row(vec![it(m.check(ID_AUTOSTART, "Start Hikidashi when Windows starts", system::autostart_enabled()), W::Fill, 26)]));
-        let lang_labels: Vec<String> = LANGS.iter().map(|(_, l)| l.to_string()).collect();
-        let lc = m.combo(ID_LANG, &lang_labels, false);
-        select_key(lc, &LANGS, &c.ui.language);
-        rows.push(row(vec![it(m.label("Language / 言語"), W::Px(L), 26), combo_it(lc, W::Px(300))]));
-        let theme_labels: Vec<String> = THEMES.iter().map(|(_, l)| l.to_string()).collect();
-        let tc = m.combo(ID_THEME, &theme_labels, false);
-        select_key(tc, &THEMES, &c.ui.theme);
-        rows.push(row(vec![it(m.label("Theme"), W::Px(L), 26), combo_it(tc, W::Px(300))]));
-        rows.push(row_gap(14, vec![it(m.sub("Prefixes"), W::Fill, 24)]));
-        rows.push(row(vec![it(m.hint("Type a prefix and a space to search only one kind, for example \"f report\"."), W::Fill, 22)]));
-        let p = &c.prefix;
-        let vals = [&p.app, &p.file, &p.bookmark, &p.kill, &p.wsl, &p.boxdrive, &p.google, &p.chatgpt, &p.clipboard, &p.calc];
-        let mut items = vec![];
-        for (i, (label, v)) in PREFIX_LABELS.iter().zip(vals).enumerate() {
-            if i > 0 && i % 3 == 0 {
-                rows.push(row(std::mem::take(&mut items)));
-            }
-            items.push(it(m.label(label), W::Px(100), 26));
-            items.push(it(m.edit(ID_PFX + i as i32, v, false), W::Px(56), 26));
-            items.push(gap(12));
-        }
-        rows.push(row(items));
+        let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
+        p.title("General");
+        p.group("Startup", "");
+        p.card();
+        p.check(ID_AUTOSTART, "Start when Windows starts", "", system::autostart_enabled());
+        p.end_card();
+        p.group("Display", "");
+        p.card();
+        p.select(ID_LANG, "Language", "", key_items(&LANGS, &c.ui.language));
+        p.select(ID_THEME, "Theme", "", key_items(&THEMES, &c.ui.theme));
+        p.end_card();
+        sections.push(p.finish());
+    }
+    // Keys
+    {
+        let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
+        p.title("Keys");
+        p.group("Hotkeys", "");
+        p.card();
+        let hk = if a.hotkey.is_empty() { "Not set" } else { a.hotkey.as_str() };
+        p.hotkey(ID_HOTKEY, "Open Hikidashi", "Works in any app", hk, ID_HOTKEY_CHANGE, None);
+        let sel = if c.hotkeys.selection.is_empty() { "Not set" } else { c.hotkeys.selection.as_str() };
+        p.hotkey(ID_SELHK, "Open with selected text", "Types it in for you", sel, ID_SELHK_CHANGE, Some(ID_SELHK_CLEAR));
+        p.end_card();
         // Enterに修飾キーを足したときの操作(2026-11-24)
-        rows.push(row_gap(14, vec![it(m.sub("Enter with Ctrl, Shift or Alt"), W::Fill, 24)]));
+        p.group("Enter combinations", "");
+        p.card();
         let k = &c.keys;
-        let choices: Vec<String> = ENTER_KEY_CHOICES.iter().map(|c| if c.is_empty() { "Not used".to_string() } else { c.to_string() }).collect();
         for (i, (label, v)) in KEY_LABELS.iter().zip([&k.chatgpt, &k.google, &k.write, &k.admin, &k.terminal]).enumerate() {
-            let combo = m.combo(ID_KEYS + i as i32, &choices, false);
+            let items = ENTER_KEY_CHOICES.iter().map(|c| if c.is_empty() { tr("Not used") } else { c.replace('+', " + ") }).collect();
             let cur = parse_enter_key(v).and_then(|mods| ENTER_KEY_CHOICES.iter().position(|c| parse_enter_key(c) == Some(mods))).unwrap_or(0);
-            unsafe { SendMessageW(combo, CB_SETCURSEL, Some(WPARAM(cur)), None) };
-            rows.push(row(vec![it(m.label(label), W::Px(150), 26), combo_it(combo, W::Px(220))]));
+            p.select(ID_KEYS + i as i32, label, "", (items, cur));
         }
-        sections.push(rows);
+        p.end_card();
+        sections.push(p.finish());
     }
-    // Search
+    // Keywords
     {
-        let mut rows = vec![row(vec![it(m.head("Search"), W::Fill, 30)])];
-        rows.push(row(vec![it(m.check(ID_RECENT, "Show recent items when the box is empty", c.search.recent), W::Fill, 26)]));
-        rows.push(row(vec![it(m.check(ID_CLIPHIST, "Clipboard history", c.search.clipboard_history), W::Fill, 26)]));
-        rows.push(row(vec![gap(24), it(m.hint("Remember what you copy (text and files, in memory only). Type the Clipboard prefix (cb) and a space to see it."), W::Fill, 22)]));
-        rows.push(row(vec![it(m.sub("Folders to search"), W::Fill, 22)]));
-        rows.push(row(vec![it(m.list(ID_ROOTS, &c.files.roots), W::Fill, 74)]));
-        rows.push(row(vec![it(m.button(ID_ROOTS_ADD, "Add…"), W::Px(96), 28), it(m.button(ID_ROOTS_DEL, "Remove"), W::Px(96), 28)]));
-        rows.push(row_gap(10, vec![it(m.sub("Skip these folders"), W::Px(170), 22), it(m.hint("and everything inside them"), W::Fill, 20)]));
-        rows.push(row(vec![it(m.list(ID_SKIP, &c.files.skip_dirs), W::Fill, 54)]));
-        rows.push(row(vec![it(m.button(ID_SKIP_ADD, "Add…"), W::Px(96), 28), it(m.button(ID_SKIP_DEL, "Remove"), W::Px(96), 28)]));
-        rows.push(row_gap(10, vec![it(m.sub("Skip these names"), W::Px(170), 22), it(m.hint("folders and files with this name, wherever they are"), W::Fill, 20)]));
-        rows.push(row(vec![it(m.list(ID_NAMES, &c.files.exclude), W::Fill, 88)]));
-        rows.push(row(vec![
-            it(m.edit(ID_NAME_EDIT, "", false), W::Px(170), 26),
-            it(m.button(ID_NAME_ADD, "Add"), W::Px(80), 28),
-            it(m.button(ID_NAME_DEL, "Remove"), W::Px(96), 28),
-            gap(0),
-            it(m.button(ID_NAME_RESET, "Restore defaults"), W::Px(150), 28),
-        ]));
-        sections.push(rows);
+        let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
+        p.title("Keywords");
+        p.group("", "Type a keyword and a space to search only that kind. Leave it empty to turn it off.");
+        p.card();
+        let f = &c.prefix;
+        let vals = [&f.app, &f.file, &f.bookmark, &f.kill, &f.wsl, &f.boxdrive, &f.google, &f.chatgpt, &f.clipboard, &f.calc];
+        for (i, (label, v)) in PREFIX_LABELS.iter().zip(vals).enumerate() {
+            let y = p.row(44);
+            let l = p.m.label(label);
+            surface(l, |p| p.card);
+            p.at(l, PAD + 16, y + 11, 210, 22);
+            let ex = p.m.raw(w!("STATIC"), &prefix_example(i, v), (SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), ID_PFX_EX + i as i32, F_HINT);
+            tint(ex, |p| p.text_tertiary);
+            surface(ex, |p| p.card);
+            p.at(ex, PAD + 236, y + 11, 200, 22);
+            p.field(ID_PFX + i as i32, v, ES_CENTER, p.right() - 80, y + 6, 80, CTL_H);
+        }
+        p.end_card();
+        sections.push(p.finish());
     }
-    // Box and WSL
+    // Search(BoxとWSLもここ. K44)
     {
-        let mut rows = vec![row(vec![it(m.head("Box and WSL"), W::Fill, 30)])];
-        // Boxの場所は自動で決める(K26. 入力欄はなくした. 変えるときは設定ファイルの`box_dir`, `box_db`)
-        rows.push(row(vec![it(m.sub("Box"), W::Fill, 22)]));
-        rows.push(row(vec![it(m.hint("Box is found automatically from Box Drive and read again whenever it changes. Type \"bx \" and a name to search it."), W::Fill, 40)]));
-        rows.push(row_gap(10, vec![it(m.sub("WSL"), W::Fill, 22)]));
-        rows.push(row(vec![it(m.check(ID_WSL_ON, "Search the home folder in WSL", c.wsl.enabled), W::Fill, 26)]));
-        rows.push(row(vec![gap(24), it(m.hint("Type the WSL prefix and a space (\"w report\"). The list is read then, and again if it is older than 5 minutes."), W::Fill, 40)]));
-        rows.push(row(vec![it(m.label("Distro"), W::Px(L), 26), it(m.edit(ID_WSL_DISTRO, &c.wsl.distro, false), W::Px(200), 26), it(m.hint("empty: the default distro"), W::Fill, 20)]));
-        rows.push(row_gap(10, vec![it(m.sub("Skip these names"), W::Px(170), 22), it(m.hint("folders and files with this name in WSL, wherever they are"), W::Fill, 20)]));
-        rows.push(row(vec![it(m.list(ID_WSL_NAMES, &c.wsl.exclude), W::Fill, 88)]));
-        rows.push(row(vec![
-            it(m.edit(ID_WSL_NAME_EDIT, "", false), W::Px(170), 26),
-            it(m.button(ID_WSL_NAME_ADD, "Add"), W::Px(80), 28),
-            it(m.button(ID_WSL_NAME_DEL, "Remove"), W::Px(96), 28),
-            gap(0),
-            it(m.button(ID_WSL_NAME_RESET, "Restore defaults"), W::Px(150), 28),
-        ]));
-        sections.push(rows);
+        let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
+        p.title("Search");
+        p.card();
+        p.check(ID_RECENT, "Show recent items", "When the box is empty", c.search.recent);
+        p.check(ID_CLIPHIST, "Clipboard history", "Keeps copied text and files in memory only", c.search.clipboard_history);
+        p.end_card();
+        p.group("Folders to search", "Box and your WSL home are found automatically, and searched with their keywords.");
+        p.list(ID_ROOTS, &c.files.roots, &[], &[], 3, vec![Bar::Button(ID_ROOTS_ADD, "Add"), Bar::Button(ID_ROOTS_DEL, "Remove")]);
+        p.group("Excluded folders", "Everything inside them is excluded too.");
+        p.list(ID_SKIP, &c.files.skip_dirs, &[], &[], 3, vec![Bar::Button(ID_SKIP_ADD, "Add"), Bar::Button(ID_SKIP_DEL, "Remove")]);
+        p.group("Excluded names", "Names to exclude anywhere, also in WSL. * matches anything.");
+        let bar = vec![Bar::Edit(ID_NAME_EDIT), Bar::Button(ID_NAME_ADD, "Add"), Bar::Button(ID_NAME_DEL, "Remove"), Bar::Button(ID_NAME_RESET, "Restore defaults")];
+        p.list(ID_NAMES, &c.files.exclude, &[], &[], 6, bar);
+        sections.push(p.finish());
     }
     // Apps
     {
-        let mut rows = vec![row(vec![it(m.head("Apps"), W::Fill, 30)])];
-        rows.push(row(vec![it(m.sub("More folders with apps"), W::Px(200), 22), it(m.hint(".exe files here are listed as apps"), W::Fill, 20)]));
-        rows.push(row(vec![it(m.list(ID_APPDIRS, &c.apps.extra_dirs), W::Fill, 88)]));
-        rows.push(row(vec![it(m.button(ID_APPDIRS_ADD, "Add…"), W::Px(96), 28), it(m.button(ID_APPDIRS_DEL, "Remove"), W::Px(96), 28)]));
-        rows.push(row_gap(14, vec![it(m.sub("Open with"), W::Px(200), 22), it(m.hint("\"Open in …\" in the Tab menu. Apps that are not installed are not shown."), W::Fill, 20)]));
-        let t = m.table(ID_OPENWITH, &[("Name", s(170, dpi)), ("App", s(190, dpi)), ("Passes", s(150, dpi))]);
-        table_fill(t, &open_with_rows(c));
-        rows.push(row(vec![it(t, W::Fill, 120)]));
-        rows.push(row(vec![
-            it(m.button(ID_OW_ADD, "Add…"), W::Px(96), 28),
-            it(m.button(ID_OW_EDIT, "Edit…"), W::Px(96), 28),
-            it(m.button(ID_OW_DEL, "Remove"), W::Px(96), 28),
-        ]));
-        let tc = m.combo(ID_TERMINAL, &[], false);
-        fill_terminals(tc, c);
-        rows.push(row_gap(10, vec![it(m.label("Terminal"), W::Px(L), 26), combo_it(tc, W::Fill)]));
-        rows.push(row(vec![gap(L), it(m.hint("\"Open in terminal\" (General, Alt+Enter at first) goes into the folder of the selected file or folder in this terminal."), W::Fill, 20)]));
-        sections.push(rows);
+        let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
+        p.title("Apps");
+        p.group("Folders with apps", ".exe files here are listed as apps.");
+        p.list(ID_APPDIRS, &c.apps.extra_dirs, &[], &[], 3, vec![Bar::Button(ID_APPDIRS_ADD, "Add"), Bar::Button(ID_APPDIRS_DEL, "Remove")]);
+        p.group("Open in another app", "Shown as \"Open in …\" in the Tab menu. Apps that are not installed are not shown.");
+        let bar = vec![Bar::Button(ID_OW_ADD, "Add"), Bar::Button(ID_OW_EDIT, "Edit"), Bar::Button(ID_OW_DEL, "Remove")];
+        p.list(ID_OPENWITH, &open_with_rows(c), &[180], &["Name", "App"], 4, bar);
+        p.group("Terminal", "");
+        p.card();
+        p.select(ID_TERMINAL, "Terminal to use", "For \"Open in terminal\"", terminals(c));
+        p.end_card();
+        sections.push(p.finish());
     }
     // Tab menu(K24): 項目×種類のチェック. 種類に合わないところは空ける
     {
-        let mut rows = vec![row(vec![it(m.head("Tab menu"), W::Fill, 30)])];
-        rows.push(row(vec![it(m.hint("Choose what the Tab menu shows for apps, files and folders. Things you can do with a key (Enter, Alt+Enter, Ctrl+Shift+Enter) can be left out."), W::Fill, 40)]));
-        const LW: i32 = 290;
-        const CW: i32 = 80;
-        rows.push(row_gap(6, vec![gap(LW), it(m.sub("Apps"), W::Px(CW), 22), it(m.sub("Files"), W::Px(CW), 22), it(m.sub("Folders"), W::Px(CW), 22)]));
+        let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
+        p.title("Tab menu");
+        p.group("", "Choose what appears when you press Tab.");
+        p.card();
+        const CW: i32 = 88;
+        let cx = |k: usize| PAD + BODY_W - 12 - CW * (3 - k as i32);
+        let y = p.row(36);
+        for (k, t) in ["Apps", "Files", "Folders"].iter().enumerate() {
+            let l = p.m.raw(w!("STATIC"), &tr(t), (SS_CENTER.0 | SS_CENTERIMAGE.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), -1, F_HINT);
+            tint(l, |p| p.text_tertiary);
+            surface(l, |p| p.card);
+            p.at(l, cx(k), y + 7, CW, 22);
+        }
         for (i, (name, label)) in config::MENU_ITEMS.iter().zip(MENU_LABELS).enumerate() {
-            let mut items = vec![it(m.label(label), W::Px(LW), 26)];
+            let y = p.row(42);
+            let l = p.m.label(label);
+            surface(l, |p| p.card);
+            p.at(l, PAD + 16, y + 10, BODY_W - 40 - CW * 3, 22);
             for (k, kind) in MENU_KINDS.iter().enumerate() {
+                let id = ID_MENU + (i * 3 + k) as i32;
                 if config::menu_item_fits(kind, name) {
-                    items.push(it(m.check(ID_MENU + (i * 3 + k) as i32, "", c.menu.has(kind, name)), W::Px(CW), 26));
+                    let text = format!("{} ({})", tr(label), tr(["Apps", "Files", "Folders"][k]));
+                    let h = p.m.check(id, &text, "", true, c.menu.has(kind, name));
+                    p.at(h, cx(k) + (CW - 36) / 2, y + 4, 36, 34);
                 } else {
-                    items.push(it(m.label("—"), W::Px(CW), 26));
+                    let h = p.m.raw(w!("STATIC"), "–", (SS_CENTER.0 | SS_CENTERIMAGE.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), -1, F_HINT);
+                    tint(h, |p| p.text_tertiary);
+                    surface(h, |p| p.card);
+                    p.at(h, cx(k), y + 10, CW, 22);
                 }
             }
-            rows.push(row(items));
         }
-        sections.push(rows);
+        p.end_card();
+        sections.push(p.finish());
     }
     // Web
     let profiles = local_state_profiles(actions::Browser::Chrome, c);
     let edge_profiles = local_state_profiles(actions::Browser::Edge, c);
     {
-        let mut rows = vec![row(vec![it(m.head("Web"), W::Fill, 30)])];
-        let labels = |v: &[(&str, &str)]| v.iter().map(|(_, l)| l.to_string()).collect::<Vec<_>>();
-        let bc = m.combo(ID_BROWSER, &labels(&BROWSERS), false);
-        select_key(bc, &BROWSERS, &c.browser.browser);
-        rows.push(row(vec![it(m.label("Browser"), W::Px(L), 26), combo_it(bc, W::Px(300))]));
-        let oc = m.combo(ID_OPEN_IN, &labels(&OPEN_IN), false);
-        select_key(oc, &OPEN_IN, &c.browser.open_in);
-        rows.push(row(vec![it(m.label("Open pages in"), W::Px(L), 26), combo_it(oc, W::Px(300))]));
-        for (id, list, cur, label) in [
-            (ID_PROFILE, &profiles, &c.browser.chrome_profile, "Chrome profile"),
-            (ID_EDGE_PROFILE, &edge_profiles, &c.browser.edge_profile, "Edge profile"),
-        ] {
-            let names: Vec<String> = list.iter().map(|(d, n)| profile_label(d, n)).collect();
-            let combo = m.combo(id, &names, true);
-            let i = list.iter().position(|(d, _)| d == cur).unwrap_or(0);
-            unsafe { SendMessageW(combo, CB_SETCURSEL, Some(WPARAM(i)), None) };
-            rows.push(row(vec![it(m.label(label), W::Px(L), 26), combo_it(combo, W::Px(300))]));
+        let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
+        p.title("Web");
+        p.group("Browser", "Bookmarks are read from both browsers, in these profiles.");
+        p.card();
+        p.select(ID_BROWSER, "Browser", "", key_items(&BROWSERS, &c.browser.browser));
+        p.select(ID_OPEN_IN, "Open pages in", "", key_items(&OPEN_IN, &c.browser.open_in));
+        for (id, list, cur, label) in [(ID_PROFILE, &profiles, &c.browser.chrome_profile, "Chrome profile"), (ID_EDGE_PROFILE, &edge_profiles, &c.browser.edge_profile, "Edge profile")] {
+            let names = list.iter().map(|(d, n)| profile_label(d, n)).collect();
+            p.select(id, label, "", (names, list.iter().position(|(d, _)| d == cur).unwrap_or(0)));
         }
-        rows.push(row(vec![gap(L), it(m.hint("Bookmarks are read from both browsers. Pages open in these profiles."), W::Fill, 20)]));
-        rows.push(row(vec![it(m.label("chrome.exe"), W::Px(L), 26), it(m.edit(ID_CHROME, &c.browser.chrome_exe, false), W::Fill, 26), it(m.button(ID_CHROME_BROWSE, "Browse…"), W::Px(96), 28)]));
-        let modes: Vec<String> = GPT_MODES.iter().map(|(_, l)| l.to_string()).collect();
-        let gm = m.combo(ID_GPT_MODE, &modes, false);
-        let cur = GPT_MODES.iter().position(|(k, _)| *k == c.chatgpt.mode).unwrap_or(0);
-        unsafe { SendMessageW(gm, CB_SETCURSEL, Some(WPARAM(cur)), None) };
-        rows.push(row_gap(10, vec![it(m.label("ChatGPT"), W::Px(L), 26), combo_it(gm, W::Fill)]));
-        rows.push(row(vec![gap(L), it(m.hint("Use \"Copy the question\" if the question stops being sent."), W::Fill, 20)]));
-        rows.push(row(vec![
-            gap(L),
-            it(m.check(ID_GPT_SEND, "Press Enter in ChatGPT after", c.chatgpt.send_enter), W::Px(230), 26),
-            it(m.edit(ID_GPT_DELAY, &c.chatgpt.send_delay_ms.to_string(), true), W::Px(70), 26),
-            it(m.hint("ms (only when ChatGPT is in front)"), W::Fill, 20),
-        ]));
-        rows.push(row(vec![gap(L), it(m.check(ID_GPT_HIDE, "Long questions: hide Markdown marks except on the line you edit", c.chatgpt.hide_marks), W::Fill, 26)]));
-        rows.push(row(vec![it(m.label("ChatGPT URL"), W::Px(L), 26), it(m.edit(ID_GPT_URL, &c.chatgpt.url, false), W::Fill, 26)]));
-        rows.push(row(vec![it(m.label("Google URL"), W::Px(L), 26), it(m.edit(ID_GOOGLE, &c.google.url, false), W::Fill, 26)]));
-        rows.push(row(vec![gap(L), it(m.hint("{q} is replaced with what you type."), W::Fill, 20)]));
-        sections.push(rows);
+        p.end_card();
+        p.group("ChatGPT", "");
+        p.card();
+        p.select(ID_GPT_MODE, "How to send a question", "If it fails, use \"Copy, then open\"", key_items(&GPT_MODES, &c.chatgpt.mode));
+        p.check(ID_GPT_SEND, "Press Enter automatically", "Only when ChatGPT is in front", c.chatgpt.send_enter);
+        p.number(ID_GPT_DELAY, "Wait before Enter", "Milliseconds", &c.chatgpt.send_delay_ms.to_string());
+        p.check(ID_GPT_HIDE, "Hide Markdown marks", "In long questions, except on the line you edit", c.chatgpt.hide_marks);
+        p.end_card();
+        sections.push(p.finish());
     }
-    // Aliases
+    // Aliases(自作コマンドもここ. K44)
     {
-        let mut rows = vec![row(vec![it(m.head("Aliases"), W::Fill, 30)])];
-        rows.push(row(vec![it(m.hint("Type the name on the left to find the app on the right, for example ppt for PowerPoint."), W::Fill, 22)]));
-        let t = m.table(ID_ALIASES, &[("Type", s(150, dpi)), ("App", s(360, dpi))]);
-        table_fill(t, &alias_rows(c));
-        rows.push(row(vec![it(t, W::Fill, 330)]));
-        rows.push(row(vec![
-            it(m.button(ID_ALIAS_ADD, "Add…"), W::Px(96), 28),
-            it(m.button(ID_ALIAS_EDIT, "Edit…"), W::Px(96), 28),
-            it(m.button(ID_ALIAS_DEL, "Remove"), W::Px(96), 28),
-        ]));
-        sections.push(rows);
-    }
-    // Commands
-    {
-        let mut rows = vec![row(vec![it(m.head("Commands"), W::Fill, 30)])];
-        rows.push(row(vec![it(
-            m.hint("Type the name to open a web page or run a command. {q} is what you type after the name, for example \"jira ABC-123\"."),
-            W::Fill,
-            40,
-        )]));
-        let t = m.table(ID_CMDS, &[("Name", s(100, dpi)), ("Shown as", s(150, dpi)), ("Does", s(280, dpi))]);
-        table_fill(t, &command_rows(c));
-        rows.push(row(vec![it(t, W::Fill, 312)]));
-        rows.push(row(vec![
-            it(m.button(ID_CMD_ADD, "Add…"), W::Px(96), 28),
-            it(m.button(ID_CMD_EDIT, "Edit…"), W::Px(96), 28),
-            it(m.button(ID_CMD_DEL, "Remove"), W::Px(96), 28),
-        ]));
-        sections.push(rows);
+        let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
+        p.title("Aliases");
+        p.group("", "Short words that open an app, a web page or a command.");
+        let bar = vec![Bar::Button(ID_ALIAS_ADD, "Add"), Bar::Button(ID_ALIAS_EDIT, "Edit"), Bar::Button(ID_ALIAS_DEL, "Remove")];
+        p.list(ID_ALIASES, &alias_rows(c), &[110, 110], &["Word", "Kind", "Opens"], 12, bar);
+        sections.push(p.finish());
     }
     // 下の帯
     m.parent = hwnd;
@@ -1241,7 +1214,11 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
     }
     let cancel = m.button(ID_CANCEL, "Cancel");
     let save = m.button(ID_SAVE, "Save");
-    let footer = vec![row(vec![it(open_file, W::Px(130), 28), it(err, W::Fill, 40), it(cancel, W::Px(96), 32), it(save, W::Px(96), 32)])];
+    // 下の帯. 位置は右下から(`layout`で縦を決める)
+    let fx = SIDE_W + PAD;
+    let footer = [(open_file, fx, 2, 150, 28), (err, fx + 158, 0, BODY_W - 158 - 216, 40), (cancel, fx + BODY_W - 208, 0, 100, 32), (save, fx + BODY_W - 100, 0, 100, 32)]
+        .map(|(hwnd, x, y, w, h)| Pos { hwnd, x, y, w, h })
+        .to_vec();
     for h in [open_file, err, cancel, save] {
         unsafe {
             let _ = ShowWindow(h, SW_SHOW);
@@ -1249,6 +1226,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
     }
     let fonts = fonts_for(dpi);
     apply_fonts(&m.made, &fonts);
+    parts::set_fonts(fonts[F_HINT as usize], fonts[F_BOLD as usize]);
     Settings {
         hwnd,
         dpi,
@@ -1284,15 +1262,17 @@ impl Settings {
             SendMessageW(self.side, LB_SETITEMHEIGHT, Some(WPARAM(0)), Some(LPARAM(s(36, d) as isize)));
             let _ = SetWindowPos(self.panel, None, s(SIDE_W, d), 0, rc.right - s(SIDE_W, d), panel_h, SWP_NOZORDER | SWP_NOACTIVATE);
         }
-        let width = CLIENT_W - SIDE_W - 2 * PAD;
         let mut bottom = 0;
-        for (i, rows) in self.sections.iter().enumerate() {
-            let b = place(rows, PAD, 16, width, d);
+        for (i, sec) in self.sections.iter().enumerate() {
+            place(&sec.pos, 0, 0, d);
             if i == self.current {
-                bottom = b;
+                bottom = sec.h;
             }
         }
-        place(&self.footer, SIDE_W + PAD - 8, client_h - FOOT_H + 12, width + 8, d);
+        for id in [ID_ROOTS, ID_SKIP, ID_NAMES, ID_APPDIRS, ID_OPENWITH, ID_ALIASES] {
+            unsafe { SendMessageW(item(self.hwnd, id), LB_SETITEMHEIGHT, Some(WPARAM(0)), Some(LPARAM(s(ITEM_H, d) as isize))) };
+        }
+        place(&self.footer, 0, client_h - FOOT_H + 14, d);
         unsafe {
             // 入りきるときは, スクロールの帯は隠れる
             let si = SCROLLINFO {
@@ -1311,16 +1291,15 @@ impl Settings {
 
     fn show_section(&mut self, i: usize) {
         self.current = i;
-        for (k, rows) in self.sections.iter().enumerate() {
-            for r in rows {
-                for it in &r.items {
-                    if let Some(h) = it.hwnd {
-                        unsafe {
-                            let _ = ShowWindow(h, if k == i { SW_SHOW } else { SW_HIDE });
-                        }
-                    }
+        for (k, sec) in self.sections.iter().enumerate() {
+            for p in &sec.pos {
+                unsafe {
+                    let _ = ShowWindow(p.hwnd, if k == i { SW_SHOW } else { SW_HIDE });
                 }
             }
+        }
+        if let Some(sec) = self.sections.get(i) {
+            parts::set_decos(self.panel, sec.deco.clone());
         }
         unsafe {
             SendMessageW(self.side, LB_SETCURSEL, Some(WPARAM(i)), None);
@@ -1334,13 +1313,7 @@ impl Settings {
         self.fonts = fonts_for(dpi);
         apply_fonts(&self.made, &self.fonts);
         delete_fonts(&old);
-        // 表の列の幅
-        let cols: [(i32, &[i32]); 3] = [(ID_ALIASES, &[150, 360]), (ID_CMDS, &[100, 150, 280]), (ID_OPENWITH, &[170, 190, 150])];
-        for (id, ws) in cols {
-            for (i, wv) in ws.iter().enumerate() {
-                unsafe { SendMessageW(item(self.hwnd, id), LVM_SETCOLUMNWIDTH, Some(WPARAM(i)), Some(LPARAM(s(*wv, dpi) as isize))) };
-            }
-        }
+        parts::set_fonts(self.fonts[F_HINT as usize], self.fonts[F_BOLD as usize]);
         self.layout();
     }
 
@@ -1406,34 +1379,22 @@ impl Settings {
                 _ => c.menu.folder = list,
             }
         }
-        let key = |i: i32| {
-            let n = unsafe { SendMessageW(item(h, ID_KEYS + i), CB_GETCURSEL, None, None).0 };
-            ENTER_KEY_CHOICES.get(n.max(0) as usize).copied().unwrap_or("").to_string()
-        };
+        let key = |i: i32| ENTER_KEY_CHOICES.get(drop_sel(item(h, ID_KEYS + i))).copied().unwrap_or("").to_string();
         c.keys.chatgpt = key(0);
         c.keys.google = key(1);
         c.keys.write = key(2);
         c.keys.admin = key(3);
         c.keys.terminal = key(4);
-        c.wsl.enabled = checked(item(h, ID_WSL_ON));
-        c.wsl.distro = t(ID_WSL_DISTRO);
-        let ti = unsafe { SendMessageW(item(h, ID_TERMINAL), CB_GETCURSEL, None, None).0 };
-        c.tools.terminal = if ti >= 1 { c.open_with.get(ti as usize - 1).map(|o| o.name.clone()).unwrap_or_default() } else { String::new() };
+        c.tools.terminal = self.terminal_name();
         c.chatgpt.send_enter = checked(item(h, ID_GPT_SEND));
         c.chatgpt.hide_marks = checked(item(h, ID_GPT_HIDE));
         c.chatgpt.send_delay_ms = t(ID_GPT_DELAY).parse().map_err(|_| "Wait before Enter must be a number of ms.".to_string())?;
         c.browser.browser = selected_key(item(h, ID_BROWSER), &BROWSERS);
         c.browser.open_in = selected_key(item(h, ID_OPEN_IN), &OPEN_IN);
-        c.browser.chrome_exe = t(ID_CHROME);
-        c.browser.chrome_profile = profile_dir(&self.profiles, &t(ID_PROFILE));
-        c.browser.edge_profile = profile_dir(&self.edge_profiles, &t(ID_EDGE_PROFILE));
-        if c.browser.chrome_profile.is_empty() || c.browser.edge_profile.is_empty() {
-            return Err("Choose a browser profile (Default if unsure).".into());
-        }
-        let gm = unsafe { SendMessageW(item(h, ID_GPT_MODE), CB_GETCURSEL, None, None).0 };
-        c.chatgpt.mode = GPT_MODES.get(gm.max(0) as usize).map(|(k, _)| k.to_string()).unwrap_or_else(|| "url".into());
-        c.chatgpt.url = t(ID_GPT_URL);
-        c.google.url = t(ID_GOOGLE);
+        let dir = |list: &[(String, String)], id: i32| list.get(drop_sel(item(h, id))).map(|(d, _)| d.clone()).unwrap_or_else(|| "Default".into());
+        c.browser.chrome_profile = dir(&self.profiles, ID_PROFILE);
+        c.browser.edge_profile = dir(&self.edge_profiles, ID_EDGE_PROFILE);
+        c.chatgpt.mode = selected_key(item(h, ID_GPT_MODE), &GPT_MODES);
         c.validate()?;
         Ok(c)
     }
@@ -1475,7 +1436,6 @@ impl Settings {
             ID_ROOTS => Some(&mut self.work.files.roots),
             ID_SKIP => Some(&mut self.work.files.skip_dirs),
             ID_NAMES => Some(&mut self.work.files.exclude),
-            ID_WSL_NAMES => Some(&mut self.work.wsl.exclude),
             ID_APPDIRS => Some(&mut self.work.apps.extra_dirs),
             _ => None,
         }
@@ -1522,7 +1482,6 @@ impl Settings {
             ID_ROOTS_ADD => self.list_add(ID_ROOTS, p),
             ID_SKIP_ADD => self.list_add(ID_SKIP, p),
             ID_APPDIRS_ADD => self.list_add(ID_APPDIRS, p),
-            ID_CHROME_BROWSE => set_text(item(self.hwnd, ID_CHROME), &p),
             _ => {}
         }
     }
@@ -1544,21 +1503,37 @@ impl Settings {
         self.work.alias.keys().cloned().collect()
     }
 
+    /// 一覧の番号から, アプリの呼び名か, Webページ・コマンドか
+    fn alias_at(&self, i: usize) -> Option<ShortRef> {
+        let keys = self.alias_keys();
+        match keys.get(i) {
+            Some(k) => Some(ShortRef::App(k.clone())),
+            None => (i - keys.len() < self.work.command.len()).then(|| ShortRef::Command(i - keys.len())),
+        }
+    }
+
     fn edit_selected(&self, id: i32) -> Option<Task> {
+        let i = list_sel(item(self.hwnd, id))?;
         match id {
             ID_ALIASES => {
-                let i = table_sel(item(self.hwnd, ID_ALIASES))?;
-                let k = self.alias_keys().get(i)?.clone();
-                let v = self.work.alias.get(&k)?.clone();
-                Some(Task::Editor(EditKind::Alias { orig: Some(k.clone()), name: k, app: v, apps: self.apps.clone() }))
-            }
-            ID_CMDS => {
-                let i = table_sel(item(self.hwnd, ID_CMDS))?;
-                let c = self.work.command.get(i)?.clone();
-                Some(Task::Editor(EditKind::Command { index: Some(i), cmd: c }))
+                let orig = self.alias_at(i)?;
+                let mut sh = Short::default();
+                match &orig {
+                    ShortRef::App(k) => {
+                        sh.word = k.clone();
+                        sh.value = self.work.alias.get(k)?.clone();
+                    }
+                    ShortRef::Command(n) => {
+                        let c = self.work.command.get(*n)?;
+                        sh.word = c.name.clone();
+                        sh.kind = if c.run.is_some() { 2 } else { 1 };
+                        sh.value = c.url.clone().or(c.run.clone()).unwrap_or_default();
+                        sh.title = c.title.clone().unwrap_or_default();
+                    }
+                }
+                Some(Task::Editor(EditKind::Alias { orig: Some(orig), short: sh }))
             }
             ID_OPENWITH => {
-                let i = table_sel(item(self.hwnd, ID_OPENWITH))?;
                 let o = self.work.open_with.get(i)?.clone();
                 Some(Task::Editor(EditKind::OpenWith { index: Some(i), ow: o }))
             }
@@ -1569,49 +1544,43 @@ impl Settings {
     /// 項目を直す窓のOK. 問題があれば文を返す
     fn apply_edit(&mut self, kind: &EditKind) -> Result<(), String> {
         match kind {
-            EditKind::Alias { orig, name, app, .. } => {
-                if name.is_empty() || name.chars().any(char::is_whitespace) {
-                    return Err("Type a name without spaces.".into());
+            EditKind::Alias { orig, short } => {
+                let word = &short.word;
+                if word.is_empty() || word.chars().any(char::is_whitespace) {
+                    return Err("Type a word without spaces.".into());
                 }
-                if app.is_empty() {
-                    return Err("Choose or type the app name.".into());
+                if short.value.is_empty() {
+                    return Err(["Choose or type the app name.", "Type the web address.", "Type the command."][short.kind].into());
                 }
-                if orig.as_deref() != Some(name.as_str()) && self.work.alias.contains_key(name) {
-                    return Err(format!("\"{name}\" is already an alias."));
+                let same_app = self.work.alias.keys().any(|k| k.eq_ignore_ascii_case(word) && orig.as_ref() != Some(&ShortRef::App(k.clone())));
+                let same_cmd = self.work.command.iter().enumerate().any(|(i, c)| c.name.eq_ignore_ascii_case(word) && orig.as_ref() != Some(&ShortRef::Command(i)));
+                if same_app || same_cmd {
+                    return Err(format!("\"{word}\" is already an alias."));
                 }
-                if let Some(o) = orig {
-                    self.work.alias.remove(o);
-                }
-                self.work.alias.insert(name.clone(), app.clone());
-                let t = item(self.hwnd, ID_ALIASES);
-                table_fill(t, &alias_rows(&self.work));
-                if let Some(i) = self.alias_keys().iter().position(|k| k == name) {
-                    table_select(t, i);
-                }
-            }
-            EditKind::Command { index, cmd } => {
-                if cmd.name.is_empty() || cmd.name.chars().any(char::is_whitespace) {
-                    return Err("Type a name without spaces.".into());
-                }
-                if cmd.url.is_none() && cmd.run.is_none() {
-                    return Err("Type the web address or the command.".into());
-                }
-                if self.work.command.iter().enumerate().any(|(i, c)| Some(i) != *index && c.name.eq_ignore_ascii_case(&cmd.name)) {
-                    return Err(format!("\"{}\" is already a command.", cmd.name));
-                }
-                let i = match index {
-                    Some(i) if *i < self.work.command.len() => {
-                        self.work.command[*i] = cmd.clone();
-                        *i
+                // 種類が変わったときは, 元の場所から消して移す
+                let mut at = None;
+                match orig {
+                    Some(ShortRef::App(k)) => {
+                        self.work.alias.remove(k);
                     }
-                    _ => {
-                        self.work.command.push(cmd.clone());
-                        self.work.command.len() - 1
+                    Some(ShortRef::Command(i)) if *i < self.work.command.len() => {
+                        self.work.command.remove(*i);
+                        at = Some(*i);
                     }
+                    _ => {}
+                }
+                let row = if short.kind == 0 {
+                    self.work.alias.insert(word.clone(), short.value.clone());
+                    self.alias_keys().iter().position(|k| k == word).unwrap_or(0)
+                } else {
+                    let v = Some(short.value.clone());
+                    let (url, run) = if short.kind == 1 { (v, None) } else { (None, v) };
+                    let cmd = Command { name: word.clone(), title: (!short.title.is_empty()).then(|| short.title.clone()), url, run };
+                    let i = at.unwrap_or(self.work.command.len());
+                    self.work.command.insert(i, cmd);
+                    self.work.alias.len() + i
                 };
-                let t = item(self.hwnd, ID_CMDS);
-                table_fill(t, &command_rows(&self.work));
-                table_select(t, i);
+                self.refresh_aliases(row);
             }
             EditKind::OpenWith { index, ow } => {
                 if ow.name.is_empty() {
@@ -1649,26 +1618,35 @@ impl Settings {
 
     /// 画面で選んでいる`Alt+Enter`のターミナルの名前(自動なら空)
     fn terminal_name(&self) -> String {
-        let ti = unsafe { SendMessageW(item(self.hwnd, ID_TERMINAL), CB_GETCURSEL, None, None).0 };
-        if ti >= 1 { self.work.open_with.get(ti as usize - 1).map(|o| o.name.clone()).unwrap_or_default() } else { String::new() }
+        let i = drop_sel(item(self.hwnd, ID_TERMINAL));
+        if i >= 1 { self.work.open_with.get(i - 1).map(|o| o.name.clone()).unwrap_or_default() } else { String::new() }
     }
 
-    /// 「〜で開く」の表と, Alt+Enterの選びを作り直す
+    fn refresh_aliases(&self, sel: usize) {
+        let h = item(self.hwnd, ID_ALIASES);
+        let rows = alias_rows(&self.work);
+        fill_list(h, &rows);
+        if !rows.is_empty() {
+            unsafe { SendMessageW(h, LB_SETCURSEL, Some(WPARAM(sel.min(rows.len() - 1))), None) };
+        }
+    }
+
+    /// 「別のアプリで開く」の一覧と, Alt+Enterの選びを作り直す
     fn refresh_open_with(&mut self, sel: Option<usize>) {
         let t = item(self.hwnd, ID_OPENWITH);
-        table_fill(t, &open_with_rows(&self.work));
+        fill_list(t, &open_with_rows(&self.work));
         if let Some(i) = sel.filter(|_| !self.work.open_with.is_empty()) {
-            table_select(t, i.min(self.work.open_with.len() - 1));
+            unsafe { SendMessageW(t, LB_SETCURSEL, Some(WPARAM(i.min(self.work.open_with.len() - 1))), None) };
         }
         if !self.work.open_with.iter().any(|o| o.name.eq_ignore_ascii_case(&self.work.tools.terminal)) {
             self.work.tools.terminal.clear();
         }
-        fill_terminals(item(self.hwnd, ID_TERMINAL), &self.work);
+        let (items, sel) = terminals(&self.work);
+        set_drop(item(self.hwnd, ID_TERMINAL), items, sel);
     }
 
     fn remove_selected(&mut self, id: i32) {
-        let t = item(self.hwnd, id);
-        let Some(i) = table_sel(t) else { return };
+        let Some(i) = list_sel(item(self.hwnd, id)) else { return };
         if id == ID_OPENWITH {
             self.work.tools.terminal = self.terminal_name();
             if i < self.work.open_with.len() {
@@ -1677,21 +1655,16 @@ impl Settings {
             self.refresh_open_with(Some(i));
             return;
         }
-        if id == ID_ALIASES {
-            if let Some(k) = self.alias_keys().get(i) {
-                self.work.alias.remove(k);
+        match self.alias_at(i) {
+            Some(ShortRef::App(k)) => {
+                self.work.alias.remove(&k);
             }
-            table_fill(t, &alias_rows(&self.work));
-        } else {
-            if i < self.work.command.len() {
-                self.work.command.remove(i);
+            Some(ShortRef::Command(n)) => {
+                self.work.command.remove(n);
             }
-            table_fill(t, &command_rows(&self.work));
+            None => {}
         }
-        let n = if id == ID_ALIASES { self.work.alias.len() } else { self.work.command.len() };
-        if n > 0 {
-            table_select(t, i.min(n - 1));
-        }
+        self.refresh_aliases(i);
     }
 
     fn command(&mut self, id: i32, code: u32) -> Vec<Task> {
@@ -1703,15 +1676,13 @@ impl Settings {
                 vec![]
             }
             ID_SAVE => {
-                // Enterで押されたとき. 名前の入力欄なら足すだけ, 表なら直す
+                // Enterで押されたとき. 名前の入力欄なら足すだけ, 一覧なら直す
                 let f = unsafe { GetFocus() };
-                for (edit, list) in [(ID_NAME_EDIT, ID_NAMES), (ID_WSL_NAME_EDIT, ID_WSL_NAMES)] {
-                    if f == item(self.hwnd, edit) {
-                        self.add_name(edit, list);
-                        return vec![];
-                    }
+                if f == item(self.hwnd, ID_NAME_EDIT) {
+                    self.add_name(ID_NAME_EDIT, ID_NAMES);
+                    return vec![];
                 }
-                for t in [ID_ALIASES, ID_CMDS, ID_OPENWITH] {
+                for t in [ID_ALIASES, ID_OPENWITH] {
                     if f == item(self.hwnd, t) {
                         return self.edit_selected(t).into_iter().collect();
                     }
@@ -1723,10 +1694,9 @@ impl Settings {
             ID_HOTKEY_CHANGE => vec![Task::ChangeHotkey],
             ID_SELHK_CHANGE => vec![Task::ChangeSelectionHotkey],
             ID_SELHK_CLEAR => vec![Task::ClearSelectionHotkey],
-            ID_ROOTS_ADD => vec![Task::Pick { id, folder: true, title: "Choose a folder to search" }],
-            ID_SKIP_ADD => vec![Task::Pick { id, folder: true, title: "Choose a folder to skip" }],
-            ID_APPDIRS_ADD => vec![Task::Pick { id, folder: true, title: "Choose a folder with apps" }],
-            ID_CHROME_BROWSE => vec![Task::Pick { id, folder: false, title: "Choose chrome.exe" }],
+            ID_ROOTS_ADD => vec![Task::Pick { id, title: "Choose a folder to search" }],
+            ID_SKIP_ADD => vec![Task::Pick { id, title: "Choose a folder to skip" }],
+            ID_APPDIRS_ADD => vec![Task::Pick { id, title: "Choose a folder with apps" }],
             ID_ROOTS_DEL => {
                 self.list_remove(ID_ROOTS);
                 vec![]
@@ -1743,19 +1713,6 @@ impl Settings {
                 self.add_name(ID_NAME_EDIT, ID_NAMES);
                 vec![]
             }
-            ID_WSL_NAME_ADD => {
-                self.add_name(ID_WSL_NAME_EDIT, ID_WSL_NAMES);
-                vec![]
-            }
-            ID_WSL_NAME_DEL => {
-                self.list_remove(ID_WSL_NAMES);
-                vec![]
-            }
-            ID_WSL_NAME_RESET => {
-                self.work.wsl.exclude = Wsl::default().exclude;
-                fill_list(item(self.hwnd, ID_WSL_NAMES), &self.work.wsl.exclude);
-                vec![]
-            }
             ID_NAME_DEL => {
                 self.list_remove(ID_NAMES);
                 vec![]
@@ -1765,16 +1722,19 @@ impl Settings {
                 fill_list(item(self.hwnd, ID_NAMES), &self.work.files.exclude);
                 vec![]
             }
-            ID_ALIAS_ADD => vec![Task::Editor(EditKind::Alias { orig: None, name: String::new(), app: String::new(), apps: self.apps.clone() })],
-            ID_CMD_ADD => vec![Task::Editor(EditKind::Command { index: None, cmd: Command { name: String::new(), title: None, url: Some(String::new()), run: None } })],
+            ID_ALIAS_ADD => vec![Task::Editor(EditKind::Alias { orig: None, short: Short::default() })],
             ID_ALIAS_EDIT => self.edit_selected(ID_ALIASES).into_iter().collect(),
-            ID_CMD_EDIT => self.edit_selected(ID_CMDS).into_iter().collect(),
             ID_ALIAS_DEL => {
                 self.remove_selected(ID_ALIASES);
                 vec![]
             }
-            ID_CMD_DEL => {
-                self.remove_selected(ID_CMDS);
+            // 一覧をダブルクリック
+            ID_ALIASES | ID_OPENWITH if code == LBN_DBLCLK => self.edit_selected(id).into_iter().collect(),
+            // キーワードの例を, 打った文字に合わせる
+            _ if (ID_PFX..ID_PFX + 10).contains(&id) && code == EN_CHANGE => {
+                let i = (id - ID_PFX) as usize;
+                let h = item(self.hwnd, ID_PFX_EX + i as i32);
+                set_raw_text(h, &prefix_example(i, &text(item(self.hwnd, id))));
                 vec![]
             }
             ID_OW_ADD => vec![Task::Editor(EditKind::OpenWith { index: None, ow: OpenWith { name: String::new(), exe: String::new(), args: String::new() } })],
@@ -1798,8 +1758,8 @@ fn run_tasks(tasks: Vec<Task>) {
                     close_settings();
                 }
             }
-            Task::Pick { id, folder, title } => {
-                if let Some(p) = pick(hwnd, folder, title) {
+            Task::Pick { id, title } => {
+                if let Some(p) = pick(hwnd, true, title) {
                     with_settings(|s| s.picked(id, p));
                 }
             }
@@ -1842,7 +1802,7 @@ fn close_settings() {
             let _ = DestroyWindow(st.hwnd);
         }
         delete_fonts(&st.fonts);
-        TINT.with(|t| t.borrow_mut().clear());
+        parts::clear();
     }
 }
 
@@ -1854,7 +1814,7 @@ extern "system" fn settings_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: L
 }
 
 fn settings_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if let Some(r) = common_proc(msg, wparam, lparam) {
+    if let Some(r) = common_proc(hwnd, msg, wparam, lparam) {
         return r;
     }
     let mut tasks = vec![];
@@ -1870,14 +1830,6 @@ fn settings_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 let code = hiword(wparam.0) as u32;
                 tasks = st.command(id, code);
                 Some(LRESULT(0))
-            }
-            WM_NOTIFY => {
-                let nm = unsafe { &*(lparam.0 as *const NMHDR) };
-                if nm.code == NM_DBLCLK && [ID_ALIASES, ID_CMDS, ID_OPENWITH].contains(&(nm.idFrom as i32)) {
-                    tasks = st.edit_selected(nm.idFrom as i32).into_iter().collect();
-                    return Some(LRESULT(0));
-                }
-                None
             }
             WM_CLOSE => {
                 tasks = vec![Task::AskClose];
@@ -1902,107 +1854,199 @@ fn settings_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
     }
 }
 
-// ---------------------------------------------------------------- 別名・自作コマンドを直す小さな窓
+// ---------------------------------------------------------------- エイリアスと「別のアプリで開く」を直す小さな窓
+
+/// 一覧の中の場所
+#[derive(Clone, PartialEq)]
+enum ShortRef {
+    App(String),
+    Command(usize),
+}
+
+/// エイリアス. `kind`は`ALIAS_KINDS`の番号
+#[derive(Clone, Default)]
+struct Short {
+    word: String,
+    kind: usize,
+    value: String,
+    title: String,
+}
 
 #[derive(Clone)]
 enum EditKind {
-    Alias { orig: Option<String>, name: String, app: String, apps: Vec<String> },
-    Command { index: Option<usize>, cmd: Command },
+    Alias { orig: Option<ShortRef>, short: Short },
     OpenWith { index: Option<usize>, ow: OpenWith },
+}
+
+/// 種類によって出す部品. `modes`は出す種類の番号
+struct Group {
+    modes: &'static [usize],
+    section: Section,
 }
 
 struct Editor {
     hwnd: HWND,
     owner: HWND,
     kind: EditKind,
-    fonts: [HFONT; 3],
+    fonts: [HFONT; 4],
+    base: Vec<Deco>,
+    groups: Vec<Group>,
+    apps: Vec<String>,
 }
 
-const ED_W: i32 = 480;
+const ED_W: i32 = 520;
+const APP_ROWS: i32 = 5;
+
+/// 種類に合わせて, 部品を出したり隠したりする
+fn editor_show_mode(hwnd: HWND) {
+    let mode = drop_sel(item(hwnd, E_KIND));
+    // 隠すときにフォーカスが動いて呼び戻されるので, 借りたままにしない
+    let Some((mut decos, groups)) = EDITOR.with(|e| {
+        e.borrow().as_ref().map(|e| (e.base.clone(), e.groups.iter().map(|g| (g.modes.contains(&mode), g.section.pos.clone(), g.section.deco.clone())).collect::<Vec<_>>()))
+    }) else {
+        return;
+    };
+    for (on, pos, deco) in groups {
+        for p in pos {
+            unsafe {
+                let _ = ShowWindow(p.hwnd, if on { SW_SHOW } else { SW_HIDE });
+            }
+        }
+        if on {
+            decos.extend(deco);
+        }
+    }
+    set_text(item(hwnd, E_VALUE_LABEL), if mode == 2 { "Command" } else { "Web address" });
+    parts::set_decos(hwnd, decos);
+}
+
+/// 打った文字を含むアプリだけを一覧に出す
+fn editor_filter(hwnd: HWND) {
+    let Some(apps) = EDITOR.with(|e| e.borrow().as_ref().map(|e| e.apps.clone())) else { return };
+    let t = text(item(hwnd, E_APP)).trim().to_lowercase();
+    let list = item(hwnd, E_APPS);
+    let exact = apps.iter().any(|a| a.to_lowercase() == t);
+    let shown: Vec<String> = apps.iter().filter(|a| exact || t.is_empty() || a.to_lowercase().contains(&t)).cloned().collect();
+    fill_list(list, &shown);
+    if let Some(i) = shown.iter().position(|a| a.to_lowercase() == t) {
+        unsafe { SendMessageW(list, LB_SETCURSEL, Some(WPARAM(i)), None) };
+    }
+}
 
 fn open_editor(owner: HWND, kind: EditKind) {
     if editor_hwnd().is_some() {
         return;
     }
     let dpi = unsafe { GetDpiForWindow(owner) }.max(96);
-    let (title, ch) = match &kind {
-        EditKind::Alias { orig: None, .. } => ("Add alias", 210),
-        EditKind::Alias { .. } => ("Edit alias", 210),
-        EditKind::Command { index: None, .. } => ("Add command", 300),
-        EditKind::Command { .. } => ("Edit command", 300),
-        EditKind::OpenWith { index: None, .. } => ("Add app to open with", 290),
-        EditKind::OpenWith { .. } => ("Edit app to open with", 290),
+    let title = match &kind {
+        EditKind::Alias { orig: None, .. } => "Add alias",
+        EditKind::Alias { .. } => "Edit alias",
+        EditKind::OpenWith { index: None, .. } => "Add app",
+        EditKind::OpenWith { .. } => "Edit app",
     };
-    let style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
-    let mut r = RECT { left: 0, top: 0, right: s(ED_W, dpi), bottom: s(ch, dpi) };
-    let mut or = RECT::default();
-    unsafe {
-        let _ = AdjustWindowRectExForDpi(&mut r, style, false, WINDOW_EX_STYLE(0), dpi);
-        let _ = GetWindowRect(owner, &mut or);
-    }
-    let (w, h) = (r.right - r.left, r.bottom - r.top);
-    let x = or.left + ((or.right - or.left) - w) / 2;
-    let y = or.top + ((or.bottom - or.top) - h) / 2;
+    let style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
     let hinst = unsafe { GetModuleHandleW(None).unwrap_or_default() };
     let t = WStr::new(&tr(title));
-    let Ok(hwnd) = (unsafe { CreateWindowExW(WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, EDITOR_CLASS, t.pcwstr(), style, x, y, w, h, Some(owner), None, Some(hinst.into()), None) })
+    let Ok(hwnd) = (unsafe { CreateWindowExW(WS_EX_CONTROLPARENT | WS_EX_DLGMODALFRAME, EDITOR_CLASS, t.pcwstr(), style, 0, 0, 100, 100, Some(owner), None, Some(hinst.into()), None) })
     else {
         return;
     };
+    let mut apps = with_settings(|s| s.apps.clone()).unwrap_or_default();
+    apps.sort_by_key(|a| a.to_lowercase());
+    apps.dedup();
     let mut m = Maker { parent: hwnd, hinst: hinst.into(), made: vec![] };
-    let mut rows = vec![];
-    const L: i32 = 110;
+    const X: i32 = 20;
+    const FW: i32 = ED_W - 2 * X;
+    let full = FW - FORM_L;
+    let mut p = Page::new(&mut m, X, 20, FW);
+    let mut groups = vec![];
+    let mut bottom;
+    let base;
     match &kind {
-        EditKind::Alias { name, app, apps, .. } => {
-            rows.push(row(vec![it(m.label("Type"), W::Px(L), 26), it(m.edit(E_NAME, name, false), W::Px(160), 26), it(m.hint("for example ppt"), W::Fill, 20)]));
-            let mut list = apps.clone();
-            list.sort_by_key(|a| a.to_lowercase());
-            list.dedup();
-            let c = m.combo(E_VALUE, &list, true);
-            set_text(c, app);
-            rows.push(row(vec![it(m.label("App"), W::Px(L), 26), combo_it(c, W::Fill)]));
-            rows.push(row(vec![gap(L), it(m.hint("Choose from the list or type the app name."), W::Fill, 20)]));
-        }
-        EditKind::Command { cmd, .. } => {
-            rows.push(row(vec![it(m.label("Name"), W::Px(L), 26), it(m.edit(E_NAME, &cmd.name, false), W::Px(160), 26), it(m.hint("what you type, for example jira"), W::Fill, 20)]));
-            rows.push(row(vec![it(m.label("Shown as"), W::Px(L), 26), it(m.edit(E_TITLE, cmd.title.as_deref().unwrap_or(""), false), W::Fill, 26)]));
-            rows.push(row(vec![gap(L), it(m.hint("optional, for example Open Jira issue"), W::Fill, 20)]));
-            let kinds = vec!["Open a web page".to_string(), "Run a command".to_string()];
-            let k = m.combo(E_KIND, &kinds, false);
-            let is_run = cmd.run.is_some();
-            unsafe { SendMessageW(k, CB_SETCURSEL, Some(WPARAM(is_run as usize)), None) };
-            rows.push(row(vec![it(m.label("Does"), W::Px(L), 26), combo_it(k, W::Px(200))]));
-            let vl = m.label(if is_run { "Command" } else { "Web address" });
-            unsafe { SetWindowLongPtrW(vl, GWLP_ID, E_VALUE_LABEL as isize) };
-            let value = cmd.url.clone().or(cmd.run.clone()).unwrap_or_default();
-            rows.push(row(vec![it(vl, W::Px(L), 26), it(m.edit(E_VALUE, &value, false), W::Fill, 26)]));
-            rows.push(row(vec![gap(L), it(m.hint("{q} is replaced with what you type after the name."), W::Fill, 20)]));
+        EditKind::Alias { short, .. } => {
+            p.form_edit("Word", E_NAME, &short.word, 160);
+            p.form_hint("What you type, for example ppt");
+            p.form_drop("Kind", E_KIND, tr_all(&ALIAS_KINDS), short.kind);
+            let y = p.y;
+            base = p.finish();
+            let (app, other) = if short.kind == 0 { (short.value.as_str(), "") } else { ("", short.value.as_str()) };
+            let mut p = Page::new(&mut m, X, y, FW);
+            p.form_edit("App", E_APP, app, full);
+            let h = p.m.list(E_APPS, &apps, &[]);
+            let lh = APP_ROWS * ITEM_H + 12;
+            p.deco(Kind::List { owner: h, head: 0, bar: 0 }, X + FORM_L, p.y, full, lh);
+            p.at(h, X + FORM_L + 2, p.y + 4, full - 4, lh - 10);
+            p.y += lh + 12;
+            bottom = p.y;
+            groups.push(Group { modes: &[0], section: p.finish() });
+            let mut p = Page::new(&mut m, X, y, FW);
+            let (x, vy) = (X + FORM_L, p.y);
+            let l = p.m.label("Web address");
+            unsafe { SetWindowLongPtrW(l, GWLP_ID, E_VALUE_LABEL as isize) };
+            p.at(l, X, vy + 5, FORM_L - 8, 22);
+            p.field(E_VALUE, other, 0, x, vy, full, CTL_H);
+            p.y += CTL_H + 8;
+            p.form_hint("{q} is replaced with what you type after the word.");
+            p.form_edit("Shown as", E_TITLE, &short.title, full);
+            p.form_hint("Optional, for example Open Jira issue");
+            bottom = bottom.max(p.y);
+            groups.push(Group { modes: &[1, 2], section: p.finish() });
         }
         EditKind::OpenWith { ow, .. } => {
-            rows.push(row(vec![it(m.label("Name"), W::Px(L), 26), it(m.edit(E_NAME, &ow.name, false), W::Fill, 26)]));
-            rows.push(row(vec![gap(L), it(m.hint("shown as \"Open in <name>\""), W::Fill, 20)]));
-            rows.push(row(vec![it(m.label("App (.exe)"), W::Px(L), 26), it(m.edit(E_VALUE, &ow.exe, false), W::Fill, 26)]));
-            rows.push(row(vec![gap(L), it(m.hint("Empty: find VS Code, WezTerm or Windows Terminal by the name."), W::Fill, 20)]));
-            rows.push(row(vec![it(m.label("Passes"), W::Px(L), 26), it(m.edit(E_TITLE, &ow.args, false), W::Fill, 26)]));
-            rows.push(row(vec![gap(L), it(m.hint("{path} file or folder, {dir} folder. Empty: the usual way."), W::Fill, 20)]));
+            p.form_edit("Name", E_NAME, &ow.name, full);
+            p.form_hint("Shown as \"Open in <name>\"");
+            let bw = button_w("Browse…", 72);
+            p.form_edit("App (.exe)", E_VALUE, &ow.exe, full - bw - 8);
+            let b = p.m.button(E_BROWSE, "Browse…");
+            p.at(b, X + FW - bw, p.y - CTL_H - 8, bw, CTL_H);
+            p.form_hint("Empty: VS Code, WezTerm and Windows Terminal are found by name.");
+            let args = ow.args.trim();
+            let pass = if args.is_empty() { 0 } else if args == PASS_FOLDER { 1 } else { 2 };
+            p.form_drop("What to pass", E_KIND, tr_all(&PASS_KINDS), pass);
+            let y = p.y;
+            base = p.finish();
+            let mut p = Page::new(&mut m, X, y, FW);
+            p.form_edit("Arguments", E_TITLE, if pass == 2 { args } else { "" }, full);
+            p.form_hint("{path}: the selected item, {dir}: its folder");
+            bottom = p.y;
+            groups.push(Group { modes: &[2], section: p.finish() });
         }
     }
-    let err = m.raw(w!("STATIC"), "", (SS_LEFT.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), E_ERROR, F_BODY);
+    let err = m.raw(w!("STATIC"), "", (SS_LEFT.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), E_ERROR, F_HINT);
     tint(err, |p| p.danger);
-    rows.push(row(vec![gap(L), it(err, W::Fill, 20)]));
     let cancel = m.button(ID_CANCEL, "Cancel");
     let ok = m.button(ID_SAVE, "OK");
-    rows.push(row_gap(4, vec![gap(0), It { hwnd: None, w: W::Fill, h: 0, drop: 0 }, it(cancel, W::Px(96), 32), it(ok, W::Px(96), 32)]));
+    let foot = [(err, X, bottom + 4, FW - 220, 36), (cancel, X + FW - 208, bottom + 6, 100, 32), (ok, X + FW - 100, bottom + 6, 100, 32)].map(|(hwnd, x, y, w, h)| Pos { hwnd, x, y, w, h });
+    bottom += 58;
     let fonts = fonts_for(dpi);
     apply_fonts(&m.made, &fonts);
     dark::apply(hwnd);
-    place(&rows, PAD - 8, 16, ED_W - 2 * PAD + 8, dpi);
-    for (h, _) in &m.made {
+    parts::hide_focus(hwnd);
+    place(&base.pos, 0, 0, dpi);
+    place(&foot, 0, 0, dpi);
+    for p in base.pos.iter().chain(&foot) {
         unsafe {
-            let _ = ShowWindow(*h, SW_SHOW);
+            let _ = ShowWindow(p.hwnd, SW_SHOW);
         }
     }
-    EDITOR.with(|e| *e.borrow_mut() = Some(Editor { hwnd, owner, kind, fonts }));
+    for g in &groups {
+        place(&g.section.pos, 0, 0, dpi);
+    }
+    unsafe {
+        SendMessageW(item(hwnd, E_APPS), LB_SETITEMHEIGHT, Some(WPARAM(0)), Some(LPARAM(s(ITEM_H, dpi) as isize)));
+        let mut r = RECT { left: 0, top: 0, right: s(ED_W, dpi), bottom: s(bottom, dpi) };
+        let _ = AdjustWindowRectExForDpi(&mut r, style, false, WS_EX_DLGMODALFRAME, dpi);
+        let mut or = RECT::default();
+        let _ = GetWindowRect(owner, &mut or);
+        let (w, h) = (r.right - r.left, r.bottom - r.top);
+        let (x, y) = (or.left + ((or.right - or.left) - w) / 2, or.top + ((or.bottom - or.top) - h) / 2);
+        let _ = SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    EDITOR.with(|e| *e.borrow_mut() = Some(Editor { hwnd, owner, kind, fonts, base: base.deco, groups, apps }));
+    editor_show_mode(hwnd);
+    if !item(hwnd, E_APPS).is_invalid() {
+        editor_filter(hwnd);
+    }
     unsafe {
         let _ = EnableWindow(owner, false);
         let _ = ShowWindow(hwnd, SW_SHOW);
@@ -2034,29 +2078,21 @@ extern "system" fn editor_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
 /// OKを押したときに, 窓の値で項目を作る
 fn editor_values(hwnd: HWND, kind: &EditKind) -> EditKind {
     let t = |id: i32| text(item(hwnd, id)).trim().to_string();
+    let k = drop_sel(item(hwnd, E_KIND));
     match kind {
-        EditKind::Alias { orig, apps, .. } => EditKind::Alias { orig: orig.clone(), name: t(E_NAME), app: t(E_VALUE), apps: apps.clone() },
-        EditKind::Command { index, .. } => {
-            let run = unsafe { SendMessageW(item(hwnd, E_KIND), CB_GETCURSEL, None, None).0 } == 1;
-            let v = t(E_VALUE);
-            let title = t(E_TITLE);
-            let val = (!v.is_empty()).then_some(v);
-            EditKind::Command {
-                index: *index,
-                cmd: Command {
-                    name: t(E_NAME),
-                    title: (!title.is_empty()).then_some(title),
-                    url: if run { None } else { val.clone() },
-                    run: if run { val } else { None },
-                },
-            }
+        EditKind::Alias { orig, .. } => EditKind::Alias {
+            orig: orig.clone(),
+            short: Short { word: t(E_NAME), kind: k, value: if k == 0 { t(E_APP) } else { t(E_VALUE) }, title: t(E_TITLE) },
+        },
+        EditKind::OpenWith { index, .. } => {
+            let args = [String::new(), PASS_FOLDER.to_string(), t(E_TITLE)][k.min(2)].clone();
+            EditKind::OpenWith { index: *index, ow: OpenWith { name: t(E_NAME), exe: t(E_VALUE), args } }
         }
-        EditKind::OpenWith { index, .. } => EditKind::OpenWith { index: *index, ow: OpenWith { name: t(E_NAME), exe: t(E_VALUE), args: t(E_TITLE) } },
     }
 }
 
 fn editor_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if let Some(r) = common_proc(msg, wparam, lparam) {
+    if let Some(r) = common_proc(hwnd, msg, wparam, lparam) {
         return r;
     }
     match msg {
@@ -2075,9 +2111,19 @@ fn editor_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT
                     }
                 }
                 ID_CANCEL => close_editor(),
-                E_KIND if code == CBN_SELCHANGE => {
-                    let run = unsafe { SendMessageW(item(hwnd, E_KIND), CB_GETCURSEL, None, None).0 } == 1;
-                    set_text(item(hwnd, E_VALUE_LABEL), if run { "Command" } else { "Web address" });
+                E_KIND if code == CBN_SELCHANGE => editor_show_mode(hwnd),
+                E_BROWSE => {
+                    if let Some(p) = pick(hwnd, false, "Choose an app") {
+                        set_raw_text(item(hwnd, E_VALUE), &short_path(&p));
+                    }
+                }
+                // 一覧で選んだ文字を入れたときは, 一覧を作り直さない
+                E_APP if code == EN_CHANGE && unsafe { GetFocus() } == item(hwnd, E_APP) => editor_filter(hwnd),
+                E_APPS if code == LBN_SELCHANGE || code == LBN_DBLCLK => {
+                    let list = item(hwnd, E_APPS);
+                    if let Some(i) = list_sel(list) {
+                        set_raw_text(item(hwnd, E_APP), &list_text(list, i));
+                    }
                 }
                 _ => {}
             }
@@ -2087,12 +2133,11 @@ fn editor_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT
             close_editor();
             LRESULT(0)
         }
-        WM_ERASEBKGND => unsafe {
-            let mut rc = RECT::default();
-            let _ = GetClientRect(hwnd, &mut rc);
-            FillRect(HDC(wparam.0 as *mut _), &rc, brush(pal().bg));
-            LRESULT(1)
-        },
+        WM_ERASEBKGND => LRESULT(1),
+        WM_PAINT => {
+            paint_surface(hwnd, 0);
+            LRESULT(0)
+        }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }

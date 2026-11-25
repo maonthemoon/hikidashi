@@ -275,21 +275,37 @@ pub fn parse_filters(input: &str) -> (String, Filters) {
     (rest.join(" "), f)
 }
 
-/// 走査で除く名前(D1). 大文字小文字は区別しない.
+/// 走査で除く名前(D1). 大文字小文字は区別しない. `*`は何文字にでも合う(K44)
 #[derive(Debug, Clone)]
 pub struct Excludes {
     names: Vec<String>,
+    patterns: Vec<String>,
 }
 
 impl Excludes {
     pub fn new(names: &[String]) -> Excludes {
-        Excludes { names: names.iter().map(|n| n.to_lowercase()).collect() }
+        let (patterns, names) = names.iter().map(|n| n.to_lowercase()).partition(|n| n.contains('*'));
+        Excludes { names, patterns }
     }
 
     pub fn contains(&self, name: &str) -> bool {
         let l = name.to_lowercase();
-        self.names.iter().any(|n| *n == l)
+        self.names.iter().any(|n| *n == l) || self.patterns.iter().any(|p| glob(p, &l))
     }
+}
+
+/// `*`(何文字にでも合う)だけの形に合うか
+fn glob(pattern: &str, name: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    let Some(mut rest) = name.strip_prefix(first).and_then(|r| r.strip_suffix(last)) else { return false };
+    for p in &parts[1..parts.len() - 1] {
+        match rest.find(p) {
+            Some(i) => rest = &rest[i + p.len()..],
+            None => return false,
+        }
+    }
+    true
 }
 
 /// 同じ場所か(大文字小文字と末尾の区切りを無視する. Windowsのパスは大文字小文字を区別しないため)
@@ -400,6 +416,17 @@ mod tests {
         let box_ = t.push(Some(root), "Box", true, 0);
         t.push(Some(box_), "会議資料.xlsx", false, 0);
         t
+    }
+
+    #[test]
+    fn excludes_match_names_and_stars() {
+        let ex = Excludes::new(&["Node_Modules".into(), "*.tmp".into(), "~$*".into(), "a*b*c".into()]);
+        for n in ["node_modules", "x.TMP", "~$book.xlsx", "abc", "a1b2c", ".tmp"] {
+            assert!(ex.contains(n), "{n}");
+        }
+        for n in ["node_modules2", "x.tmp2", "book.xlsx", "ac", "a1c", "ab"] {
+            assert!(!ex.contains(n), "{n}");
+        }
     }
 
     #[test]

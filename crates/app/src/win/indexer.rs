@@ -566,11 +566,13 @@ fn box_loop(shared: Arc<Shared>, hwnd: Hwnd) {
 /// WSL: WSLの中で`find`して一覧をもらう(D4). `\\wsl.localhost`を走査するより速い
 fn wsl_scan(cfg: &Config) -> Option<FileTable> {
     let mut prune = String::new();
-    for (i, e) in cfg.wsl.exclude.iter().enumerate() {
+    for (i, e) in cfg.files.exclude.iter().enumerate() {
         if i > 0 {
             prune.push_str(" -o");
         }
-        prune.push_str(&format!(" -name '{}'", e.replace('\'', "")));
+        // `*`だけを特別な文字にする(Windowsの側と同じ. K44)
+        let pat: String = e.chars().filter(|c| *c != '\'').flat_map(|c| if "[]?\\".contains(c) { vec!['\\', c] } else { vec![c] }).collect();
+        prune.push_str(&format!(" -iname '{pat}'"));
     }
     let script = if prune.is_empty() {
         "echo \"$WSL_DISTRO_NAME\"; cd ~ && pwd && find . -mindepth 1 \\( -type d -printf 'd %P\\n' -o -printf 'f %P\\n' \\) 2>/dev/null".to_string()
@@ -623,7 +625,7 @@ fn wsl_loop(shared: Arc<Shared>, hwnd: Hwnd) {
         }
         let cfg = shared.config.lock().unwrap().clone();
         let has_wsl = super::system::wsl_installed();
-        if cfg.wsl.enabled && has_wsl {
+        if !cfg.prefix.wsl.trim().is_empty() && has_wsl {
             let t0 = Instant::now();
             let had = shared.tables.lock().unwrap()[SLOT_WSL].is_some();
             shared.set_status(SLOT_WSL, if had { "Updating the WSL list…".into() } else { "Reading WSL…".into() });
