@@ -45,23 +45,21 @@ jobs:
       - name: Package
         id: package
         run: |
-          name="Hikidashi-${{ steps.version.outputs.version }}"
-          mkdir -p "dist/$name"
-          cp target/x86_64-pc-windows-gnu/release/hikidashi.exe "dist/$name/Hikidashi.exe"
-          cp LICENSE "dist/$name/LICENSE.txt"
-          cp THIRD-PARTY-NOTICES.txt "dist/$name/"
+          # ZIPは1重で, 上にはexeだけが見えるようにする(K50)
+          mkdir -p dist/docs dist/data dist/licenses
+          cp target/x86_64-pc-windows-gnu/release/hikidashi.exe dist/Hikidashi.exe
           # トレイのManualはexeの隣のdocs/manual.htmlを開く(K46)
-          mkdir "dist/$name/docs"
-          cp docs/manual.html "dist/$name/docs/manual.html"
+          cp docs/manual.html dist/docs/manual.html
           # 辞書(GPL)はexeとは別のファイルとして同梱する(K35). bin/に置いたものを使う(tools/update-dict.sh)
-          cp bin/SKK-JISYO.L bin/SKK-JISYO.L-COPYING.txt "dist/$name/"
-          (cd dist && zip -r "$name.zip" "$name")
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "zip=dist/$name.zip" >> "$GITHUB_OUTPUT"
+          cp bin/SKK-JISYO.L dist/data/
+          cp LICENSE dist/licenses/Hikidashi.txt
+          cp THIRD-PARTY-NOTICES.txt dist/licenses/
+          cp bin/SKK-JISYO.L-COPYING.txt dist/licenses/
+          echo "name=Hikidashi-${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package.outputs.name }}
-          path: ${{ steps.package.outputs.zip }}
+          path: dist
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -74,11 +72,15 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Make ZIP
+        run: |
+          tag="${{ github.ref_name }}"
+          (cd dist && zip -r "../Hikidashi-${tag#v}.zip" .)
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/*.zip \
+          gh release create "${{ github.ref_name }}" Hikidashi-*.zip \
             --repo "${{ github.repository }}" \
             --title "Hikidashi ${{ github.ref_name }}" \
             --generate-notes
@@ -89,7 +91,7 @@ jobs:
       - name: Commit bin/Hikidashi.exe to main
         run: |
           mkdir -p repo/bin
-          unzip -o -j dist/*.zip '*/Hikidashi.exe' -d repo/bin
+          cp dist/Hikidashi.exe repo/bin/Hikidashi.exe
           cd repo
           if git diff --quiet -- bin/Hikidashi.exe && git ls-files --error-unmatch bin/Hikidashi.exe >/dev/null 2>&1; then
             echo "bin/Hikidashi.exe is up to date"

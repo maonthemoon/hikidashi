@@ -2,7 +2,7 @@
 //!
 //! 拡張の形:
 //! ```js
-//! export const meta = { title: "MIPI RFFE", keyword: "rffe", clipboard: true };
+//! export const meta = { title: "MIPI RFFE", keyword: "mipi", clipboard: true };
 //! export function search(query, ctx) { return [{ title: "…", subtitle: "…", copy: "…", url: "…", fill: "…" }]; }
 //! ```
 //! `rquickjs`の`Runtime`はスレッドをまたげないので, 専用のスレッドを1本立ててその中で全部行う.

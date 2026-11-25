@@ -72,3 +72,37 @@ pub fn start(hwnd: HWND) {
         })
         .ok();
 }
+
+/// 落ちたとき(メモリの誤りなど. Rustのパニックではないもの)に, 理由と場所をログに書く(K50)
+pub fn log_crashes() {
+    use windows::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter;
+    unsafe {
+        SetUnhandledExceptionFilter(Some(on_crash));
+    }
+}
+
+unsafe extern "system" fn on_crash(info: *const windows::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS) -> i32 {
+    use windows::core::PCWSTR;
+    use windows::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT};
+    if let Some(rec) = info.as_ref().and_then(|i| i.ExceptionRecord.as_ref()) {
+        let addr = rec.ExceptionAddress as usize;
+        let mut h = windows::Win32::Foundation::HMODULE::default();
+        let mut name = String::new();
+        if GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, PCWSTR(addr as *const u16), &mut h).is_ok() {
+            let mut buf = [0u16; 260];
+            let n = GetModuleFileNameW(Some(h), &mut buf) as usize;
+            // フォルダーは書かない(ユーザー名が入るため)
+            name = String::from_utf16_lossy(&buf[..n]).rsplit('\\').next().unwrap_or("").to_string();
+        }
+        let doing = DOING.try_lock().map(|d| d.clone()).unwrap_or_default();
+        super::storage::log(&format!(
+            "crash: code 0x{:08X} at {}+0x{:X} (thread: {}, doing: {doing})",
+            rec.ExceptionCode.0 as u32,
+            name,
+            addr.wrapping_sub(h.0 as usize),
+            std::thread::current().name().unwrap_or("?")
+        ));
+    }
+    // あとはWindowsに任せる(いつもどおり終わる)
+    0
+}

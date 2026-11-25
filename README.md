@@ -38,7 +38,7 @@ Windowsのスタートメニューの検索や, PowerToys Runなどのランチ�
 - **見つからなければChatGPT**: 一致がなければ, 打った文字をChatGPTに送ります. 一致があっても`Ctrl+Enter`でChatGPT. Google検索は`g `のあとに打つか`Ctrl+Alt+Enter`.
 - **クリップボードの履歴**: `cb `で, コピーした文字とファイルを探して貼ります(メモリの中だけ).
 - **選択した文字で開く**: 文字を選んで`Ctrl+Alt+Space`で, その文字を入れて窓を出します.
-- **ファイルを条件で絞る**: `ext:pdf`, `in:案件`, `modified:7d`.
+- **ファイルを条件で絞る**: `*.pdf`, `見積*`, `ext:docx,xlsx`, `in:案件`, `modified:7d`.
 - **スクリプトと拡張**: フォルダーに置いたPowerShellなどのスクリプトやJavaScriptの拡張を, 一覧から使えます. `Hikidashi.exe --query "文字"`でほかのアプリからも開けます.
 - **WSLとkill**: `w `でWSLのホームのファイルを探し, `k `でプロセスをすぐ終わらせます.
 - **計算**: 16進数と2進数, dBmとW, VSWR, リアクタンス, MIPI RFFEなど. `=`と空白で計算のモードに入ります.
@@ -51,7 +51,7 @@ Windowsのスタートメニューの検索や, PowerToys Runなどのランチ�
 3. ホットキーを聞かれたら, 使いたいキー(例: `Alt+Space`)を押します. 次に, Windowsと一緒に起動するかを聞かれます.
 4. ホットキーを押して, 名前の一部を打ち, `Enter`で開きます.
 
-ZIPの中は, `Hikidashi.exe`, ローマ字で日本語の名前を探すための辞書`SKK-JISYO.L`とそのライセンス, `LICENSE.txt`, `THIRD-PARTY-NOTICES.txt`, `docs\manual.html`(マニュアル)です. インストーラーも管理者権限も要りません.
+ZIPの中は, `Hikidashi.exe`と3つのフォルダーです: `docs`(マニュアル), `data`(ローマ字で日本語の名前を探すための辞書), `licenses`(ライセンス). フォルダーごと置いてください. インストーラーも管理者権限も要りません.
 
 - 「スマート アプリ コントロールが安全でない可能性のあるアプリをブロックしました」と出たら, Windowsセキュリティ →「アプリとブラウザーコントロール」→「スマートアプリコントロールの設定」で「オフ」にします. 署名のないexeは個別に許可できません.
 
@@ -76,7 +76,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 
 | キー | 起きること |
 |---|---|
-| ホットキー | 窓を出す. もう一度押すと隠れる. 前回の入力が全選択で残る |
+| ホットキー | 窓を出す. もう一度押すと隠れる. 前回の入力が全選択で残る. 打ち始めると, 左の印は外れる |
 | `Enter` | 選んだ行を開く. 一致がなければChatGPTに聞く |
 | `Shift+Enter` | 改行して長い質問を書く窓にする. 見出しや太字を整えて見せ, `Enter`でChatGPTに送る |
 | `Ctrl+Enter` | 一致があっても, 打った文字をChatGPTに聞く |
@@ -108,7 +108,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 
 ### 計算
 
-`=`と空白を打つと計算のモードになります. 進数は, 打った進数以外の2つを出します: `0x1F`(16進数), `0b111011`(2進数), `1187`(10進数). RFは, `10dBm`(Wと50Ωでの電圧), `100mW`(dBm), `3dB`, `x2`, `vswr 1.5`, `rl 20`, `vswr 10 il 2dB`(損失を通して入力から見たVSWR), `10nH@2.4G`, `1pF@100M`, `10nH 1pF`(共振周波数). MIPI RFFEは, ビット列をそのまま打つとモード, SA, アドレス, データに, `rffe w 6 1C 38`のように打つとビット列になります(`rffe`で例が出ます). `Enter`で結果をコピーします.
+`=`と空白を打つと計算のモードになります. 進数は, 打った進数以外の2つを出します: `0x1F`(16進数), `0b111011`(2進数), `1187`(10進数). RFは, `10dBm`(Wと50Ωでの電圧), `100mW`(dBm), `3dB`, `x2`, `vswr 1.5`, `rl 20`, `vswr 10 il 2dB`(損失を通して入力から見たVSWR), `10nH@2.4G`, `1pF@100M`, `10nH 1pF`(共振周波数). MIPI RFFEは, ビット列をそのまま打つとモード, SA, アドレス, データに, `mipi w 6 1C 38`のように打つとビット列になります(`mipi`で例が出ます). `Enter`で結果をコピーします.
 
 ### タスクトレイ
 
@@ -148,7 +148,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 - **マニュアル**: `docs/manual.html`(1つのHTML). トレイの`Manual`で開きます. ZIPにも`docs\manual.html`として入れます. 書体も埋め込み, 開いてもWebを見にいきません(`tools/embed-fonts.py`). 元のファイルは開発用の文書と一緒に置いていて, このリポジトリには入っていません.
 - **アイコン**: `uv run tools/make-icon.py`で`assets/hikidashi.ico`を作り直します.
 - **紹介のページ**: GitHub Pagesのトップ(`docs/index.html`)は, 窓をHTMLで作り直した動くデモのページです. `./tools/build-manual.sh`でマニュアル(`docs/manual.html`)と一緒に作ります. デモの元は紹介のページとマニュアルで同じです. READMEの動く画像は, `uv run tools/make-demo.py`でそのデモを`docs/images/demo-*.webp`に書き出します(ライトとダーク, 広い幅と狭い幅の4枚. Playwrightのchromiumを使う).
-- **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, 別のファイルとして`bin/`に置き, ZIPにも入れます. 新しくするときは`./tools/update-dict.sh`で[skk-dev/dict](https://github.com/skk-dev/dict)から取ってきてcommitします. exeの隣に辞書がなければ, 起動したときにネットから取ってきます.
+- **辞書**: ローマ字で日本語を探すための辞書(SKK-JISYO.L)はGPLなので, exeには入れず, 別のファイルとして`bin/`に置き, ZIPにも入れます. 新しくするときは`./tools/update-dict.sh`で[skk-dev/dict](https://github.com/skk-dev/dict)から取ってきてcommitします. exeの隣(ZIPでは`data`フォルダー)に辞書がなければ, 起動したときにネットから取ってきます.
 
 ## ライセンス
 

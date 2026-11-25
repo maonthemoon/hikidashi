@@ -52,6 +52,8 @@ struct Decos {
     /// 最後の行など, 次の行から高さを測れないときの1行の高さ(ピクセル)
     line_h: i32,
     dpi: u32,
+    /// 字の位置を聞く(行の高さを推定しないため. K50)
+    doc: Option<ITextDocument>,
     /// 整えたときの文字の数とカーソル. 変換中など, 整える前に文字が増減したら, カーソルより後ろの絵をその分ずらす
     len: usize,
     at: usize,
@@ -374,7 +376,7 @@ impl Compose {
         let line_h = m.line_h();
         drop(m);
         let dpi = self.dpi;
-        DECOS.with(|d| *d.borrow_mut() = Decos { items: decos, line_h, dpi, len: text.encode_utf16().count(), at: s0 });
+        DECOS.with(|d| *d.borrow_mut() = Decos { items: decos, line_h, dpi, doc: self.doc.clone(), len: text.encode_utf16().count(), at: s0 });
         unsafe {
             let _ = InvalidateRect(Some(h), None, true);
         }
@@ -556,6 +558,17 @@ fn pos(hwnd: HWND, i: usize) -> (i32, i32) {
     (p.x, p.y)
 }
 
+/// その字の下端の線(ベースライン)の高さ. 聞けなければNone
+fn baseline(doc: &Option<ITextDocument>, i: usize) -> Option<i32> {
+    let kind = tomConstants(tomStart.0 | tomClientCoord.0 | tomAllowOffClient.0 | TA_BASELINE.0 as i32);
+    unsafe {
+        let r = doc.as_ref()?.Range(i as i32, i as i32 + 1).ok()?;
+        let (mut x, mut y) = (0i32, 0i32);
+        r.GetPoint(kind, &mut x, &mut y).ok()?;
+        Some(y)
+    }
+}
+
 /// 中の文字の数(段落の区切りは1つ)
 fn text_len(hwnd: HWND) -> usize {
     let g = GETTEXTLENGTHEX { flags: GTL_PRECISE | GTL_NUMCHARS, codepage: 1200 };
@@ -599,9 +612,14 @@ pub fn paint_decos(hwnd: HWND) {
             let _ = HideCaret(Some(hwnd));
             let mut client = RECT::default();
             let _ = GetClientRect(hwnd, &mut client);
+            // RichEditのDCは親の窓まで描けてしまう(CS_PARENTDC)ので, 入力欄の中に限る(K50)
+            let saved = SaveDC(dc);
+            let _ = IntersectClipRect(dc, client.left, client.top, client.right, client.bottom);
             let visible = |top: i32, bottom: i32| bottom >= client.top && top <= client.bottom;
             let diff = text_len(hwnd) as isize - d.len as isize;
             let sh = |i: usize| if i > d.at { (i as isize + diff).max(0) as usize } else { i };
+            // 字の真ん中の高さ. 行の高さは, 最後の行では測れず改行の前後で変わるので, 字の下端の線から決める
+            let mid = |i: usize| baseline(&d.doc, i).map(|b| b - s(BODY_PX as f32 * 0.36));
             for item in &d.items {
                 let item = match *item {
                     Deco::Dot(i) => Deco::Dot(sh(i)),
@@ -619,7 +637,7 @@ pub fn paint_decos(hwnd: HWND) {
                         }
                         // Obsidianの「•」は本文の字の0.3倍ほどの丸
                         let r = s(BODY_PX as f32 * 0.15);
-                        let (cx, cy) = ((x0 + x1) / 2, y + h / 2);
+                        let (cx, cy) = ((x0 + x1) / 2, mid(i).unwrap_or(y + h / 2));
                         let br = CreateSolidBrush(rgb(pal().text_tertiary));
                         let pen = CreatePen(PS_SOLID, 1, rgb(pal().text_tertiary));
                         let ob = SelectObject(dc, br.into());
@@ -634,6 +652,11 @@ pub fn paint_decos(hwnd: HWND) {
                         let (x, top) = (pos(hwnd, i).0, pos(hwnd, from).1);
                         let last = pos(hwnd, to).1;
                         let bottom = last + line_h(hwnd, to, d.line_h);
+                        // 最後の行の高さは推定なので, 字の下端から少し下までにする
+                        let bottom = match baseline(&d.doc, i) {
+                            Some(b) if last == top && text_len(hwnd) <= to => b + s(BODY_PX as f32 * 0.4),
+                            _ => bottom,
+                        };
                         if !visible(top, bottom) {
                             continue;
                         }
@@ -648,7 +671,7 @@ pub fn paint_decos(hwnd: HWND) {
                         }
                         let size = s(BODY_PX as f32 * 0.8).min((x1 - x0).max(s(10.0)));
                         // 左端を, 引用の縦線や「•」の行の頭にそろえる
-                        let (l, t) = (x0 + s(1.0), y + (h - size) / 2);
+                        let (l, t) = (x0 + s(1.0), mid(i).map_or(y + (h - size) / 2, |m| m - size / 2));
                         let rr = s(3.0);
                         let (fillc, edge) = if done { (pal().accent, pal().accent) } else { (pal().bg, pal().text_tertiary) };
                         let br = CreateSolidBrush(rgb(fillc));
@@ -685,6 +708,7 @@ pub fn paint_decos(hwnd: HWND) {
                     }
                 }
             }
+            let _ = RestoreDC(dc, saved);
             let _ = ShowCaret(Some(hwnd));
             ReleaseDC(Some(hwnd), dc);
         }

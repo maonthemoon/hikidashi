@@ -138,6 +138,9 @@ impl FileTable {
             if !f.exts.is_empty() && (fl & FLAG_DIR != 0 || !f.exts.iter().any(|e| lower.ends_with(e.as_str()))) {
                 continue;
             }
+            if !f.globs.iter().all(|g| glob(g, lower)) {
+                continue;
+            }
             if p.is_empty() {
                 // 検索語がなく絞り込みだけのとき: 更新が新しい順
                 if self.in_ok(id, f) {
@@ -223,13 +226,15 @@ pub struct Filters {
     pub exts: Vec<String>,
     /// パスの途中にあるフォルダー名の部分(小文字). すべてについて, 含む親のフォルダーがあること
     pub dirs: Vec<String>,
+    /// `*`を含む名前の形(小文字. `*.pdf`). すべてに合うこと(K50)
+    pub globs: Vec<String>,
     /// 更新が今から何秒以内か
     pub modified_secs: Option<u64>,
 }
 
 impl Filters {
     pub fn is_empty(&self) -> bool {
-        self.exts.is_empty() && self.dirs.is_empty() && self.modified_secs.is_none()
+        self.exts.is_empty() && self.dirs.is_empty() && self.globs.is_empty() && self.modified_secs.is_none()
     }
 }
 
@@ -246,7 +251,7 @@ fn parse_age(v: &str) -> Option<u64> {
     Some(n.saturating_mul(mul))
 }
 
-/// 入力から`ext:`, `in:`, `modified:`の語を取り出す. 返すのは(残りの検索語, 絞り込み).
+/// 入力から`ext:`, `in:`, `modified:`の語と, `*`を含む語(`*.pdf`)を取り出す. 返すのは(残りの検索語, 絞り込み).
 /// 値が空(`ext:`だけ)や読めない値(`modified:abc`)の語は絞り込みにせず, 普通の語として残す.
 pub fn parse_filters(input: &str) -> (String, Filters) {
     let mut f = Filters::default();
@@ -269,6 +274,9 @@ pub fn parse_filters(input: &str) -> (String, Filters) {
                 f.modified_secs = Some(s);
                 continue;
             }
+        } else if lw.contains('*') && lw.chars().any(|c| c != '*') {
+            f.globs.push(lw);
+            continue;
         }
         rest.push(w);
     }
@@ -548,6 +556,21 @@ mod tests {
         assert_eq!(names(&t, "memo ext:docx"), vec!["memo.docx"]);
         assert!(names(&t, "memo ext:pdf").is_empty());
         assert_eq!(names(&t, "ext:docx,gz").len(), 2);
+    }
+
+    #[test]
+    fn filter_by_glob() {
+        let t = filter_table();
+        let mut v = names(&t, "*.PDF");
+        v.sort();
+        assert_eq!(v, vec!["notes.pdf", "report.pdf", "見積.PDF", "見積.pdf"]);
+        assert_eq!(names(&t, "re*.pdf"), vec!["report.pdf"]);
+        assert_eq!(names(&t, "見積* in:reports"), vec!["見積.pdf"]);
+        assert_eq!(names(&t, "*port*.pdf"), vec!["report.pdf"]);
+        assert!(names(&t, "*.pdf memo").is_empty());
+        // `*`だけは絞り込みにしない
+        assert!(parse_filters("*").1.is_empty());
+        assert!(parse_filters("2 ** 3").1.is_empty());
     }
 
     #[test]

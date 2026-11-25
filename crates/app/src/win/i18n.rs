@@ -85,7 +85,6 @@ fn table() -> &'static Table {
 const PAIRS: &[(&str, &str)] = &[
     // 区分と見出し
     ("General", "全般"),
-    ("Keys", "キー"),
     ("Keywords", "キーワード"),
     ("Search", "検索"),
     ("Apps", "アプリ"),
@@ -109,6 +108,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("Dark", "ダーク"),
     // キー
     ("Hotkeys", "ホットキー"),
+    ("Show the window", "窓を出す"),
     ("Open Hikidashi", "Hikidashiを開く"),
     ("Works in any app", "どのアプリからでも開きます"),
     ("Open with selected text", "選択した文字で開く"),

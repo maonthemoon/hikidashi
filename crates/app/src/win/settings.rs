@@ -120,7 +120,7 @@ const E_APP: i32 = 16;
 const E_APPS: i32 = 17;
 const E_BROWSE: i32 = 18;
 
-const SECTIONS: [&str; 8] = ["General", "Keys", "Keywords", "Search", "Apps", "Tab menu", "Web", "Aliases"];
+const SECTIONS: [&str; 8] = ["General", "Hotkeys", "Keywords", "Search", "Apps", "Tab menu", "Web", "Aliases"];
 const PREFIX_LABELS: [&str; 10] = ["Apps", "Files", "Bookmarks", "End a process", "WSL", "Box", "Google", "ChatGPT", "Clipboard history", "Calculator"];
 /// キーワードのあとに打つ文字の例
 const PREFIX_EXAMPLES: [&str; 10] = ["power", "report", "news", "excel", "report", "design", "weather", "question", "memo", "12*3"];
@@ -1129,8 +1129,8 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
     // Keys
     {
         let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
-        p.title("Keys");
-        p.group("Hotkeys", "");
+        p.title("Hotkeys");
+        p.group("Show the window", "");
         p.card();
         let hk = if a.hotkey.is_empty() { "Not set" } else { a.hotkey.as_str() };
         p.hotkey(ID_HOTKEY, "Open Hikidashi", "Works in any app", hk, ID_HOTKEY_CHANGE, None);

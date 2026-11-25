@@ -38,8 +38,10 @@ pub fn start(hwnd: HWND, shared: Arc<Shared>, dict: Arc<OnceLock<Dict>>) {
 fn prepare(shared: &Shared) -> Option<Dict> {
     let p = path();
     // exeの隣(同梱したもの), 前に取ってきたものの順に読む
-    let beside = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join(FILE_NAME)));
-    for cand in beside.into_iter().chain(std::iter::once(p.clone())) {
+    // ZIPでは`data`の中, リポジトリの`bin`ではexeの隣(K50)
+    let dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf()));
+    let beside = dir.into_iter().flat_map(|d| [d.join("data").join(FILE_NAME), d.join(FILE_NAME)]);
+    for cand in beside.chain(std::iter::once(p.clone())) {
         let Ok(bytes) = std::fs::read(&cand) else { continue };
         match load(&bytes) {
             Ok(d) => {

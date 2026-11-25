@@ -1301,7 +1301,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         { type: "vswr 1.5", rows: (q) => (q === "vswr 1.5" ? [calc("13.98 dB", "Return loss"), calc("0.200", "|Γ| reflection coefficient"), calc("4.00 %", "Reflected power"), calc("0.1773 dB", "Mismatch loss")] : CALC_NONE) }, { clear: true },
         { type: "10nH 2.4G", rows: (q) => (q === "10nH 2.4G" ? [calc("0.4398 pF", "Capacitance C = 1/(ω²L) for resonance")] : CALC_NONE) }, { clear: true },
         { type: "0110010111001001110000", fast: true, rows: (q) => (q.length >= 22 ? [calc("Register Write", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000 · parity OK"), calc("SA 0x6", "Slave address · 0110"), calc("Address 0x1C PM_TRIG", "11100"), calc("Data 0x38", "00111000 · Active, mask 111, trig 000"), calc("Parity OK", "Odd parity · cmd OK · data OK")] : q.length >= 13 ? [calc("Register Write", `Not enough bits (${q.length})`)] : CALC_NONE) }, { clear: true },
-        { type: "rffe w 6 1C 38", fast: true, rows: (q) => (q === "rffe w 6 1C 38" ? [calc("0110 010 11100 1 00111000 0", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000")] : CALC_NONE) }, { key: "Enter" },
+        { type: "mipi w 6 1C 38", fast: true, rows: (q) => (q === "mipi w 6 1C 38" ? [calc("0110 010 11100 1 00111000 0", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000")] : CALC_NONE) }, { key: "Enter" },
       ],
     },
   ];

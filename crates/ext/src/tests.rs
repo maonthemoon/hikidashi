@@ -9,7 +9,7 @@ fn tmpdir(tag: &str) -> PathBuf {
     d
 }
 
-fn rffe_host() -> ExtHost {
+fn mipi_host() -> ExtHost {
     ExtHost::start(vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extensions")])
 }
 
@@ -25,22 +25,22 @@ fn next_gen() -> u64 {
 
 #[test]
 fn 見本の拡張を読んで行が返る() {
-    let h = rffe_host();
+    let h = mipi_host();
     assert!(h.errors().is_empty(), "{:?}", h.errors());
     let l = h.list();
     assert_eq!(l.len(), 1);
-    assert_eq!(l[0].keyword, "rffe");
+    assert_eq!(l[0].keyword, "mipi");
     assert_eq!(l[0].title, "MIPI RFFE");
     assert!(l[0].clipboard);
-    let rows = run(&h, "rffe", "6 1C 38", None);
+    let rows = run(&h, "mipi", "6 1C 38", None);
     assert_eq!(rows[0].title, "0110 010 11100 1 00111000 0");
     assert_eq!(rows[0].subtitle, "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000");
     assert_eq!(rows[0].copy, "0110010111001001110000");
 }
 
 #[test]
-fn rffeの値とビット列とパリティ() {
-    let h = rffe_host();
+fn mipiの値とビット列とパリティ() {
+    let h = mipi_host();
     let cases = [
         (0x38, "Active, mask 111, trig 000"),
         (0x80, "Low Power, mask 000, trig 000"),
@@ -52,11 +52,11 @@ fn rffeの値とビット列とパリティ() {
         (0x00, "Active, mask 000, trig 000"),
     ];
     for (d, text) in cases {
-        let rows = run(&h, "rffe", &format!("6 0x1C {:X}", d), None);
+        let rows = run(&h, "mipi", &format!("6 0x1C {:X}", d), None);
         let want = format!("SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x{:02X} · {}", d, text);
         assert_eq!(rows[0].subtitle, want);
         // 値から作ったビット列を読み解くとパリティが合う
-        let back = run(&h, "rffe", &rows[0].copy, None);
+        let back = run(&h, "mipi", &rows[0].copy, None);
         assert_eq!(back[0].subtitle, format!("{} · parity OK", want));
         assert_eq!(back[0].title, "Register Write");
         assert_eq!(back[1].title, "SA 0x6");
@@ -67,55 +67,55 @@ fn rffeの値とビット列とパリティ() {
         assert_eq!(back[5].copy, rows[0].copy);
         // 末尾のBPの0とスペース, _は無視
         let spaced = format!("{} 0", rows[0].title.replace(' ', "_"));
-        let back2 = run(&h, "rffe", &spaced, None);
+        let back2 = run(&h, "mipi", &spaced, None);
         assert_eq!(back2[0].subtitle, format!("{} · parity OK", want));
     }
     // パリティが違えばNG
-    let rows = run(&h, "rffe", "0110010111001001110001", None);
+    let rows = run(&h, "mipi", "0110010111001001110001", None);
     assert!(rows[0].subtitle.ends_with("parity NG"), "{}", rows[0].subtitle);
 }
 
 #[test]
-fn rffeのほかの形() {
-    let h = rffe_host();
+fn mipiのほかの形() {
+    let h = mipi_host();
     // Register 0 Write
-    let r = run(&h, "rffe", "6 38", None);
+    let r = run(&h, "mipi", "6 38", None);
     assert_eq!(r[0].title, "0110 10111000 1");
     assert!(r[0].subtitle.contains("Register 0 Write"), "{}", r[0].subtitle);
-    let back = run(&h, "rffe", &r[0].copy, None);
+    let back = run(&h, "mipi", &r[0].copy, None);
     assert!(back[0].subtitle.ends_with("0x38 · parity OK"), "{}", back[0].subtitle);
     // Extended Register Write
-    let r = run(&h, "rffe", "6 1C 123", None);
+    let r = run(&h, "mipi", "6 1C 123", None);
     assert!(r[0].subtitle.contains("Extended Register Write · 2 bytes"), "{}", r[0].subtitle);
-    let back = run(&h, "rffe", &r[0].copy, None);
+    let back = run(&h, "mipi", &r[0].copy, None);
     assert!(back[0].subtitle.ends_with("← 0x01 0x23 · parity OK"), "{}", back[0].subtitle);
-    let r = run(&h, "rffe", "6 40 12", None);
+    let r = run(&h, "mipi", "6 40 12", None);
     assert!(r[0].subtitle.contains("Extended Register Write · 1 byte ·"), "{}", r[0].subtitle);
     // Long
-    let r = run(&h, "rffe", "6 1234 AB", None);
-    let back = run(&h, "rffe", &r[0].copy, None);
+    let r = run(&h, "mipi", "6 1234 AB", None);
+    let back = run(&h, "mipi", &r[0].copy, None);
     assert!(back[0].subtitle.contains("Write Long · 1 byte · 0x1234 ← 0xAB · parity OK"), "{}", back[0].subtitle);
     // Register Read(データなし)
-    let back = run(&h, "rffe", "0110011111001", None);
+    let back = run(&h, "mipi", "0110011111001", None);
     assert!(back[0].subtitle.contains("Register Read · 0x1C PM_TRIG"), "{}", back[0].subtitle);
     // 分からないコマンド
-    let back = run(&h, "rffe", "011000010000000000", None);
+    let back = run(&h, "mipi", "011000010000000000", None);
     assert!(back[0].subtitle.contains("unknown command"), "{}", back[0].subtitle);
     // 使い方(Enterで入力欄に入る)
-    let r = run(&h, "rffe", "", None);
+    let r = run(&h, "mipi", "", None);
     assert_eq!(r.len(), 8);
-    assert_eq!(r[1].fill.as_deref(), Some("rffe w 6 1C 38"));
+    assert_eq!(r[1].fill.as_deref(), Some("mipi w 6 1C 38"));
     // 使い方の例は, どれも読める
     for row in &r {
-        let q = row.fill.as_deref().unwrap().strip_prefix("rffe ").unwrap();
-        let rows = run(&h, "rffe", q, None);
+        let q = row.fill.as_deref().unwrap().strip_prefix("mipi ").unwrap();
+        let rows = run(&h, "mipi", q, None);
         assert!(rows.iter().all(|x| !x.title.is_empty() && x.fill.is_none()), "{q}: {rows:?}");
     }
 }
 
 #[test]
-fn rffeのモード() {
-    let h = rffe_host();
+fn mipiのモード() {
+    let h = mipi_host();
     // モードを書いて作り, ビット列を読み解くと同じモードになる
     for (q, mode, addr) in [
         ("w 6 1C 38", "Register Write", "Address 0x1C PM_TRIG"),
@@ -127,24 +127,24 @@ fn rffeのモード() {
         ("w0 6 38", "Register 0 Write", "Address 0x00"),
         ("WRITE 0x6 0x1C 0x38", "Register Write", "Address 0x1C PM_TRIG"),
     ] {
-        let r = run(&h, "rffe", q, None);
+        let r = run(&h, "mipi", q, None);
         assert!(r[0].subtitle.contains(mode), "{q}: {r:?}");
-        let back = run(&h, "rffe", &r[0].copy, None);
+        let back = run(&h, "mipi", &r[0].copy, None);
         assert_eq!(back[0].title, mode, "{q}");
         assert_eq!(back[2].title, addr, "{q}");
         assert!(back.iter().any(|x| x.title == "Parity OK"), "{q}: {back:?}");
     }
     // モードを書かなければ, 使えるものを全部
-    let t = |q: &str| run(&h, "rffe", q, None).into_iter().map(|r| r.subtitle).collect::<Vec<_>>();
+    let t = |q: &str| run(&h, "mipi", q, None).into_iter().map(|r| r.subtitle).collect::<Vec<_>>();
     let v = t("6 1C 38");
     assert_eq!(v.len(), 3);
     assert!(v[0].contains("Register Write ·") && v[1].contains("Extended Register Write ·") && v[2].contains("Write Long"), "{v:?}");
     let v = t("6 1C");
     assert!(v[0].contains("Register Read") && v[1].contains("Register 0 Write") && v.len() == 4, "{v:?}");
     // 足りない, 範囲の外
-    assert!(run(&h, "rffe", "w", None)[0].title.contains("SA ADDRESS DATA"));
-    assert!(run(&h, "rffe", "w 6 40 12", None)[0].title.contains("up to 0x1F"));
-    assert!(run(&h, "rffe", "w 16 1C 38", None)[0].title.contains("SA is"));
+    assert!(run(&h, "mipi", "w", None)[0].title.contains("SA ADDRESS DATA"));
+    assert!(run(&h, "mipi", "w 6 40 12", None)[0].title.contains("up to 0x1F"));
+    assert!(run(&h, "mipi", "w 16 1C 38", None)[0].title.contains("SA is"));
 }
 
 fn frame_rows(byte: u8) -> Vec<u8> {
@@ -156,8 +156,8 @@ fn frame_rows(byte: u8) -> Vec<u8> {
 }
 
 #[test]
-fn rffeの表を読む() {
-    let h = rffe_host();
+fn mipiの表を読む() {
+    let h = mipi_host();
     let a = frame_rows(0x38);
     let b = frame_rows(0x80);
     let mut t = String::from("Label\tSCLK\tACTIVE\tLOW_POW\tEmpty\n");
@@ -171,7 +171,7 @@ fn rffeの表を読む() {
     for _ in 0..2 {
         t += "x\t0\t0\t0\t0\n";
     }
-    let rows = run(&h, "rffe", "", Some(&t));
+    let rows = run(&h, "mipi", "", Some(&t));
     assert_eq!(rows.len(), 3, "{:?}", rows);
     assert_eq!(rows[0].title, "ACTIVE");
     assert_eq!(rows[0].subtitle, "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000 · parity OK");
@@ -181,15 +181,15 @@ fn rffeの表を読む() {
     assert_eq!(rows[2].subtitle, "No command");
     // 見出しだけ大文字小文字が違っても読む. SSCがない列, ビットが足りない列
     let t2 = "sclk\tA\tB\n0\t1\t0\n1\t1\t0\n0\t1\t0\n1\t1\t0\n";
-    let rows = run(&h, "rffe", "", Some(t2));
+    let rows = run(&h, "mipi", "", Some(t2));
     assert!(rows[0].subtitle.contains("SSC not found"), "{:?}", rows);
     assert_eq!(rows[1].subtitle, "No command");
     let t3 = "SCLK\tA\n0\t1\n0\t0\n1\t0\n0\t0\n1\t1\n0\t1\n";
-    let rows = run(&h, "rffe", "", Some(t3));
+    let rows = run(&h, "mipi", "", Some(t3));
     assert!(rows[0].subtitle.contains("Not enough bits"), "{:?}", rows);
     // 表でないクリップボードは使い方
-    let rows = run(&h, "rffe", "", Some("hello"));
-    assert_eq!(rows[1].fill.as_deref(), Some("rffe w 6 1C 38"));
+    let rows = run(&h, "mipi", "", Some("hello"));
+    assert_eq!(rows[1].fill.as_deref(), Some("mipi w 6 1C 38"));
 }
 
 #[test]
@@ -324,27 +324,27 @@ fn 溜まった古い要求は捨てて最新だけ実行する() {
 
 #[test]
 fn コマンドフレームのパリティはsaを含む() {
-    let h = rffe_host();
+    let h = mipi_host();
     // SA 0x7(1が3つ): 12ビット中の1は7個なのでパリティ0
-    let r = run(&h, "rffe", "7 1C 38", None);
+    let r = run(&h, "mipi", "7 1C 38", None);
     assert_eq!(r[0].title, "0111 010 11100 0 00111000 0");
-    let back = run(&h, "rffe", &r[0].copy, None);
+    let back = run(&h, "mipi", &r[0].copy, None);
     assert!(back[0].subtitle.ends_with("parity OK"), "{}", back[0].subtitle);
     // SAを除いた計算(パリティ1)のものはNG
-    let bad = run(&h, "rffe", "0111010111001001110000", None);
+    let bad = run(&h, "mipi", "0111010111001001110000", None);
     assert!(bad[0].subtitle.ends_with("parity NG"), "{}", bad[0].subtitle);
     // Register 0 Write: 0111 1 0111000 -> 1は7個 -> 0
-    let r = run(&h, "rffe", "7 38", None);
+    let r = run(&h, "mipi", "7 38", None);
     assert_eq!(r[0].title, "0111 10111000 0");
-    assert!(run(&h, "rffe", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
+    assert!(run(&h, "mipi", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
     // Extended: 0111 0000 0000 -> 1は3個 -> 0
-    let r = run(&h, "rffe", "7 40 12", None);
+    let r = run(&h, "mipi", "7 40 12", None);
     assert!(r[0].title.starts_with("0111 00000000 0 "), "{}", r[0].title);
-    assert!(run(&h, "rffe", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
+    assert!(run(&h, "mipi", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
     // Long: 0111 00110000 -> 1は5個 -> 0
-    let r = run(&h, "rffe", "7 1234 AB", None);
+    let r = run(&h, "mipi", "7 1234 AB", None);
     assert!(r[0].title.starts_with("0111 00110000 0 "), "{}", r[0].title);
-    assert!(run(&h, "rffe", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
+    assert!(run(&h, "mipi", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
 }
 
 #[test]
@@ -373,8 +373,8 @@ fn 計算のモードで使えるかはmetaで決まる() {
     let d = tmpdir("calcmeta");
     fs::write(d.join("a.js"), "export const meta={keyword:'a',calc:true}; export function search(){return []}").unwrap();
     fs::write(d.join("b.js"), "export const meta={keyword:'b'}; export function search(){return []}").unwrap();
-    fs::write(d.join("rffe.js"), include_str!("../../../extensions/rffe.js")).unwrap();
+    fs::write(d.join("mipi.js"), include_str!("../../../extensions/mipi.js")).unwrap();
     let h = ExtHost::start(vec![d]);
     let v: Vec<(String, bool)> = h.list().into_iter().map(|m| (m.keyword, m.calc)).collect();
-    assert_eq!(v, vec![("a".into(), true), ("b".into(), false), ("rffe".into(), true)]);
+    assert_eq!(v, vec![("a".into(), true), ("b".into(), false), ("mipi".into(), true)]);
 }

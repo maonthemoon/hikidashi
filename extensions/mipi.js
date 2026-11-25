@@ -1,10 +1,10 @@
 // MIPI RFFEのコマンドフレームを読み解く見本の拡張(規格の読み解きだけ).
 // 計算のモード(`= `)の中でも, ふだんの検索でも使える. 計算のモードでは, ビット列はそのまま打ってよい.
-//   rffe 0110010111001001110000   ビット列 -> モード, SA, アドレス, データ, パリティ
-//   rffe w 6 1C 38                モード, SA, アドレス, データ(16進) -> ビット列
-//   rffe 6 1C 38                  モードを書かなければ, 使えるモードを全部出す
-//   rffe (クリップボードにExcelの表)  SCLKの列とデータの列から読み取る
-export const meta = { title: "MIPI RFFE", keyword: "rffe", clipboard: true, calc: true, calcBits: 13 };
+//   mipi 0110010111001001110000   ビット列 -> モード, SA, アドレス, データ, パリティ
+//   mipi w 6 1C 38                モード, SA, アドレス, データ(16進) -> ビット列
+//   mipi 6 1C 38                  モードを書かなければ, 使えるモードを全部出す
+//   mipi (クリップボードにExcelの表)  SCLKの列とデータの列から読み取る
+export const meta = { title: "MIPI RFFE", keyword: "mipi", clipboard: true, calc: true, calcBits: 13 };
 
 const REG_NAMES = { 0x1c: "PM_TRIG", 0x1d: "PRODUCT_ID", 0x1e: "MANUFACTURER_ID", 0x1f: "MAN_USID" };
 const PWR_MODES = ["Active", "Startup", "Low Power", "Reserved"];
@@ -215,9 +215,9 @@ function fromValues(tokens) {
   const first = tokens[0].toLowerCase();
   const mode = MODES.find((m) => m.names.includes(first));
   const vals = (mode ? tokens.slice(1) : tokens).map(parseHex);
-  const usage = mode ? { title: `${mode.key} ${mode.args}`, subtitle: `${mode.title} · Example: ${mode.ex} (hex)`, fill: "rffe " + mode.ex } : null;
+  const usage = mode ? { title: `${mode.key} ${mode.args}`, subtitle: `${mode.title} · Example: ${mode.ex} (hex)`, fill: "mipi " + mode.ex } : null;
   if (mode && !vals.length) return [usage];
-  if (vals.some((v) => !v)) return [{ title: "Type hex values", subtitle: "Example: rffe w 6 1C 38", fill: "rffe w 6 1C 38" }];
+  if (vals.some((v) => !v)) return [{ title: "Type hex values", subtitle: "Example: mipi w 6 1C 38", fill: "mipi w 6 1C 38" }];
   const sa = vals[0].v;
   if (sa > 0xf) return [{ title: "SA is 0x0 to 0xF", subtitle: "", copy: "" }];
   const rest = vals.slice(1);
@@ -243,8 +243,8 @@ function fromValues(tokens) {
 }
 
 function usageRows() {
-  return [{ title: BITS_EX, subtitle: "Bits to mode, SA, address, data, parity", fill: "rffe " + BITS_EX }].concat(
-    MODES.map((m) => ({ title: m.ex, subtitle: `${m.title} to bits · ${m.key} ${m.args}`, fill: "rffe " + m.ex }))
+  return [{ title: BITS_EX, subtitle: "Bits to mode, SA, address, data, parity", fill: "mipi " + BITS_EX }].concat(
+    MODES.map((m) => ({ title: m.ex, subtitle: `${m.title} to bits · ${m.key} ${m.args}`, fill: "mipi " + m.ex }))
   );
 }
 

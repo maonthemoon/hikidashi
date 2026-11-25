@@ -423,34 +423,6 @@ pub fn url_encode(s: &str) -> String {
     out
 }
 
-/// 計算のモードの使い方の例(入力が空のときと, 答えが出ないときに出す)
-const CALC_EXAMPLES: [(&str, &str); 8] = [
-    ("0x1F", "Hex to decimal and binary"),
-    ("(12+3)*4", "Calculator: + - * / ^ ( ) %"),
-    ("10dBm", "dBm to watts and volts"),
-    ("vswr 1.5", "VSWR to return loss and reflection"),
-    ("10nH 2.4G", "Capacitance that resonates with 10 nH at 2.4 GHz"),
-    ("50+j50@2G", "Impedance to admittance and equivalent circuits"),
-    ("rffe", "MIPI RFFE: all commands (write, read, extended)"),
-    ("0110010111001001110000", "MIPI RFFE: bits to mode, SA, address, data"),
-];
-
-fn calc_hint_rows() -> Vec<Row> {
-    CALC_EXAMPLES
-        .iter()
-        .map(|(ex, note)| Row {
-            name: ex.to_string(),
-            sub: format!("Example · {note}"),
-            tag: "try",
-            positions: vec![],
-            action: Action::Fill(ex.to_string()),
-            learn_key: None,
-            warn: false,
-            icon: Icon::Calc,
-            score: 0,
-        })
-        .collect()
-}
 
 fn calc_rows(c: &calc::Calc) -> Vec<Row> {
     c.rows
@@ -580,9 +552,9 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
     let prefixes = ctx.config.prefixes();
     let (mode, text) = parse(input, &prefixes);
     let text_trim = text.trim();
-    // 計算の行は計算のモードのときだけ. 入力が空のときと答えが出ないときは, 使い方の例を出す
+    // 計算の行は計算のモードのときだけ. 答えが出ないときは何も出さない(K50)
     if mode == Mode::Calc {
-        return (mode, calc::evaluate(text_trim).map(|c| calc_rows(&c)).unwrap_or_else(calc_hint_rows));
+        return (mode, calc::evaluate(text_trim).map(|c| calc_rows(&c)).unwrap_or_default());
     }
     if text_trim.is_empty() {
         return (mode, vec![]);
@@ -930,12 +902,9 @@ mod tests {
         let (_, rows) = run(&w, "= 5");
         assert_eq!(names(&rows), vec!["0x5", "0101"]);
         let (_, rows) = run(&w, "= doc");
-        assert!(rows.iter().all(|r| r.sub.starts_with("Example")), "{:?}", names(&rows));
-        assert!(rows.len() >= 5);
-        // 空のときも例
-        let (_, rows) = run(&w, "= ");
-        assert!(rows.iter().all(|r| r.sub.starts_with("Example")));
-        assert_eq!(rows[0].name, "0x1F");
+        assert!(rows.is_empty(), "{:?}", names(&rows));
+        // 空のときも例は出さない(K50)
+        assert!(run(&w, "= ").1.is_empty());
     }
 
     #[test]

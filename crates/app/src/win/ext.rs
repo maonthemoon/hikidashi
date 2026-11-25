@@ -16,7 +16,7 @@ use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 pub const WM_APP_EXT: u32 = 0x8000 + 43;
 
 /// exeに埋め込んで配る拡張(ファイル名, 中身)
-const BUNDLED: &[(&str, &str)] = &[("rffe.js", include_str!("../../../../extensions/rffe.js"))];
+const BUNDLED: &[(&str, &str)] = &[("mipi.js", include_str!("../../../../extensions/mipi.js"))];
 
 /// 利用者の拡張のフォルダー(作らない)
 fn user_dir() -> PathBuf {
@@ -32,6 +32,8 @@ fn bundled_dir() -> PathBuf {
 fn write_bundled() {
     let dir = bundled_dir();
     let _ = std::fs::create_dir_all(&dir);
+    // 前の版の名前(K50)
+    let _ = std::fs::remove_file(dir.join("rffe.js"));
     for (name, text) in BUNDLED {
         let path = dir.join(name);
         if std::fs::read(&path).ok().as_deref() != Some(text.as_bytes()) {

@@ -68,6 +68,7 @@ const WM_APP_SHOW: u32 = 0x8000 + 2;
 const WM_APP_QUIT: u32 = 0x8000 + 3;
 const TIMER_GLOW: usize = 2;
 const TIMER_QUICK: usize = 3;
+const TIMER_SELECTION: usize = 77;
 /// 書く窓を整える頼み(K22. RichEditの通知の中では整えず, あとで行う)
 const WM_APP_COMPOSE: u32 = 0x8000 + 5;
 /// ブックマークのアイコンを読み終えた
@@ -133,6 +134,8 @@ pub struct App {
     pub config_error: Option<String>,
     /// 塗ってある色がダークか
     themed_dark: bool,
+    /// 前回の印を残して出したところ(打ち始めたら印を外す. K50)
+    carry: bool,
     apps: Catalog,
     bookmarks: Catalog,
     /// ChromeとEdgeのBookmarksの更新日時(変わったときだけ読み直す)
@@ -469,7 +472,7 @@ impl App {
         if self.mode == Mode::Clipboard {
             return Some(clip_rows(&self.clips, text));
         }
-        // 計算のモードの中でも, 計算の拡張(`rffe `)は使える(K43)
+        // 計算のモードの中でも, 計算の拡張(`mipi `)は使える(K43)
         if self.mode == Mode::Calc {
             return self.ext_rows(text);
         }
@@ -699,6 +702,12 @@ impl App {
             self.load_favicons();
         }
         self.history.reset();
+        // 印(モード)は引き継がない: 文字がなければ外し, 文字があれば打ち始めたときに外す(K50)
+        if select_all && self.mode != Mode::All && self.edit_text().is_empty() {
+            self.mode = Mode::All;
+            self.position_edit();
+        }
+        self.carry = select_all && self.mode != Mode::All;
         self.refresh();
         if self.composing() {
             // 書きかけのまま閉じたので, 書く窓で開く(Q5のA). 日本語で書くことが多いのでIMEは変えない
@@ -1365,6 +1374,38 @@ impl App {
         self.keep_old_draft();
         self.enter_compose(format!("{before}{pasted}{after}"), Some(caret));
         true
+    }
+
+    /// 貼る1行(改行の前まで. 入力欄に入る長さまで). 文字がなければNone
+    fn paste_line(&mut self) -> Option<String> {
+        if self.capture {
+            return None;
+        }
+        let t = actions::clipboard_text(self.hwnd)?;
+        let line = t.split(['\r', '\n', '\0']).next().unwrap_or("");
+        let room = EDIT_LIMIT.saturating_sub(self.edit_text().encode_utf16().count());
+        let mut used = 0;
+        Some(line.chars().take_while(|c| { used += c.len_utf16(); used <= room }).collect())
+    }
+
+    /// 前回の印(`file`など)を残して出しているとき, 全体を選んだまま打ち始めたら印を外す(K50)
+    fn drop_carry(&mut self) {
+        if !std::mem::take(&mut self.carry) || self.mode == Mode::All {
+            return;
+        }
+        let (mut s, mut e) = (0u32, 0u32);
+        unsafe {
+            SendMessageW(self.edit, EM_GETSEL, Some(WPARAM(&mut s as *mut _ as usize)), Some(LPARAM(&mut e as *mut _ as isize)));
+        }
+        let n = self.edit_text().encode_utf16().count() as u32;
+        if n > 0 && s.min(e) == 0 && s.max(e) >= n {
+            self.mode = Mode::All;
+            self.ext.reset();
+            self.position_edit();
+            unsafe {
+                let _ = InvalidateRect(Some(self.hwnd), None, false);
+            }
+        }
     }
 
     /// 整えて, 中身の高さを測り, 窓の大きさを合わせる
@@ -2449,7 +2490,15 @@ impl App {
 
     /// 選んだ文字で開くホットキー(2つ目)が押された. 前面のアプリの選択を読んで, その文字で窓を出す
     fn on_selection_hotkey(&mut self) {
-        if self.capture || self.visible() {
+        if self.capture {
+            return;
+        }
+        // 窓が出ているときは, いったん隠して前のアプリに戻ってから読む(K50)
+        if self.visible() {
+            self.hide();
+            unsafe {
+                SetTimer(Some(self.hwnd), TIMER_SELECTION, 150, None);
+            }
             return;
         }
         self.stats.hotkey_at = Some(Instant::now());
@@ -2673,6 +2722,8 @@ impl App {
 }
 
 const WM_APP_ASK_AUTOSTART: u32 = 0x8000 + 4;
+/// 入力欄に入る長さ
+const EDIT_LIMIT: usize = 4096;
 
 fn group(n: usize) -> String {
     let s = n.to_string();
@@ -2845,6 +2896,14 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                         paint::invalidate_line(app);
                     }
                     TIMER_QUICK => app.on_quick_timer(),
+                    TIMER_SELECTION => {
+                        unsafe {
+                            let _ = KillTimer(Some(hwnd), TIMER_SELECTION);
+                        }
+                        if !app.visible() {
+                            app.on_selection_hotkey();
+                        }
+                    }
                     _ => {}
                 }
                 Some(LRESULT(0))
@@ -3015,10 +3074,12 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
             CUE_SHOWN.set(cue);
             return r;
         }
-        WM_IME_STARTCOMPOSITION => EDIT_IME.set(true),
         WM_IME_ENDCOMPOSITION => EDIT_IME.set(false),
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let sys = msg == WM_SYSKEYDOWN;
+            if wparam.0 as u16 == windows::Win32::UI::Input::KeyboardAndMouse::VK_DELETE.0 {
+                with_app(|app| app.drop_carry());
+            }
             if let Some(true) = with_app(|app| app.on_key(wparam.0 as u16, sys)) {
                 return LRESULT(0);
             }
@@ -3034,9 +3095,27 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
             if let Some(true) = with_app(|app| app.paste_multiline()) {
                 return LRESULT(0);
             }
+            with_app(|app| app.drop_carry());
+            // 標準の貼り付けは, クリップボードを開いたままEN_CHANGEを送る. その中で拡張に渡す文字を読むと,
+            // 標準の入力欄が使っている途中のメモリが解放されて落ちうるので, 先に読んで閉じてから入れる(K50)
+            if let Some(Some(t)) = with_app(|app| app.paste_line()) {
+                let w = util::wide(&t);
+                unsafe { SendMessageW(hwnd, windows::Win32::UI::Controls::EM_REPLACESEL, Some(WPARAM(1)), Some(LPARAM(w.as_ptr() as isize))) };
+                redraw_cue(hwnd);
+                return LRESULT(0);
+            }
+        }
+        WM_CUT | WM_CLEAR | WM_IME_STARTCOMPOSITION => {
+            if msg == WM_IME_STARTCOMPOSITION {
+                EDIT_IME.set(true);
+            }
+            with_app(|app| app.drop_carry());
         }
         WM_CHAR | WM_SYSCHAR => {
             let c = wparam.0 as u32;
+            if msg == WM_CHAR && (c == 0x08 || c >= 0x20) && c != 0x7F {
+                with_app(|app| app.drop_carry());
+            }
             // 書く窓にしたあとに届いた文字(Ctrl+Vなど)は入れない
             let capture = with_app(|app| app.capture || app.composing()).unwrap_or(false);
             // Enter, Tab, Esc, Ctrl+Backspace, Ctrl+A, Ctrl+N/P の文字は入力欄に入れない(鳴らさない)
@@ -3054,13 +3133,19 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
     if matches!(
         msg,
         WM_SETTEXT | WM_KEYDOWN | WM_CHAR | WM_PASTE | WM_CUT | WM_CLEAR | WM_UNDO | WM_IME_STARTCOMPOSITION | WM_IME_ENDCOMPOSITION | WM_IME_COMPOSITION | WM_IME_CHAR
-    ) && cue_wanted(hwnd) != CUE_SHOWN.get()
-    {
+    ) {
+        redraw_cue(hwnd);
+    }
+    r
+}
+
+/// 案内を出すか消すかが変わったら, 入力欄を描き直す
+fn redraw_cue(hwnd: HWND) {
+    if cue_wanted(hwnd) != CUE_SHOWN.get() {
         unsafe {
             let _ = InvalidateRect(Some(hwnd), None, true);
         }
     }
-    r
 }
 
 /// 書く窓(RichEdit)のキーを横取りする(K22)
@@ -3077,6 +3162,14 @@ fn compose_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id:
         WM_PAINT => {
             let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
             compose::paint_decos(hwnd);
+            return r;
+        }
+        // 絵は上から描いているので, スクロールのあとは全体を描き直す(K50)
+        WM_VSCROLL | WM_MOUSEWHEEL => {
+            let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+            unsafe {
+                let _ = InvalidateRect(Some(hwnd), None, false);
+            }
             return r;
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {
@@ -3166,6 +3259,7 @@ pub fn run() {
     std::panic::set_hook(Box::new(|info| {
         storage::log(&format!("panic: {info}"));
     }));
+    diag::log_crashes();
     // `--query 文字`: 動いていればその窓に渡して終わる(置き換えのための入れ替えもしない). 動いていなければ, ふつうに起動して, その文字で窓を出す
     let query = csel::query_arg(std::env::args().skip(1));
     if let Some(q) = &query {
@@ -3223,6 +3317,8 @@ pub fn run() {
         ..Default::default()
     };
     unsafe { RegisterClassExW(&wc) };
+    // テーマを決めてから窓と書く窓を作る(後で読むと, 書く窓の地がライトのままになる. K50)
+    let (config, err) = storage::load_config();
     let hwnd = unsafe {
         CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
@@ -3264,7 +3360,7 @@ pub fn run() {
     let Ok(edit) = edit else { return };
     unsafe {
         let _ = SetWindowSubclass(edit, Some(edit_proc), 1, 0);
-        SendMessageW(edit, EM_SETLIMITTEXT, Some(WPARAM(4096)), Some(LPARAM(0)));
+        SendMessageW(edit, EM_SETLIMITTEXT, Some(WPARAM(EDIT_LIMIT)), Some(LPARAM(0)));
     }
 
     let compose = compose::Compose::create(hwnd);
@@ -3275,7 +3371,6 @@ pub fn run() {
         None => storage::log("compose: could not create the RichEdit control; Shift+Enter sends to ChatGPT right away"),
     }
 
-    let (config, err) = storage::load_config();
     set_border_color(hwnd);
     let shared = Shared::new(config.clone());
     let dict: Arc<OnceLock<Dict>> = Arc::new(OnceLock::new());
@@ -3325,6 +3420,7 @@ pub fn run() {
         config,
         config_error: err.map(|e| e.0),
         themed_dark: theme::is_dark(),
+        carry: false,
         apps: Catalog::new(vec![]),
         bookmarks: Catalog::new(vec![]),
         bookmarks_mtime: vec![],
