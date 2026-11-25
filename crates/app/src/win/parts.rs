@@ -429,7 +429,7 @@ pub unsafe fn draw_button(d: &DRAWITEMSTRUCT, style: Btn) {
     });
 }
 
-// ---------------------------------------------------------------- チェックボックス
+// ---------------------------------------------------------------- スイッチ(行)とチェックボックス(Tabメニューの表)
 
 struct Check {
     /// 名前の下の説明
@@ -438,7 +438,7 @@ struct Check {
     cell: bool,
 }
 
-/// 標準のチェックボックスの見た目を付け替える(押し方と読み上げは標準のまま)
+/// 標準のチェックボックスの見た目を, スイッチか表の箱に付け替える(押し方と読み上げは標準のまま)
 pub fn make_check(h: HWND, hint: &str, cell: bool) {
     CHECKS.with(|m| m.borrow_mut().insert(h.0 as isize, Check { hint: hint.to_string(), cell }));
     unsafe {
@@ -480,21 +480,34 @@ fn paint_check(h: HWND, hdc: HDC, rc: &RECT) {
     // マウスで押しただけのときは, 枠を出さない
     let focus = unsafe { GetFocus() } == h && unsafe { SendMessageW(h, WM_QUERYUISTATE, None, None).0 } as u32 & UISF_HIDEFOCUS == 0;
     let (hint, cell) = CHECKS.with(|m| m.borrow().get(&(h.0 as isize)).map(|c| (c.hint.clone(), c.cell)).unwrap_or_default());
-    let size = s(20, dpi);
-    let left = if cell { (rc.right - size) / 2 } else { rc.right - s(12, dpi) - size };
-    let top = (rc.bottom - size) / 2;
-    let b = RECT { left, top, right: left + size, bottom: top + size };
+    let (bw, bh) = if cell { (s(20, dpi), s(20, dpi)) } else { (s(42, dpi), s(22, dpi)) };
+    let left = if cell { (rc.right - bw) / 2 } else { rc.right - s(12, dpi) - bw };
+    let top = (rc.bottom - bh) / 2;
+    let b = RECT { left, top, right: left + bw, bottom: top + bh };
+    let line = s(1, dpi).max(1) + (dpi > 96) as i32;
     if focus {
         let m = s(3, dpi);
-        round(hdc, &RECT { left: b.left - m, top: b.top - m, right: b.right + m, bottom: b.bottom + m }, s(6, dpi), Some((FOCUS, s(2, dpi).max(2))), bg);
+        let r = if cell { s(6, dpi) } else { bh / 2 + m };
+        round(hdc, &RECT { left: b.left - m, top: b.top - m, right: b.right + m, bottom: b.bottom + m }, r, Some((FOCUS, s(2, dpi).max(2))), bg);
     }
-    if on {
+    if !cell {
+        // スイッチ: 入なら塗りと右の丸, 切なら枠と左の丸
+        let d = s(12, dpi);
+        let gap = (bh - d) / 2;
+        let x = if on { b.right - gap - d } else { b.left + gap };
+        if on {
+            round(hdc, &b, bh / 2, None, if down { FILL_DOWN } else { FILL });
+        } else {
+            round(hdc, &b, bh / 2, Some((p.off, line)), if down { p.btn_down } else { bg });
+        }
+        round(hdc, &RECT { left: x, top: top + gap, right: x + d, bottom: top + gap + d }, d / 2, None, if on { 0xFFFFFF } else { p.off });
+    } else if on {
         round(hdc, &b, s(4, dpi), None, if down { FILL_DOWN } else { FILL });
         let k = dpi as f32 / 96.0;
         let at = |x: f32, y: f32| (left as f32 + x * k, top as f32 + y * k);
         stroke(hdc, &[at(5.0, 10.5), at(8.7, 14.0), at(15.0, 6.5)], 2.0 * k, 0xFFFFFF);
     } else {
-        round(hdc, &b, s(4, dpi), Some((p.off, s(1, dpi).max(1) + (dpi > 96) as i32)), if down { p.btn_down } else { p.field });
+        round(hdc, &b, s(4, dpi), Some((p.off, line)), if down { p.btn_down } else { p.field });
     }
     if cell {
         return;
