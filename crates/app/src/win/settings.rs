@@ -1999,7 +1999,7 @@ fn open_editor(owner: HWND, kind: EditKind) {
             p.form_edit("App (.exe)", E_VALUE, &ow.exe, full - bw - 8);
             let b = p.m.button(E_BROWSE, "Browse…");
             p.at(b, X + FW - bw, p.y - CTL_H - 8, bw, CTL_H);
-            p.form_hint("Empty: VS Code, WezTerm and Windows Terminal are found by name.");
+            p.form_hint("Empty: VS Code, WezTerm and so on are found by name.");
             let args = ow.args.trim();
             let pass = if args.is_empty() { 0 } else if args == PASS_FOLDER { 1 } else { 2 };
             p.form_drop("What to pass", E_KIND, tr_all(&PASS_KINDS), pass);

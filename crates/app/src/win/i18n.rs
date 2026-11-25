@@ -206,7 +206,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("Optional, for example Open Jira issue", "なくてもよい(例: Open Jira issue)"),
     ("Shown as \"Open in <name>\"", "「Open in <名前>」と出ます"),
     ("App (.exe)", "アプリ (.exe)"),
-    ("Empty: VS Code, WezTerm and Windows Terminal are found by name.", "空なら, VS Code, WezTerm, Windows Terminalは名前から探します."),
+    ("Empty: VS Code, WezTerm and so on are found by name.", "空なら, VS CodeやWezTermなどは名前から探します."),
     ("What to pass", "渡し方"),
     ("The selected item", "選んだものを渡す"),
     ("Its folder", "フォルダーを渡す"),
