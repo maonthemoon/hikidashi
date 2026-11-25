@@ -5,11 +5,12 @@
 //! export const meta = { title: "MIPI RFFE", keyword: "mipi", clipboard: true };
 //! export function search(query, ctx) { return [{ title: "…", subtitle: "…", copy: "…", url: "…", fill: "…" }]; }
 //! ```
+//! `ctx`は`clipboard`(クリップボードの文字), `raw`(空白を落とす前の入力), `options`(設定ファイルの`[ext.<ファイル名>]`).
 //! `rquickjs`の`Runtime`はスレッドをまたげないので, 専用のスレッドを1本立ててその中で全部行う.
 //! 呼ぶ側は`ExtHost`にメッセージを送り, 結果を`Receiver`で受ける.
 
 use rquickjs::{Context, Ctx, Function, Module, Object, Runtime, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -49,14 +50,31 @@ pub struct ExtRow {
     pub copy: String,
     /// あればEnterでURLを開く(Tabのメニューでコピー)
     pub url: Option<String>,
-    /// あればEnterで入力欄に入れる(keywordのあとに)
+    /// あればEnterかTabで入力欄に入れる
     pub fill: Option<String>,
+    /// あればTabで入力欄に入れる(Enterはコピー)
+    pub complete: Option<String>,
+    /// 帯(区切りごとの小さな箱の並び). あれば, 字の代わりに描く
+    pub band: Vec<Seg>,
+    /// 誤りの行(色を変える)
+    pub bad: bool,
+}
+
+/// 帯の1つの箱
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Seg {
+    pub label: String,
+    pub bits: String,
+    pub kind: String,
+    /// 前の箱との間を空ける(フレームの始まり)
+    pub gap: bool,
+    pub bad: bool,
 }
 
 impl ExtRow {
     fn error(name: &str, msg: &str) -> ExtRow {
         let title = format!("{}: {}", name, msg);
-        ExtRow { copy: title.clone(), title, subtitle: String::new(), url: None, fill: None }
+        ExtRow { copy: title.clone(), title, subtitle: String::new(), url: None, fill: None, complete: None, band: vec![], bad: true }
     }
 }
 
@@ -78,7 +96,11 @@ struct Shared {
     metas: Vec<ExtMeta>,
     /// (ファイル名, 理由)
     errors: Vec<(String, String)>,
+    /// 拡張ごとの設定(設定ファイルの`[ext.<名前>]`)
+    options: Options,
 }
+
+pub type Options = BTreeMap<String, BTreeMap<String, String>>;
 
 pub struct ExtHost {
     tx: Sender<Cmd>,
@@ -109,6 +131,11 @@ impl ExtHost {
         self.shared.lock().unwrap().metas.clone()
     }
 
+    /// 拡張ごとの設定を渡す
+    pub fn set_options(&self, o: Options) {
+        self.shared.lock().unwrap().options = o;
+    }
+
     /// 読めなかったファイルと理由
     pub fn errors(&self) -> Vec<(String, String)> {
         self.shared.lock().unwrap().errors.clone()
@@ -136,7 +163,7 @@ impl ExtHost {
         self.latest.fetch_max(generation, Ordering::SeqCst);
         let _ = self.tx.send(Cmd::Search {
             keyword: keyword.to_string(),
-            query: query.trim().to_string(),
+            query: query.to_string(),
             clipboard,
             generation,
             reply,
@@ -244,7 +271,8 @@ fn worker(dirs: Vec<PathBuf>, rx: Receiver<Cmd>, shared: Arc<Mutex<Shared>>, lat
             if generation < latest.load(Ordering::SeqCst) {
                 continue; // もっと新しい要求がある
             }
-            let rows = run_search(&guard, &st.exts, &keyword, &query, clipboard);
+            let options = shared.lock().unwrap().options.clone();
+            let rows = run_search(&guard, &st.exts, &keyword, &query, clipboard, &options);
             let _ = reply.send(SearchResult { generation, rows });
         }
     }
@@ -373,7 +401,7 @@ fn load_file(rt: &Runtime, guard: &Guard, name: &str, path: &Path, stamp: Stamp)
     Ok(Loaded { meta: r?, stamp, ctx })
 }
 
-fn run_search(guard: &Guard, exts: &HashMap<String, Loaded>, keyword: &str, query: &str, clipboard: Option<String>) -> Vec<ExtRow> {
+fn run_search(guard: &Guard, exts: &HashMap<String, Loaded>, keyword: &str, query: &str, clipboard: Option<String>, options: &Options) -> Vec<ExtRow> {
     let kw = keyword.to_lowercase();
     let mut cands: Vec<&Loaded> = exts.values().filter(|l| l.meta.keyword.to_lowercase() == kw).collect();
     cands.sort_by(|a, b| a.meta.name.cmp(&b.meta.name));
@@ -386,7 +414,13 @@ fn run_search(guard: &Guard, exts: &HashMap<String, Loaded>, keyword: &str, quer
         let f: Function = c.globals().get("__hikidashi_search").map_err(d)?;
         let o = Object::new(c.clone()).map_err(d)?;
         o.set("clipboard", cb).map_err(d)?;
-        let v: Value = f.call((query.to_string(), o)).map_err(d)?;
+        o.set("raw", query).map_err(d)?;
+        let opts = Object::new(c.clone()).map_err(d)?;
+        for (k, v) in options.get(&l.meta.name).into_iter().flatten() {
+            opts.set(k.as_str(), v.as_str()).map_err(d)?;
+        }
+        o.set("options", opts).map_err(d)?;
+        let v: Value = f.call((query.trim().to_string(), o)).map_err(d)?;
         if !v.is_array() {
             return Err("返り値が配列ではない".into());
         }
@@ -410,7 +444,13 @@ fn rows_from_json(v: &serde_json::Value) -> Vec<ExtRow> {
                 .filter_map(|o| {
                     let title = s(o, "title")?;
                     let copy = s(o, "copy").unwrap_or_else(|| title.clone());
-                    Some(ExtRow { subtitle: s(o, "subtitle").unwrap_or_default(), url: s(o, "url").filter(|u| !u.is_empty()), fill: s(o, "fill").filter(|u| !u.is_empty()), title, copy })
+                    let flag = |o: &serde_json::Value, k: &str| o.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
+                    let band = o
+                        .get("band")
+                        .and_then(|b| b.as_array())
+                        .map(|b| b.iter().take(64).map(|g| Seg { label: s(g, "label").unwrap_or_default(), bits: s(g, "bits").unwrap_or_default(), kind: s(g, "kind").unwrap_or_default(), gap: flag(g, "gap"), bad: flag(g, "bad") }).collect())
+                        .unwrap_or_default();
+                    Some(ExtRow { complete: s(o, "complete").filter(|u| !u.is_empty()), band, bad: flag(o, "bad"), subtitle: s(o, "subtitle").unwrap_or_default(), url: s(o, "url").filter(|u| !u.is_empty()), fill: s(o, "fill").filter(|u| !u.is_empty()), title, copy })
                 })
                 .take(MAX_ROWS)
                 .collect()

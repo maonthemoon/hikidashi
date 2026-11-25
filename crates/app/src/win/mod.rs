@@ -57,7 +57,7 @@ use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Controls::RichEdit::{EN_REQUESTRESIZE, EN_SELCHANGE, REQRESIZE};
 use windows::Win32::UI::Controls::{EM_GETRECT, EM_GETSEL, EM_SETLIMITTEXT, EM_SETSEL, NMHDR};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, SetFocus, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_INSERT, VK_RIGHT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RWIN, VK_SHIFT, VK_TAB, VK_UP};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, SetFocus, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_INSERT, VK_LEFT, VK_RIGHT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RWIN, VK_SHIFT, VK_TAB, VK_UP};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -472,7 +472,11 @@ impl App {
         }
         // 計算のモードの中でも, 計算の拡張(`mipi `)は使える(K43)
         if self.mode == Mode::Calc {
-            return self.ext_rows(text);
+            if let Some(r) = self.ext_rows(text) {
+                return Some(r);
+            }
+            let hints = self.ext.hints(text, &self.ext_taken());
+            return if hints.is_empty() { None } else { Some(hints) };
         }
         if self.mode != Mode::All {
             return None;
@@ -880,6 +884,7 @@ impl App {
         self.config = cfg.clone();
         *self.shared.config.lock().unwrap() = cfg;
         self.rebuild_commands();
+        self.ext.set_options(&self.config.ext);
         self.apply_apps();
         self.sync_clip_listener();
         self.apply_selection_hotkey();
@@ -1182,14 +1187,25 @@ impl App {
                 self.on_enter(mods);
                 true
             }
-            // 入力欄の終わりで→: パスや%APPDATA%の候補を入力欄に入れて, 続きを打てるようにする(2026-11-24)
-            v if v == VK_RIGHT.0 && !ctrl && !shift && !alt => self.complete_path(),
-            v if v == VK_TAB.0 => {
-                if self.menu.is_some() {
-                    self.menu = None;
-                    self.layout();
-                } else {
+            // 入力欄の終わりで→: 操作のメニュー. ←で戻る(K52. Flow Launcherと同じ)
+            v if v == VK_RIGHT.0 && !ctrl && !shift && !alt => {
+                if self.menu.is_none() {
+                    if !self.caret_at_end() {
+                        return false;
+                    }
                     self.open_menu();
+                }
+                true
+            }
+            v if v == VK_LEFT.0 && self.menu.is_some() => {
+                self.menu = None;
+                self.layout();
+                true
+            }
+            // Tab: 選んだ行を入力欄に入れて, 続きを打てるようにする(補完)
+            v if v == VK_TAB.0 => {
+                if self.menu.is_none() {
+                    self.complete();
                 }
                 true
             }
@@ -1859,26 +1875,50 @@ impl App {
         }
     }
 
-    /// →: 入力欄の終わりにカーソルがあれば, 選んでいる候補(`%APPDATA%`やフォルダーの中身)を入力欄に入れる. 入れたらtrue
-    fn complete_path(&mut self) -> bool {
-        if self.menu.is_some() || self.mode != Mode::All {
-            return false;
-        }
-        let text = self.edit_text();
+    /// 入力欄のカーソルが終わりにあり, 何も選んでいないか
+    fn caret_at_end(&self) -> bool {
         let (mut s, mut e) = (0u32, 0u32);
         unsafe {
             SendMessageW(self.edit, EM_GETSEL, Some(WPARAM(&mut s as *mut _ as usize)), Some(LPARAM(&mut e as *mut _ as isize)));
         }
-        let len = text.encode_utf16().count() as u32;
-        if s != e || e != len {
-            return false;
+        s == e && e == self.edit_text().encode_utf16().count() as u32
+    }
+
+    /// `Tab`: 選んだ行を入力欄に入れる(補完. K52). 拡張の候補, パス, フォルダー, アプリなどの名前
+    fn complete(&mut self) {
+        self.wait_pending();
+        if !self.wait_ext() {
+            return;
         }
-        let Some(row) = self.rows.get(self.sel).cloned() else { return false };
-        let is_dir = self.row_is_dir(&row) || row.tag == "folder";
-        let Some(t) = router::completion(&text, &row, is_dir) else { return false };
+        let text = self.edit_text();
+        let Some(row) = self.rows.get(self.sel).cloned() else { return };
+        let mut mode = self.mode;
+        let t = if let Action::Fill(t) = &row.action {
+            Some(t.clone())
+        } else if self.ext.view {
+            self.ext.completes.get(self.sel).cloned().flatten()
+        } else if matches!(self.mode, Mode::Calc | Mode::Clipboard | Mode::Google) || self.script_view {
+            None
+        } else {
+            let is_dir = self.row_is_dir(&row) || row.tag == "folder";
+            let path = match &row.action {
+                Action::File { .. } | Action::Path(_) => self.row_path(&row),
+                _ => None,
+            };
+            let done = if self.mode == Mode::All { router::completion(&text, &row, is_dir) } else { None };
+            done.or_else(|| {
+                // ファイルとフォルダーはパス(フォルダーなら中身が続けて出る), ほかは名前
+                path.map(|p| {
+                    mode = Mode::All;
+                    if is_dir && !p.ends_with('\\') { format!("{p}\\") } else { p }
+                })
+            })
+            .or_else(|| matches!(row.action, Action::Item { .. }).then(|| row.name.clone()))
+        };
+        let Some(t) = t.filter(|t| *t != text) else { return };
+        self.mode = mode;
         self.set_edit_text(&t);
         self.refresh();
-        true
     }
 
     /// `Alt+Enter`: ファイルやフォルダーの行を, ターミナルでそのフォルダーに入って開く(Q6)
@@ -2253,7 +2293,7 @@ impl App {
         if items.is_empty() {
             return;
         }
-        self.menu = Some(Menu { title: format!("Tab: {}", row.name), items, sel: 0, row });
+        self.menu = Some(Menu { title: format!("Actions: {}", row.name), items, sel: 0, row });
         self.layout();
     }
 
@@ -3462,6 +3502,7 @@ pub fn run() {
         system::fix_autostart(&app.exe_path);
         std::thread::spawn(storage::remove_old_copy);
         indexer::start(&app.shared, hwnd);
+        app.ext.set_options(&app.config.ext);
         app.ext.start();
         diag::start(hwnd);
         app.icons.start(hwnd);

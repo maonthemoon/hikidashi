@@ -1158,7 +1158,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
           </article>
           <article class="card">
             <h3 class="card__title">進数とRFの計算を, その場で</h3>
-            <p class="card__body"><code>=</code>と空白で計算のモードに入り, <code>0x1F</code>で10進数と2進数, <code>10dBm</code>でWと電圧, <code>vswr 1.5</code>でリターンロス, MIPI RFFEはビット列を打つとモード, SA, アドレス, データに分けます. <kbd>Enter</kbd>で結果をコピーします.</p>
+            <p class="card__body"><code>=</code>と空白で計算のモードに入り, <code>0x1F</code>で10進数と2進数, <code>10dBm</code>でWと電圧, <code>vswr 1.5</code>でリターンロス, MIPI RFFEは<code>mipi</code>のあとにビット列を打つと, フレームとビットに分けて見せます. <kbd>Enter</kbd>で結果をコピーします.</p>
           </article>
           <article class="card">
             <h3 class="card__title">Windowsのダークモードに合わせる</h3>
@@ -1256,8 +1256,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   const calc = (v, note) => row("calc", v, note, "copy");
 
   // 計算のモードに入ったときの例(Hikidashiでは7行. デモは5行)
-  const CALC_HINTS = [["0x1F", "Hex to decimal and binary"], ["(12+3)*4", "Calculator: + - * / ^ ( ) %"], ["10dBm", "dBm to watts and volts"], ["vswr 1.5", "VSWR to return loss and reflection"], ["10nH 2.4G", "Capacitance that resonates with 10 nH at 2.4 GHz"]].map(([v, n]) => ({ ...calc(v, "Example · " + n), tag: "try" }));
-  const CALC_NONE = CALC_HINTS;
+  const CALC_NONE = [];
 
   const ALL = [
     {
@@ -1295,13 +1294,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       tab: "計算",
       caption: "<strong>計算のモードで, 進数もRFも.</strong> <code>=</code>と空白で計算のモード. 16進数, dBm, VSWR, 共振, MIPI RFFEのビット列と値. <kbd>Enter</kbd>で結果をコピーします.",
       steps: [
-        { type: "=", short: true, rows: () => [] }, { mode: "calc", rows: CALC_HINTS },
+        { type: "=", short: true, rows: () => [] }, { mode: "calc", rows: () => [] },
         { type: "0x1F", rows: (q) => (q === "0x1F" ? [calc("31", "dec"), calc("0001 1111", "bin")] : CALC_NONE) }, { clear: true },
         { type: "10dBm", rows: (q) => (q === "10dBm" ? [calc("10 mW", "Power"), calc("1 V", "Peak voltage at Z0 = 50 Ω · Vrms 707.1 mV · Vpp 2 V")] : CALC_NONE) }, { clear: true },
         { type: "vswr 1.5", rows: (q) => (q === "vswr 1.5" ? [calc("13.98 dB", "Return loss"), calc("0.200", "|Γ| reflection coefficient"), calc("4.00 %", "Reflected power"), calc("0.1773 dB", "Mismatch loss")] : CALC_NONE) }, { clear: true },
         { type: "10nH 2.4G", rows: (q) => (q === "10nH 2.4G" ? [calc("0.4398 pF", "Capacitance C = 1/(ω²L) for resonance")] : CALC_NONE) }, { clear: true },
-        { type: "0110010111001001110000", fast: true, rows: (q) => (q.length >= 22 ? [calc("Register Write", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000 · parity OK"), calc("SA 0x6", "Slave address · 0110"), calc("Address 0x1C PM_TRIG", "11100"), calc("Data 0x38", "00111000 · Active, mask 111, trig 000"), calc("Parity OK", "Odd parity · cmd OK · data OK")] : q.length >= 13 ? [calc("Register Write", `Not enough bits (${q.length})`)] : CALC_NONE) }, { clear: true },
-        { type: "mipi w 6 1C 38", fast: true, rows: (q) => (q === "mipi w 6 1C 38" ? [calc("0110 010 11100 1 00111000 0", "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000")] : CALC_NONE) }, { key: "Enter" },
+        { type: "mipi 01100101110010011100000", fast: true, rows: (q) => (q.length >= 28 ? [calc("SSC  0110 010 11100 1  00111000 0  0", "SA · CMD · ADDR · P    DATA · P    B"), calc("Register Write", "SA 0x6 · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000 · 23 bits"), calc("Command frame   SA 0x6 · Register Write · 0x1C PM_TRIG", "0110 010 11100 1 · parity OK"), calc("Data frame   0x38", "00111000 0 · parity OK · Active, mask 111, trig 000")] : CALC_NONE) }, { clear: true },
+        { type: "mipi sa=6 addr=1C data=38", fast: true, rows: (q) => (q === "mipi sa=6 addr=1C data=38" ? [calc("0110 010 11100 1  00111000 0  0", "Register Write · SA 0x6 · 0x1C PM_TRIG ← 0x38"), calc("0110 0000 0000 1  00011100 0  00111000 0  0", "Extended Register Write · SA 0x6 · 0x1C PM_TRIG ← 0x38")] : CALC_NONE) }, { key: "Enter" },
       ],
     },
   ];
@@ -1455,7 +1454,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
       } else if (st.clear) {
         await press("Ctrl+A", id);
         keycap.hidden = true;
-        text = ""; rows = chip ? CALC_HINTS : [];
+        text = ""; rows = [];
       } else if (st.wait) {
         await wait(st.wait, id);
       } else if (st.key === "Space") {

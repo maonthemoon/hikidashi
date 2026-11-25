@@ -337,7 +337,7 @@ pub fn paint(app: &mut App) {
             y += pad;
             let mut frc = RECT { left: s(PAD_X, d), top: y, right: w - s(PAD_X, d), bottom: y + s(STATUS_H, d) };
             fill(mem, &RECT { left: 0, top: y, right: w, bottom: y + 1 }, pal().border_faint);
-            draw_text(mem, app.fonts.sub, "Enter Run    Esc Back", pal().text_tertiary, &mut frc, DT_VCENTER);
+            draw_text(mem, app.fonts.sub, "Enter Run    ← Back", pal().text_tertiary, &mut frc, DT_VCENTER);
         } else if !app.rows.is_empty() {
             y += pad;
             let vis = app.visible_rows();
@@ -345,7 +345,7 @@ pub fn paint(app: &mut App) {
             let rows: Vec<Row> = app.rows[top..top + vis].to_vec();
             let list_top = y;
             for (i, row) in rows.iter().enumerate() {
-                draw_row(mem, app, row, top + i == app.sel && !app.nothing_selected(), pad, y, w);
+                draw_row(mem, app, row, top + i, top + i == app.sel && !app.nothing_selected(), pad, y, w);
                 y += s(ROW_H, d);
             }
             // 9行目からあるときは, 右端に細いスクロールの印を描く(C2)
@@ -427,13 +427,61 @@ fn paint_compose(hdc: HDC, app: &App, w: i32, h: i32) {
     draw_text(hdc, app.fonts.sub, keys, pal().text_tertiary, &mut krc, DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
 }
 
-fn draw_row(hdc: HDC, app: &mut App, row: &Row, selected: bool, pad: i32, y: i32, w: i32) {
+/// 帯(K52): 区切りごとの小さな箱. 上に名前, 下にビット
+fn draw_band(hdc: HDC, app: &App, band: &[hikidashi_ext::Seg], pad: i32, y: i32, w: i32) {
+    let d = app.dpi;
+    let p = pal();
+    let (top, bottom) = (y + s(5, d), y + s(ROW_H, d) - s(5, d));
+    let mut x = pad + s(12, d);
+    let right = w - pad - s(8, d);
+    for (i, g) in band.iter().enumerate() {
+        if i > 0 {
+            x += s(if g.gap { 8 } else { 2 }, d);
+        }
+        let bw = text_width(hdc, app.fonts.sub, &g.label).max(text_width(hdc, app.fonts.tag, &g.bits)) + s(12, d);
+        if x + bw > right {
+            break;
+        }
+        let rc = RECT { left: x, top, right: x + bw, bottom };
+        let edge = g.kind == "b";
+        let c = match g.kind.as_str() {
+            "sa" => mix(p.bg, p.accent, 0.30),
+            "addr" => mix(p.bg, p.accent, 0.16),
+            "data" => p.ok_bg,
+            "mask" => mix(p.bg, p.text, 0.22),
+            "b" => p.border,
+            _ => mix(p.bg, p.text, 0.10),
+        };
+        round_fill(hdc, &rc, s(6, d), if g.bad { p.danger } else { c });
+        // SSCとB, 誤りのあるフレームは枠だけ
+        if edge || g.bad {
+            let t = s(if g.bad { 2 } else { 1 }, d).max(1);
+            let inner = RECT { left: rc.left + t, top: rc.top + t, right: rc.right - t, bottom: rc.bottom - t };
+            round_fill(hdc, &inner, s(5, d), if edge { p.bg } else { c });
+        }
+        let mid = if g.bits.is_empty() { bottom } else { (top + bottom) / 2 };
+        let mut lrc = RECT { left: rc.left, top: rc.top, right: rc.right, bottom: mid };
+        draw_text(hdc, app.fonts.sub, &g.label, p.text_secondary, &mut lrc, DT_CENTER | DT_VCENTER);
+        let mut brc = RECT { left: rc.left, top: mid, right: rc.right, bottom: rc.bottom };
+        draw_text(hdc, app.fonts.tag, &g.bits, p.text, &mut brc, DT_CENTER | DT_VCENTER);
+        x += bw;
+    }
+}
+
+fn draw_row(hdc: HDC, app: &mut App, row: &Row, index: usize, selected: bool, pad: i32, y: i32, w: i32) {
     let d = app.dpi;
     let rh = s(ROW_H, d);
     let rr = RECT { left: pad, top: y, right: w - pad, bottom: y + rh };
     if selected {
         round_fill(hdc, &rr, s(8, d), pal().bg_muted);
     }
+    if app.ext.view {
+        if let Some(b) = app.ext.bands.get(index).filter(|b| !b.is_empty()) {
+            draw_band(hdc, app, b, pad, y, w);
+            return;
+        }
+    }
+    let bad = app.ext.view && app.ext.bads.get(index).copied().unwrap_or(false);
     // アイコン(K2)
     let isz = s(ICON, d);
     let ix = pad + s(12, d);
@@ -470,7 +518,7 @@ fn draw_row(hdc: HDC, app: &mut App, row: &Row, selected: bool, pad: i32, y: i32
         let a = app.confirm.as_deref().and_then(SysAction::from_id);
         (a.map(|a| a.confirm_text().to_string()).unwrap_or_default(), "Esc to cancel".to_string(), pal().accent_text, true)
     } else {
-        (row.name.clone(), row.sub.clone(), pal().text, false)
+        (row.name.clone(), row.sub.clone(), if bad { pal().danger } else { pal().text }, false)
     };
     if sub.is_empty() {
         draw_name(hdc, app, &name, &row.positions, nx, y + (rh - name_h) / 2, max_w, color, bold);

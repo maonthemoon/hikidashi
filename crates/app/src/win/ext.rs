@@ -4,7 +4,7 @@
 use super::{clipboard, storage};
 use hikidashi_core::router::{Action, Icon, Row};
 use hikidashi_core::scripts as cscripts;
-use hikidashi_ext::{ExtHost, ExtMeta, ExtRow};
+use hikidashi_ext::{ExtHost, ExtMeta, ExtRow, Options, Seg};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -56,6 +56,11 @@ pub struct Ext {
     prev_view: bool,
     /// 行ごとのEnterでコピーする文字(`view`のとき)
     pub copies: Vec<String>,
+    /// 行ごとの帯, 誤りか, Tabで入れる文字(`view`のとき)
+    pub bands: Vec<Vec<Seg>>,
+    pub bads: Vec<bool>,
+    pub completes: Vec<Option<String>>,
+    options: Arc<Mutex<Options>>,
     /// 結果を待っている世代
     pending: Option<u64>,
     /// ログに書いた内容(同じものは1回だけ)
@@ -95,6 +100,10 @@ impl Ext {
             view: false,
             prev_view: false,
             copies: vec![],
+            bands: vec![],
+            bads: vec![],
+            completes: vec![],
+            options: Arc::new(Mutex::new(Options::new())),
             pending: None,
             logged: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -102,13 +111,40 @@ impl Ext {
 
     /// 読み込みを待つので, 起動を遅らせないよう裏のスレッドで始める
     pub fn start(&self) {
-        let (slot, logged) = (self.host.clone(), self.logged.clone());
+        let (slot, logged, options) = (self.host.clone(), self.logged.clone(), self.options.clone());
         let _ = std::thread::Builder::new().name("ext-start".into()).spawn(move || {
             write_bundled();
             let host = Arc::new(ExtHost::start(vec![user_dir(), bundled_dir()]));
             log_errors(&host, &logged);
+            host.set_options(options.lock().unwrap().clone());
             *slot.lock().unwrap() = Some(host);
         });
+    }
+
+    /// 設定ファイルの`[ext.…]`を渡す
+    pub fn set_options(&self, o: &Options) {
+        *self.options.lock().unwrap() = o.clone();
+        if let Some(h) = self.host() {
+            h.set_options(o.clone());
+        }
+    }
+
+    /// 計算のモードで, 打ちかけの語から拡張の名前を補う行(`mi`→`mipi`)
+    pub fn hints(&self, text: &str, taken: &[String]) -> Vec<Row> {
+        let t = text.trim().to_lowercase();
+        let Some(h) = self.host().filter(|_| !t.is_empty()) else { return vec![] };
+        h.list()
+            .into_iter()
+            .filter(|m| m.calc && m.keyword.to_lowercase().starts_with(&t) && !taken.contains(&m.keyword.to_lowercase()))
+            .map(|m| Row { name: m.keyword.clone(), sub: m.title.clone(), tag: "try", positions: vec![], action: Action::Fill(format!("{} ", m.keyword)), learn_key: None, warn: false, icon: Icon::Calc, score: 0 })
+            .collect()
+    }
+
+    fn clear_rows(&mut self) {
+        self.copies.clear();
+        self.bands.clear();
+        self.bads.clear();
+        self.completes.clear();
     }
 
     fn host(&self) -> Option<Arc<ExtHost>> {
@@ -159,7 +195,7 @@ impl Ext {
             let head = text.get(..m.keyword.len())?;
             let rest = text.get(m.keyword.len()..)?;
             if head.to_lowercase() == kw && (rest.starts_with(char::is_whitespace) || calc && rest.is_empty()) {
-                Some((m.clone(), rest.trim().to_string()))
+                Some((m.clone(), rest.trim_start().to_string()))
             } else {
                 None
             }
@@ -196,7 +232,7 @@ impl Ext {
         if self.prev_view {
             Some(current.to_vec())
         } else {
-            self.copies.clear();
+            self.clear_rows();
             Some(vec![cscripts::loading_row()])
         }
     }
@@ -210,16 +246,14 @@ impl Ext {
         }
         drop(g);
         self.pending = None;
-        let mut copies = Vec::new();
-        let out: Vec<Row> = rows
-            .iter()
-            .map(|r| {
-                copies.push(r.copy.clone());
-                make_row(r)
-            })
-            .collect();
-        self.copies = copies;
-        Some(out)
+        self.clear_rows();
+        for r in &rows {
+            self.copies.push(r.copy.clone());
+            self.bands.push(r.band.clone());
+            self.bads.push(r.bad);
+            self.completes.push(r.complete.clone());
+        }
+        Some(rows.iter().map(make_row).collect())
     }
 
     /// 結果を待っている世代. なければNone
@@ -248,7 +282,7 @@ fn make_row(r: &ExtRow) -> Row {
     let (tag, action, icon) = match (r.url.as_deref().filter(|u| url_ok(u)), &r.fill) {
         (_, Some(t)) => ("try", Action::Fill(t.clone()), Icon::Calc),
         (Some(u), None) => ("url", Action::OpenUrl(u.trim().to_string()), Icon::Web),
-        (None, None) => ("copy", Action::Copy(r.copy.clone()), Icon::Calc),
+        (None, None) => (if r.copy.is_empty() { "" } else { "copy" }, Action::Copy(r.copy.clone()), Icon::Calc),
     };
     Row { name: r.title.clone(), sub: r.subtitle.clone(), tag, positions: vec![], action, learn_key: None, warn: false, icon, score: 0 }
 }

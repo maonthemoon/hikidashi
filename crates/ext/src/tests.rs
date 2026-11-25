@@ -32,119 +32,130 @@ fn 見本の拡張を読んで行が返る() {
     assert_eq!(l[0].keyword, "mipi");
     assert_eq!(l[0].title, "MIPI RFFE");
     assert!(l[0].clipboard);
-    let rows = run(&h, "mipi", "6 1C 38", None);
-    assert_eq!(rows[0].title, "0110 010 11100 1 00111000 0");
-    assert_eq!(rows[0].subtitle, "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000");
-    assert_eq!(rows[0].copy, "0110010111001001110000");
+    let rows = run(&h, "mipi", "sa=6 addr=1C data=38 cmd=w", None);
+    assert_eq!(rows[0].copy, "01100101110010011100000");
+}
+
+/// 帯の箱を`名前:ビット`で並べる
+fn band(rows: &[ExtRow]) -> String {
+    rows.iter().flat_map(|r| &r.band).map(|g| format!("{}{}:{}", if g.gap { "| " } else { "" }, g.label, g.bits)).collect::<Vec<_>>().join(" ")
+}
+
+fn titles(rows: &[ExtRow]) -> Vec<&str> {
+    rows.iter().filter(|r| r.band.is_empty()).map(|r| r.title.as_str()).collect()
 }
 
 #[test]
-fn mipiの値とビット列とパリティ() {
+fn mipiのビット列を分ける() {
+    let h = mipi_host();
+    let r = run(&h, "mipi", "0110 0101_1100 1001110 0000", None);
+    assert_eq!(band(&r), "SSC: | SA:0110 CMD:010 ADDR:11100 P:1 | DATA:00111000 P:0 | B:0");
+    assert_eq!(titles(&r), vec!["Register Write", "Command frame   SA 0x6 · Register Write · 0x1C PM_TRIG", "Data frame   0x38"]);
+    assert_eq!(r[1].subtitle, "SA 0x6 · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000 · 23 bits");
+    assert_eq!(r[2].subtitle, "0110 010 11100 1 · parity OK");
+    assert!(r.iter().all(|x| !x.bad));
+    // 厳密: 最後のBがない, 余る, Bが1
+    let r = run(&h, "mipi", "0110010111001001110000", None);
+    assert_eq!(r[2].title, "1 more bit (the last B)");
+    assert!(r[2].bad);
+    let r = run(&h, "mipi", "011001011100100111000000", None);
+    assert_eq!(r[2].title, "1 extra bit");
+    let r = run(&h, "mipi", "01100101110010011100001", None);
+    assert_eq!(r[2].title, "B must be 0");
+    // パリティが違う: 正しい値も出す
+    let r = run(&h, "mipi", "01100101110010011100010", None);
+    assert!(r[3].bad && r[3].subtitle.contains("parity NG · P should be 0"), "{r:?}");
+    assert!(r[0].band.iter().any(|g| g.bad));
+    let r = run(&h, "mipi", "01100101110000011100000", None);
+    assert!(r[2].bad && r[2].subtitle.contains("P should be 1"), "{r:?}");
+    // コマンドフレームに足りない
+    let r = run(&h, "mipi", "0110010", None);
+    assert_eq!(r[0].title, "6 more bits for the command frame");
+    // 分からないコマンド
+    let r = run(&h, "mipi", "01100001000000000000", None);
+    assert!(titles(&r).contains(&"Unknown command"));
+}
+
+#[test]
+fn mipiの値からビット列() {
     let h = mipi_host();
     let cases = [
-        (0x38, "Active, mask 111, trig 000"),
-        (0x80, "Low Power, mask 000, trig 000"),
-        (0x40, "Startup, mask 000, trig 000"),
-        (0x01, "Active, mask 000, trig 001"),
-        (0x02, "Active, mask 000, trig 010"),
-        (0x04, "Active, mask 000, trig 100"),
-        (0x07, "Active, mask 000, trig 111"),
-        (0x00, "Active, mask 000, trig 000"),
+        ("cmd=w0 sa=6 data=38", "SSC: | SA:0110 CMD:1 DATA:0111000 P:1 | B:0", "Register 0 Write"),
+        ("cmd=w sa=6 addr=1C data=38", "SSC: | SA:0110 CMD:010 ADDR:11100 P:1 | DATA:00111000 P:0 | B:0", "Register Write"),
+        // 読みはデータの前にもBが付く
+        ("cmd=r sa=6 addr=1C data=38", "SSC: | SA:0110 CMD:011 ADDR:11100 P:0 | B:0 | DATA:00111000 P:0 | B:0", "Register Read"),
+        ("cmd=r sa=6 addr=1C", "SSC: | SA:0110 CMD:011 ADDR:11100 P:0 | B:0", "Register Read"),
+        ("cmd=ew sa=6 addr=40 data=12,34", "SSC: | SA:0110 CMD:0000 BC:0001 P:0 | ADDRESS:01000000 P:0 | DATA:00010010 P:1 | DATA:00110100 P:0 | B:0", "Extended Register Write"),
+        ("cmd=er sa=6 addr=40 bytes=2", "SSC: | SA:0110 CMD:0010 BC:0001 P:1 | ADDRESS:01000000 P:0 | B:0", "Extended Register Read"),
+        ("cmd=er sa=6 addr=40 data=1234", "SSC: | SA:0110 CMD:0010 BC:0001 P:1 | ADDRESS:01000000 P:0 | B:0 | DATA:00010010 P:1 | DATA:00110100 P:0 | B:0", "Extended Register Read"),
+        ("cmd=ewl sa=6 addr=1234 data=AB", "SSC: | SA:0110 CMD:00110 BC:000 P:1 | ADDRESS:00010010 P:1 | ADDRESS:00110100 P:0 | DATA:10101011 P:0 | B:0", "Extended Register Write Long"),
+        ("cmd=erl sa=6 addr=1234 bytes=2", "SSC: | SA:0110 CMD:00111 BC:001 P:1 | ADDRESS:00010010 P:1 | ADDRESS:00110100 P:0 | B:0", "Extended Register Read Long"),
     ];
-    for (d, text) in cases {
-        let rows = run(&h, "mipi", &format!("6 0x1C {:X}", d), None);
-        let want = format!("SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x{:02X} · {}", d, text);
-        assert_eq!(rows[0].subtitle, want);
-        // 値から作ったビット列を読み解くとパリティが合う
-        let back = run(&h, "mipi", &rows[0].copy, None);
-        assert_eq!(back[0].subtitle, format!("{} · parity OK", want));
-        assert_eq!(back[0].title, "Register Write");
-        assert_eq!(back[1].title, "SA 0x6");
-        assert_eq!(back[2].title, "Address 0x1C PM_TRIG");
-        assert_eq!(back[3].title, format!("Data 0x{:02X}", d));
-        assert_eq!(back[3].subtitle, format!("{:08b} · {}", d, text));
-        assert_eq!(back[4].title, "Parity OK");
-        assert_eq!(back[5].copy, rows[0].copy);
-        // 末尾のBPの0とスペース, _は無視
-        let spaced = format!("{} 0", rows[0].title.replace(' ', "_"));
-        let back2 = run(&h, "mipi", &spaced, None);
-        assert_eq!(back2[0].subtitle, format!("{} · parity OK", want));
-    }
-    // パリティが違えばNG
-    let rows = run(&h, "mipi", "0110010111001001110001", None);
-    assert!(rows[0].subtitle.ends_with("parity NG"), "{}", rows[0].subtitle);
-}
-
-#[test]
-fn mipiのほかの形() {
-    let h = mipi_host();
-    // Register 0 Write
-    let r = run(&h, "mipi", "6 38", None);
-    assert_eq!(r[0].title, "0110 10111000 1");
-    assert!(r[0].subtitle.contains("Register 0 Write"), "{}", r[0].subtitle);
-    let back = run(&h, "mipi", &r[0].copy, None);
-    assert!(back[0].subtitle.ends_with("0x38 · parity OK"), "{}", back[0].subtitle);
-    // Extended Register Write
-    let r = run(&h, "mipi", "6 1C 123", None);
-    assert!(r[0].subtitle.contains("Extended Register Write · 2 bytes"), "{}", r[0].subtitle);
-    let back = run(&h, "mipi", &r[0].copy, None);
-    assert!(back[0].subtitle.ends_with("← 0x01 0x23 · parity OK"), "{}", back[0].subtitle);
-    let r = run(&h, "mipi", "6 40 12", None);
-    assert!(r[0].subtitle.contains("Extended Register Write · 1 byte ·"), "{}", r[0].subtitle);
-    // Long
-    let r = run(&h, "mipi", "6 1234 AB", None);
-    let back = run(&h, "mipi", &r[0].copy, None);
-    assert!(back[0].subtitle.contains("Write Long · 1 byte · 0x1234 ← 0xAB · parity OK"), "{}", back[0].subtitle);
-    // Register Read(データなし)
-    let back = run(&h, "mipi", "0110011111001", None);
-    assert!(back[0].subtitle.contains("Register Read · 0x1C PM_TRIG"), "{}", back[0].subtitle);
-    // 分からないコマンド
-    let back = run(&h, "mipi", "011000010000000000", None);
-    assert!(back[0].subtitle.contains("unknown command"), "{}", back[0].subtitle);
-    // 使い方(Enterで入力欄に入る)
-    let r = run(&h, "mipi", "", None);
-    assert_eq!(r.len(), 8);
-    assert_eq!(r[1].fill.as_deref(), Some("mipi w 6 1C 38"));
-    // 使い方の例は, どれも読める
-    for row in &r {
-        let q = row.fill.as_deref().unwrap().strip_prefix("mipi ").unwrap();
-        let rows = run(&h, "mipi", q, None);
-        assert!(rows.iter().all(|x| !x.title.is_empty() && x.fill.is_none()), "{q}: {rows:?}");
-    }
-}
-
-#[test]
-fn mipiのモード() {
-    let h = mipi_host();
-    // モードを書いて作り, ビット列を読み解くと同じモードになる
-    for (q, mode, addr) in [
-        ("w 6 1C 38", "Register Write", "Address 0x1C PM_TRIG"),
-        ("r 6 1C", "Register Read", "Address 0x1C PM_TRIG"),
-        ("ew 6 40 12 34", "Extended Register Write", "Address 0x40"),
-        ("er 6 40 2", "Extended Register Read", "Address 0x40"),
-        ("ewl 6 1234 AB", "Extended Register Write Long", "Address 0x1234"),
-        ("erl 6 1234 2", "Extended Register Read Long", "Address 0x1234"),
-        ("w0 6 38", "Register 0 Write", "Address 0x00"),
-        ("WRITE 0x6 0x1C 0x38", "Register Write", "Address 0x1C PM_TRIG"),
-    ] {
+    for (q, want, mode) in cases {
         let r = run(&h, "mipi", q, None);
-        assert!(r[0].subtitle.contains(mode), "{q}: {r:?}");
+        assert_eq!(band(&r), want, "{q}");
+        assert!(r.iter().all(|x| !x.bad), "{q}: {r:?}");
+        // 作ったビット列を読み解くと同じ分解になる
         let back = run(&h, "mipi", &r[0].copy, None);
-        assert_eq!(back[0].title, mode, "{q}");
-        assert_eq!(back[2].title, addr, "{q}");
-        assert!(back.iter().any(|x| x.title == "Parity OK"), "{q}: {back:?}");
+        assert_eq!(band(&back), want, "{q}");
+        assert_eq!(titles(&back)[0], mode, "{q}");
+        // 順番は自由. 0xと小文字もよい
+        let rev: Vec<&str> = q.split(' ').rev().collect();
+        assert_eq!(run(&h, "mipi", &rev.join(" ").to_lowercase(), None)[0].copy, r[0].copy, "{q}");
     }
-    // モードを書かなければ, 使えるものを全部
-    let t = |q: &str| run(&h, "mipi", q, None).into_iter().map(|r| r.subtitle).collect::<Vec<_>>();
-    let v = t("6 1C 38");
-    assert_eq!(v.len(), 3);
-    assert!(v[0].contains("Register Write ·") && v[1].contains("Extended Register Write ·") && v[2].contains("Write Long"), "{v:?}");
-    let v = t("6 1C");
-    assert!(v[0].contains("Register Read") && v[1].contains("Register 0 Write") && v.len() == 4, "{v:?}");
-    // 足りない, 範囲の外
-    assert!(run(&h, "mipi", "w", None)[0].title.contains("SA ADDRESS DATA"));
-    assert!(run(&h, "mipi", "w 6 40 12", None)[0].title.contains("up to 0x1F"));
-    assert!(run(&h, "mipi", "w 16 1C 38", None)[0].title.contains("SA is"));
+    // 種類を書かなければ, 使えるものを全部. Tabで種類を決められる
+    let r = run(&h, "mipi", "sa=6 addr=1C data=0x38", None);
+    assert_eq!(r.len(), 3);
+    assert!(r[0].subtitle.starts_with("Register Write") && r[1].subtitle.starts_with("Extended Register Write ·") && r[2].subtitle.starts_with("Extended Register Write Long"));
+    assert_eq!(r[0].complete.as_deref(), Some("mipi cmd=w sa=6 addr=1C data=0x38 "));
+    assert_eq!(r[0].copy, "01100101110010011100000");
+    // 範囲の外, 書き間違い
+    for (q, e) in [("cmd=w sa=6 addr=40 data=12", "addr is up to 1F"), ("sa=16 addr=1", "sa is 0 to F"), ("sa=6 addr=XY", "addr=XY: hex only"), ("foo=1", "foo=1: use sa= addr= data= (hex)"), ("cmd=w0 sa=6 data=80", "data is 7 bits (up to 7F)"), ("cmd=w sa=6 addr=1 data=1234", "1 byte only")] {
+        let r = run(&h, "mipi", q, None);
+        assert!(r.iter().any(|x| x.title == e && x.bad), "{q}: {r:?}");
+    }
+    // データが多いときは帯を分ける
+    let r = run(&h, "mipi", "cmd=ew sa=6 addr=40 data=000102030405060708090A0B0C0D0E0F", None);
+    assert_eq!(r.iter().filter(|x| !x.band.is_empty()).count(), 4);
+    assert_eq!(r.iter().filter(|x| x.title.starts_with("Data frame")).count(), 16);
+}
+
+#[test]
+fn mipiの補完() {
+    let h = mipi_host();
+    let fills = |q: &str| run(&h, "mipi", q, None).into_iter().filter_map(|r| r.fill).collect::<Vec<_>>();
+    // 何もなければコマンドの一覧. Masked Writeは設定がなければ出さない
+    let f = fills("");
+    assert_eq!(f.len(), 7);
+    assert_eq!(f[1], "mipi cmd=w ");
+    assert_eq!(fills("cmd=e"), vec!["mipi cmd=ew ", "mipi cmd=er ", "mipi cmd=ewl ", "mipi cmd=erl "]);
+    assert_eq!(fills("cmd=w "), vec!["mipi cmd=w sa=", "mipi cmd=w addr=", "mipi cmd=w data="]);
+    assert_eq!(fills("cmd=w sa=6 "), vec!["mipi cmd=w sa=6 addr=", "mipi cmd=w sa=6 data="]);
+    assert_eq!(fills("cmd=w sa=6 a"), vec!["mipi cmd=w sa=6 addr="]);
+    assert_eq!(fills("cmd=w sa=6 addr=1"), vec!["mipi cmd=w sa=6 addr=1C ", "mipi cmd=w sa=6 addr=1D ", "mipi cmd=w sa=6 addr=1E ", "mipi cmd=w sa=6 addr=1F "]);
+    assert!(fills("cmd=er sa=6 addr=40 ").contains(&"mipi cmd=er sa=6 addr=40 bytes=".to_string()));
+    assert!(fills("s").contains(&"mipi sa=".to_string()));
+    // 補完だけで最後まで行ける
+    let r = run(&h, "mipi", "cmd=w sa=6 addr=1C data=38 ", None);
+    assert_eq!(r[0].copy, "01100101110010011100000");
+    // クリップボードのビット列
+    let r = run(&h, "mipi", "", Some("0110 0101 1100 1001 1100 000\r\n"));
+    assert!(r[1].subtitle.starts_with("From the clipboard · SA 0x6"), "{r:?}");
+}
+
+#[test]
+fn mipiの設定のコマンド() {
+    let h = mipi_host();
+    // 値は例(本当の値は公開されていないので持たない)
+    let mut o = Options::new();
+    o.entry("mipi".into()).or_default().insert("masked_write".into(), "0001 0101".into());
+    assert!(run(&h, "mipi", "cmd=mw sa=6 addr=40 mask=F0 data=05", None)[0].bad);
+    h.set_options(o);
+    let r = run(&h, "mipi", "cmd=mw sa=6 addr=40 mask=F0 data=05", None);
+    assert_eq!(band(&r), "SSC: | SA:0110 CMD:00010101 P:0 | ADDRESS:01000000 P:0 | MASK:11110000 P:1 | DATA:00000101 P:1 | B:0");
+    let back = run(&h, "mipi", &r[0].copy, None);
+    assert_eq!(titles(&back)[0], "Masked Write");
+    assert!(back.iter().any(|x| x.title == "Mask frame   0xF0"));
 }
 
 fn frame_rows(byte: u8) -> Vec<u8> {
@@ -174,9 +185,9 @@ fn mipiの表を読む() {
     let rows = run(&h, "mipi", "", Some(&t));
     assert_eq!(rows.len(), 3, "{:?}", rows);
     assert_eq!(rows[0].title, "ACTIVE");
-    assert_eq!(rows[0].subtitle, "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000 · parity OK");
+    assert_eq!(rows[0].subtitle, "Register Write · SA 0x6 · 0x1C PM_TRIG ← 0x38 · Active, mask 111, trig 000 · parity OK");
     assert_eq!(rows[1].title, "LOW_POW");
-    assert_eq!(rows[1].subtitle, "SA 0x6 · Register Write · 0x1C PM_TRIG ← 0x80 · Low Power, mask 000, trig 000 · parity OK");
+    assert_eq!(rows[1].subtitle, "Register Write · SA 0x6 · 0x1C PM_TRIG ← 0x80 · Low Power, mask 000, trig 000 · parity OK");
     assert_eq!(rows[2].title, "Empty");
     assert_eq!(rows[2].subtitle, "No command");
     // 見出しだけ大文字小文字が違っても読む. SSCがない列, ビットが足りない列
@@ -186,10 +197,10 @@ fn mipiの表を読む() {
     assert_eq!(rows[1].subtitle, "No command");
     let t3 = "SCLK\tA\n0\t1\n0\t0\n1\t0\n0\t0\n1\t1\n0\t1\n";
     let rows = run(&h, "mipi", "", Some(t3));
-    assert!(rows[0].subtitle.contains("Not enough bits"), "{:?}", rows);
+    assert!(rows[0].subtitle.contains("more bits for the command frame"), "{:?}", rows);
     // 表でないクリップボードは使い方
     let rows = run(&h, "mipi", "", Some("hello"));
-    assert_eq!(rows[1].fill.as_deref(), Some("mipi w 6 1C 38"));
+    assert_eq!(rows[1].fill.as_deref(), Some("mipi cmd=w "));
 }
 
 #[test]
@@ -204,7 +215,7 @@ export function search(q,c){ if(q==="arr") return "str"; if(q==="ok") return [{t
     let r = run(&h, "bad", "arr", None);
     assert!(r[0].title.starts_with("Bad: "), "{}", r[0].title);
     let r = run(&h, "bad", "ok", None);
-    assert_eq!(r[0], ExtRow { title: "t".into(), subtitle: "".into(), copy: "t".into(), url: None, fill: None });
+    assert_eq!(r[0], ExtRow { title: "t".into(), subtitle: "".into(), copy: "t".into(), url: None, fill: None, complete: None, band: vec![], bad: false });
     assert!(run(&h, "none", "x", None).is_empty());
 }
 
@@ -325,26 +336,12 @@ fn 溜まった古い要求は捨てて最新だけ実行する() {
 #[test]
 fn コマンドフレームのパリティはsaを含む() {
     let h = mipi_host();
-    // SA 0x7(1が3つ): 12ビット中の1は7個なのでパリティ0
-    let r = run(&h, "mipi", "7 1C 38", None);
-    assert_eq!(r[0].title, "0111 010 11100 0 00111000 0");
-    let back = run(&h, "mipi", &r[0].copy, None);
-    assert!(back[0].subtitle.ends_with("parity OK"), "{}", back[0].subtitle);
-    // SAを除いた計算(パリティ1)のものはNG
-    let bad = run(&h, "mipi", "0111010111001001110000", None);
-    assert!(bad[0].subtitle.ends_with("parity NG"), "{}", bad[0].subtitle);
-    // Register 0 Write: 0111 1 0111000 -> 1は7個 -> 0
-    let r = run(&h, "mipi", "7 38", None);
-    assert_eq!(r[0].title, "0111 10111000 0");
-    assert!(run(&h, "mipi", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
-    // Extended: 0111 0000 0000 -> 1は3個 -> 0
-    let r = run(&h, "mipi", "7 40 12", None);
-    assert!(r[0].title.starts_with("0111 00000000 0 "), "{}", r[0].title);
-    assert!(run(&h, "mipi", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
-    // Long: 0111 00110000 -> 1は5個 -> 0
-    let r = run(&h, "mipi", "7 1234 AB", None);
-    assert!(r[0].title.starts_with("0111 00110000 0 "), "{}", r[0].title);
-    assert!(run(&h, "mipi", &r[0].copy, None)[0].subtitle.ends_with("parity OK"));
+    // SAの1の数が偶数(6)と奇数(7)で, コマンドフレームのPが変わる(ユーザーの資料: コマンドフレーム13ビットの1が奇数個)
+    for (sa, p) in [("6", "1"), ("7", "0")] {
+        let r = run(&h, "mipi", &format!("cmd=w sa={sa} addr=1C data=38"), None);
+        assert_eq!(r[0].band[4].bits, p);
+        assert!(run(&h, "mipi", &r[0].copy, None).iter().all(|x| !x.bad));
+    }
 }
 
 #[test]

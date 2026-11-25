@@ -23,9 +23,9 @@ pub struct Config {
     /// Enterに修飾キーを足したときにすること(2026-11-24)
     pub keys: Keys,
     pub tools: Tools,
-    /// Tabのメニューの「〜で開く」(Q5). 入っているものだけ出す
+    /// 操作のメニュー(→)の「〜で開く」(Q5). 入っているものだけ出す
     pub open_with: Vec<OpenWith>,
-    /// Tabのメニューに出すもの(種類ごと. K24)
+    /// 操作のメニュー(→)に出すもの(種類ごと. K24)
     pub menu: Menu,
     /// 設定画面とトレイの言語(K24)
     pub ui: Ui,
@@ -33,6 +33,8 @@ pub struct Config {
     pub search: Search,
     /// メインのほかのホットキー(選んだ文字で開く)
     pub hotkeys: Hotkeys,
+    /// 拡張ごとの設定(`[ext.mipi] masked_write = "…"`. K52). 中身は拡張に渡すだけ
+    pub ext: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 /// 検索まわりの入れ切り
@@ -65,10 +67,10 @@ impl Default for Hotkeys {
     }
 }
 
-/// Tabのメニューの項目の名前(K24). 並び順はこの順
+/// 操作のメニュー(→)の項目の名前(K24). 並び順はこの順
 pub const MENU_ITEMS: [&str; 8] = ["copy_file", "new_window", "open_with", "reveal", "copy_path", "copy_wsl_path", "admin", "explorer"];
 
-/// Tabのメニューに出すもの(K24). 種類ごとに`MENU_ITEMS`の名前を並べる. 種類に合わないものは出さない
+/// 操作のメニュー(→)に出すもの(K24). 種類ごとに`MENU_ITEMS`の名前を並べる. 種類に合わないものは出さない
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Menu {
@@ -402,6 +404,7 @@ impl Default for Config {
             ui: Ui::default(),
             search: Search::default(),
             hotkeys: Hotkeys::default(),
+            ext: BTreeMap::new(),
         }
     }
 }
@@ -724,7 +727,7 @@ pub fn to_toml(c: &Config) -> String {
     line("# Terminal for Alt+Enter: a name from [[open_with]]. Leave empty to use WezTerm, then Windows Terminal.");
     line(&format!("terminal = {}", q(&c.tools.terminal)));
     line("");
-    line("# \"Open in ...\" in the Tab menu. Only apps that are installed are shown.");
+    line("# \"Open in ...\" in the actions menu (the right arrow key). Only apps that are installed are shown.");
     line("# exe: leave empty to find VS Code, WezTerm or Windows Terminal automatically.");
     line("# args: {path} is the file or folder, {dir} is the folder. Leave empty for the usual way.");
     for ow in &c.open_with {
@@ -734,7 +737,7 @@ pub fn to_toml(c: &Config) -> String {
         line(&format!("args = {}", q(&ow.args)));
     }
     line("");
-    line("# What the Tab menu shows for apps, files and folders. Items: copy_file (copy the file itself), new_window (apps), open_with (\"Open in ...\"),");
+    line("# What the actions menu (the right arrow key) shows for apps, files and folders. Items: copy_file (copy the file itself), new_window (apps), open_with (\"Open in ...\"),");
     line("# reveal (open the folder it is in), copy_path, copy_wsl_path (only when WSL is installed), admin, explorer (folders).");
     line("[menu]");
     line(&format!("app = {}", list(&c.menu.app)));
@@ -755,6 +758,18 @@ pub fn to_toml(c: &Config) -> String {
     line("# selection: open Hikidashi with the text selected in the app in front. Leave empty to turn it off.");
     line("[hotkeys]");
     line(&format!("selection = {}", q(&c.hotkeys.selection)));
+    line("");
+    line("# Settings for extensions. masked_write: the 8 command bits of Masked Write in MIPI RFFE (not public, so not built in).");
+    if !c.ext.contains_key("mipi") {
+        line("# [ext.mipi]");
+        line("# masked_write = \"xxxxxxxx\"");
+    }
+    for (name, opts) in &c.ext {
+        line(&format!("[ext.{}]", q(name)));
+        for (k, v) in opts {
+            line(&format!("{} = {}", q(k), q(v)));
+        }
+    }
     o
 }
 
@@ -799,7 +814,7 @@ impl Config {
         }
         for (kind, list) in [("app", &self.menu.app), ("file", &self.menu.file), ("folder", &self.menu.folder)] {
             if let Some(bad) = list.iter().find(|i| !MENU_ITEMS.contains(&i.as_str())) {
-                return Err(format!("Unknown Tab menu item \"{bad}\" for {kind}."));
+                return Err(format!("Unknown actions menu item \"{bad}\" for {kind}."));
             }
         }
         let sel = self.hotkeys.selection.trim();
@@ -898,6 +913,7 @@ mod tests {
         c.browser.browser = "edge".into();
         c.browser.open_in = "tab".into();
         c.browser.edge_profile = "Profile 1".into();
+        c.ext.entry("mipi".into()).or_default().insert("masked_write".into(), "0101".into());
         let text = to_toml(&c);
         assert_eq!(Config::parse(&text).unwrap(), c, "{text}");
         assert!(text.contains(r"roots = ['%USERPROFILE%', 'D:\work']"), "{text}");

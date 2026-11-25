@@ -531,7 +531,7 @@ fn child_rows(raw: &str, ctx: &Ctx) -> Vec<Row> {
         .collect()
 }
 
-/// 補完で入力欄に入れる文字(`→`. 2026-11-24). `%APPDATA%`の行は`%APPDATA%\`, パスの中身の行は打ったフォルダー+名前(フォルダーなら`\`も)
+/// 補完で入力欄に入れる文字(`Tab`. K52. 前は`→`). `%APPDATA%`の行は`%APPDATA%\`, パスの中身の行は打ったフォルダー+名前(フォルダーなら`\`も)
 pub fn completion(input: &str, row: &Row, is_dir: bool) -> Option<String> {
     if row.name.starts_with('%') && row.name.ends_with('%') && row.name.len() > 2 {
         return Some(format!("{}\\", row.name));

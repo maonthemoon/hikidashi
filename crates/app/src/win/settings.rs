@@ -120,10 +120,21 @@ const E_APP: i32 = 16;
 const E_APPS: i32 = 17;
 const E_BROWSE: i32 = 18;
 
-const SECTIONS: [&str; 8] = ["General", "Hotkeys", "Keywords", "Search", "Apps", "Tab menu", "Web", "Aliases"];
+const SECTIONS: [&str; 8] = ["General", "Hotkeys", "Keywords", "Search", "Apps", "Actions", "Web", "Aliases"];
 const PREFIX_LABELS: [&str; 10] = ["Apps", "Files", "Bookmarks", "End a process", "WSL", "Box", "Google", "ChatGPT", "Clipboard history", "Calculator"];
-/// キーワードのあとに打つ文字の例
-const PREFIX_EXAMPLES: [&str; 10] = ["power", "report", "news", "excel", "report", "design", "weather", "question", "memo", "12*3"];
+/// キーワードで探すものの説明(K52)
+const PREFIX_NOTES: [&str; 10] = [
+    "Apps in the Start menu",
+    "File and folder names",
+    "Chrome and Edge bookmarks",
+    "Running apps",
+    "Files in your WSL home",
+    "Files in Box Drive",
+    "Search on Google",
+    "A long question to ChatGPT",
+    "Text and files you copied",
+    "Numbers, formulas, RF, MIPI",
+];
 const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows"), ("ja", "日本語"), ("en", "English")];
 /// ランチャーの窓, 書く窓, 設定画面, トレイのメニューの色(K39, K43)
 const THEMES: [(&str, &str); 3] = [("auto", "Same as Windows"), ("light", "Light"), ("dark", "Dark")];
@@ -1078,12 +1089,12 @@ fn terminals(c: &Config) -> (Vec<String>, usize) {
     (names, c.open_with.iter().position(|o| o.name.eq_ignore_ascii_case(c.tools.terminal.trim())).map_or(0, |i| i + 1))
 }
 
-/// キーワードの使い方の例. 空なら使わないこと
-fn prefix_example(i: usize, v: &str) -> String {
+/// キーワードの説明. 空なら使わないこと
+fn prefix_note(i: usize, v: &str) -> String {
     if v.trim().is_empty() {
         tr("Not used")
     } else {
-        format!("{} {}", v.trim(), tr(PREFIX_EXAMPLES[i]))
+        tr(PREFIX_NOTES[i])
     }
 }
 
@@ -1162,7 +1173,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
             let l = p.m.label(label);
             surface(l, |p| p.card);
             p.at(l, PAD + 16, y + 11, 210, 22);
-            let ex = p.m.raw(w!("STATIC"), &prefix_example(i, v), (SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), ID_PFX_EX + i as i32, F_HINT);
+            let ex = p.m.raw(w!("STATIC"), &prefix_note(i, v), (SS_LEFT.0 | SS_CENTERIMAGE.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), ID_PFX_EX + i as i32, F_HINT);
             tint(ex, |p| p.text_tertiary);
             surface(ex, |p| p.card);
             p.at(ex, PAD + 236, y + 11, 200, 22);
@@ -1194,7 +1205,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         p.title("Apps");
         p.group("Folders with apps", ".exe files here are listed as apps.");
         p.list(ID_APPDIRS, &c.apps.extra_dirs, &[], &[], 3, vec![Bar::Button(ID_APPDIRS_ADD, "Add"), Bar::Button(ID_APPDIRS_DEL, "Remove")]);
-        p.group("Open in another app", "Shown as \"Open in …\" in the Tab menu. Apps that are not installed are not shown.");
+        p.group("Open in another app", "Shown as \"Open in …\" in the actions menu. Apps that are not installed are not shown.");
         let bar = vec![Bar::Button(ID_OW_ADD, "Add"), Bar::Button(ID_OW_EDIT, "Edit"), Bar::Button(ID_OW_DEL, "Remove")];
         p.list(ID_OPENWITH, &open_with_rows(c), &[180], &["Name", "App"], 4, bar);
         p.group("Terminal", "");
@@ -1206,8 +1217,8 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
     // Tab menu(K24): 項目×種類のチェック. 種類に合わないところは空ける
     {
         let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
-        p.title("Tab menu");
-        p.group("", "Choose what appears when you press Tab.");
+        p.title("Actions");
+        p.group("", "Choose what appears when you press the right arrow key on a row.");
         p.card();
         const CW: i32 = 88;
         let cx = |k: usize| PAD + BODY_W - 12 - CW * (3 - k as i32);
@@ -1910,7 +1921,7 @@ impl Settings {
             _ if (ID_PFX..ID_PFX + 10).contains(&id) && code == EN_CHANGE => {
                 let i = (id - ID_PFX) as usize;
                 let h = item(self.hwnd, ID_PFX_EX + i as i32);
-                set_raw_text(h, &prefix_example(i, &text(item(self.hwnd, id))));
+                set_raw_text(h, &prefix_note(i, &text(item(self.hwnd, id))));
                 vec![]
             }
             ID_OW_ADD => vec![Task::Editor(EditKind::OpenWith { index: None, ow: OpenWith { name: String::new(), exe: String::new(), args: String::new() } })],
@@ -1964,7 +1975,9 @@ fn run_tasks(tasks: Vec<Task>) {
                     continue;
                 }
                 with_settings(|s| {
-                    let p = hikidashi_core::prompt::config_prompt(&config::to_toml(&s.orig), super::i18n::is_ja());
+                    // 拡張の設定(公開されていない値など)は, AIに渡す文に入れない(K52)
+                    let shown = Config { ext: Default::default(), ..s.orig.clone() };
+                    let p = hikidashi_core::prompt::config_prompt(&config::to_toml(&shown), super::i18n::is_ja());
                     s.say(match actions::copy_text(s.hwnd, &p) {
                         Ok(()) => Status::Ok(tr("Copied")),
                         Err(e) => Status::Error(e),
