@@ -38,7 +38,7 @@
 | 調べものの多くを, ブラウザーのChatGPTで済ませる | 窓の整列, 定型文, 通貨の換算もまとめたい |
 | WindowsとWSLを行き来する, 16進数やdBmをよく使う | AIの答えを, ランチャーの窓の中で読みたい |
 
-向いていない使い方には, PowerToysのコマンドパレット, Raycast, Flow Launcherなどがあります([比べた表](https://maonthemoon.github.io/hikidashi/#compare)). ホットキーを分ければ, 一緒に使えます.
+拡張をたくさん使うならRaycastやFlow Launcher, Windowsの道具をまとめて使うならPowerToysなどと使い分けてください. ホットキーを分ければ, 一緒に使えます.
 
 ## インストール
 
