@@ -659,7 +659,8 @@ fn apps_loop(shared: Arc<Shared>, hwnd: Hwnd) {
         storage::log(&format!("apps: {} items, {:?}", list.len(), t0.elapsed()));
         // どのアプリがどの名前で探せるか(exeの名前が取れたか)を残す. 原因を追うため
         let lines: Vec<String> = list.iter().map(|it| format!("  {} | {} | {} | {}", it.name, it.keys.join(","), it.target, it.args)).collect();
-        storage::log(&format!("apps list:\n{}", lines.join("\n")));
+        // ログが長くなるので別のファイルに書く(K51)
+        let _ = std::fs::write(storage::data_dir().join("apps.txt"), lines.join("\r\n"));
         *shared.apps.lock().unwrap() = Some(list);
         post(hwnd, WM_APP_APPS);
         let mut dirs = apps::start_menu_dirs();

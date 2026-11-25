@@ -212,6 +212,9 @@ pub fn buffered(hdc: HDC, rc: &RECT, f: impl FnOnce(HDC)) {
 /// 何行かの文字(はみ出すところは折り返す)
 pub fn draw_lines(hdc: HDC, text: &str, font: HFONT, color: u32, rc: RECT) {
     let mut t: Vec<u16> = text.encode_utf16().collect();
+    if t.is_empty() {
+        return;
+    }
     let (mut rc, mut m) = (rc, rc);
     unsafe {
         let old = SelectObject(hdc, font.into());
@@ -227,6 +230,9 @@ pub fn draw_lines(hdc: HDC, text: &str, font: HFONT, color: u32, rc: RECT) {
 /// 1行の文字の幅(px)
 pub fn text_width(hdc: HDC, text: &str, font: HFONT) -> i32 {
     let mut t: Vec<u16> = text.encode_utf16().collect();
+    if t.is_empty() {
+        return 0;
+    }
     let mut rc = RECT::default();
     unsafe {
         let old = SelectObject(hdc, font.into());

@@ -186,6 +186,18 @@ fn is_gdi_format(f: u32) -> bool {
     matches!(f, 2 | 3 | 9 | 14 | 0x80..=0x8E | 0x0300..=0x03FF)
 }
 
+/// OLEが内部で使う形式(中身はそのアプリの中だけで意味がある. 戻すと, 貼る側がおかしくなる)
+fn is_ole_private(f: u32) -> bool {
+    static IDS: OnceLock<[u32; 2]> = OnceLock::new();
+    IDS.get_or_init(|| {
+        ["DataObject", "Ole Private Data"].map(|n| {
+            let w = WStr::new(n);
+            unsafe { RegisterClipboardFormatW(w.pcwstr()) }
+        })
+    })
+    .contains(&f)
+}
+
 /// 今のクリップボードの形式をすべて写して退避する. 開けなければ`None`(あとで戻さない)
 pub fn save(hwnd: HWND) -> Option<Saved> {
     if !open(hwnd) {
@@ -203,7 +215,7 @@ pub fn save(hwnd: HWND) -> Option<Saved> {
         let mut total = 0usize;
         for f in list {
             // 文字から作られる形式(CF_TEXT, CF_OEMTEXT, CF_LOCALE)は, 文字を戻せば自動で付く
-            if is_gdi_format(f) || (has_text && matches!(f, 1 | 7 | 16)) {
+            if is_gdi_format(f) || is_ole_private(f) || (has_text && matches!(f, 1 | 7 | 16)) {
                 continue;
             }
             let Ok(h) = GetClipboardData(f) else { continue };

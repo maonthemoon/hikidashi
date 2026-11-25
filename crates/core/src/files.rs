@@ -2,6 +2,7 @@
 //! 名前は1つの大きな文字列に詰め, 親の番号でパスを組み立てる.
 
 use crate::fuzzy::{self, lower_str};
+use crate::migemo::{self, Dict};
 use crate::search::{match_name, Prepared, TopK};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -138,7 +139,7 @@ impl FileTable {
             if !f.exts.is_empty() && (fl & FLAG_DIR != 0 || !f.exts.iter().any(|e| lower.ends_with(e.as_str()))) {
                 continue;
             }
-            if !f.globs.iter().all(|g| glob(g, lower)) {
+            if !f.globs.iter().all(|g| g.matches(lower)) {
                 continue;
             }
             if p.is_empty() {
@@ -227,12 +228,51 @@ pub struct Filters {
     /// パスの途中にあるフォルダー名の部分(小文字). すべてについて, 含む親のフォルダーがあること
     pub dirs: Vec<String>,
     /// `*`を含む名前の形(小文字. `*.pdf`). すべてに合うこと(K50)
-    pub globs: Vec<String>,
+    pub globs: Vec<Glob>,
     /// 更新が今から何秒以内か
     pub modified_secs: Option<u64>,
 }
 
+/// `*`で区切った名前の形. 区切りごとに, どれかに合えばよい語を持つ(ローマ字なら日本語にも広げる. K51)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Glob {
+    segs: Vec<Vec<String>>,
+}
+
+impl Glob {
+    fn new(pattern: &str) -> Glob {
+        Glob { segs: pattern.split('*').map(|s| vec![s.to_string()]).collect() }
+    }
+
+    fn matches(&self, name: &str) -> bool {
+        self.rest(0, name)
+    }
+
+    fn rest(&self, i: usize, name: &str) -> bool {
+        let last = i + 1 == self.segs.len();
+        self.segs[i].iter().any(|w| {
+            if i == 0 {
+                name.strip_prefix(w.as_str()).is_some_and(|r| if last { r.is_empty() } else { self.rest(1, r) })
+            } else if last {
+                name.ends_with(w.as_str())
+            } else {
+                name.find(w.as_str()).is_some_and(|at| self.rest(i + 1, &name[at + w.len()..]))
+            }
+        })
+    }
+}
+
 impl Filters {
+    /// `benkyo*`のようなローマ字を, 日本語の名前にも合うように広げる
+    pub fn expand_romaji(&mut self, dict: Option<&Dict>) {
+        for g in &mut self.globs {
+            for seg in &mut g.segs {
+                let e = migemo::expand(&seg[0], dict);
+                seg.extend(e.words().iter().map(|w| w.to_lowercase()));
+            }
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.exts.is_empty() && self.dirs.is_empty() && self.globs.is_empty() && self.modified_secs.is_none()
     }
@@ -275,7 +315,7 @@ pub fn parse_filters(input: &str) -> (String, Filters) {
                 continue;
             }
         } else if lw.contains('*') && lw.chars().any(|c| c != '*') {
-            f.globs.push(lw);
+            f.globs.push(Glob::new(&lw));
             continue;
         }
         rest.push(w);
@@ -568,6 +608,13 @@ mod tests {
         assert_eq!(names(&t, "見積* in:reports"), vec!["見積.pdf"]);
         assert_eq!(names(&t, "*port*.pdf"), vec!["report.pdf"]);
         assert!(names(&t, "*.pdf memo").is_empty());
+        // ローマ字は日本語の名前にも合う
+        let (_, mut f) = parse_filters("kaigi*.pdf");
+        let dict = Dict::parse("かいぎ /会議/\n");
+        assert!(!f.globs[0].matches("会議資料.pdf"));
+        f.expand_romaji(Some(&dict));
+        assert!(f.globs[0].matches("会議資料.pdf") && f.globs[0].matches("カイギ.pdf") && f.globs[0].matches("kaigi.pdf"));
+        assert!(!f.globs[0].matches("会議資料.docx") && !f.globs[0].matches("定例会議.pdf"));
         // `*`だけは絞り込みにしない
         assert!(parse_filters("*").1.is_empty());
         assert!(parse_filters("2 ** 3").1.is_empty());

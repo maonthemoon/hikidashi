@@ -110,6 +110,9 @@ fn round_fill(hdc: HDC, rc: &RECT, r: i32, color: u32) {
 }
 
 fn text_width(hdc: HDC, f: HFONT, t: &str) -> i32 {
+    if t.is_empty() {
+        return 0;
+    }
     let w: Vec<u16> = t.encode_utf16().collect();
     let mut sz = SIZE::default();
     unsafe {
@@ -130,7 +133,11 @@ fn text_height(hdc: HDC, f: HFONT) -> i32 {
     tm.tmHeight
 }
 
+/// 空の文字は渡さない(空のVecの先頭は無効な場所で, DrawTextWの中で落ちる. K51)
 fn draw_text(hdc: HDC, f: HFONT, t: &str, color: u32, rc: &mut RECT, flags: DRAW_TEXT_FORMAT) {
+    if t.is_empty() {
+        return;
+    }
     let mut w: Vec<u16> = t.encode_utf16().collect();
     unsafe {
         let old = SelectObject(hdc, f.into());
@@ -171,10 +178,12 @@ fn draw_name(hdc: HDC, app: &App, name: &str, positions: &[u32], x: i32, y: i32,
                     wpart = text_width(hdc, font, &part);
                 }
             }
-            let old = SelectObject(hdc, font.into());
-            let wv: Vec<u16> = part.encode_utf16().collect();
-            let _ = TextOutW(hdc, cx, y, &wv);
-            SelectObject(hdc, old);
+            if !part.is_empty() {
+                let old = SelectObject(hdc, font.into());
+                let wv: Vec<u16> = part.encode_utf16().collect();
+                let _ = TextOutW(hdc, cx, y, &wv);
+                SelectObject(hdc, old);
+            }
             cx += wpart;
             limit -= wpart;
             if part.len() < t.len() {

@@ -71,6 +71,17 @@ struct LineInfo {
     marker_end: usize,
 }
 
+/// 行の見た目を決めるもの. 同じなら整え直さない
+#[derive(Clone, PartialEq)]
+struct LineKey {
+    text: Vec<u16>,
+    block: Block,
+    active: bool,
+    in_marker: bool,
+    block_active: bool,
+    first: bool,
+}
+
 pub struct Compose {
     pub hwnd: HWND,
     /// 整えるときに元に戻す(Ctrl+Z)の記録を止めるため
@@ -83,6 +94,11 @@ pub struct Compose {
     /// 最後に整えたときのカーソル(行, 印の中か)
     shown: Option<(usize, bool)>,
     lines: Vec<LineInfo>,
+    /// 前に整えたときの行(変わった行だけ整える. K51)と, そのときの大きさ, 設定, テーマ
+    keys: Vec<LineKey>,
+    env: (u32, bool, bool),
+    /// 絵の位置だけを集め, 字は変えない
+    dry: std::cell::Cell<bool>,
     /// 画面の拡大率(字の大きさに使う)
     pub dpi: u32,
     /// RichEditがtwipをピクセルにするときの拡大率
@@ -111,6 +127,9 @@ impl Measure {
     /// 本文の字での幅(twip)
     fn twips(&self, s: &str) -> i32 {
         let w: Vec<u16> = s.encode_utf16().collect();
+        if w.is_empty() {
+            return 0;
+        }
         let mut sz = SIZE::default();
         unsafe {
             let _ = GetTextExtentPoint32W(self.dc, &w, &mut sz);
@@ -158,7 +177,7 @@ impl Compose {
             let dc = GetDC(Some(hwnd));
             let dc_dpi = GetDeviceCaps(Some(dc), LOGPIXELSY).max(1);
             ReleaseDC(Some(hwnd), dc);
-            Some(Compose { hwnd, doc, active: false, ime: false, hide_marks: true, shown: None, lines: vec![], dpi: 96, dc_dpi })
+            Some(Compose { hwnd, doc, active: false, ime: false, hide_marks: true, shown: None, lines: vec![], keys: vec![], env: (0, false, false), dry: std::cell::Cell::new(false), dpi: 96, dc_dpi })
         }
     }
 
@@ -184,6 +203,7 @@ impl Compose {
             SendMessageW(self.hwnd, EM_SETTEXTEX, Some(WPARAM(&st as *const _ as usize)), Some(LPARAM(w.as_ptr() as isize)));
         }
         self.shown = None;
+        self.keys.clear();
     }
 
     /// 選んでいる範囲(なければカーソルの位置)を置き換える. 元に戻せる
@@ -261,7 +281,7 @@ impl Compose {
     }
 
     fn apply(&self, a: usize, b: usize, cf: &CHARFORMAT2W) {
-        if a >= b {
+        if a >= b || self.dry.get() {
             return;
         }
         self.set_sel(a, b);
@@ -271,6 +291,9 @@ impl Compose {
     }
 
     fn para(&self, at: usize, pf: &PARAFORMAT2) {
+        if self.dry.get() {
+            return;
+        }
         self.set_sel(at, at);
         unsafe {
             SendMessageW(self.hwnd, EM_SETPARAFORMAT, Some(WPARAM(0)), Some(LPARAM(pf as *const _ as isize)));
@@ -327,6 +350,53 @@ impl Compose {
             }
         }
         let caret_block = caret_line.and_then(|i| block_of[i]);
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let state: Vec<(bool, bool, bool)> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let active = Some(i) == caret_line;
+                (active, active && s0 == s1 && s1 >= l.start && s1 < l.marker_end(), block_of[i].is_some() && block_of[i] == caret_block)
+            })
+            .collect();
+        let keys: Vec<LineKey> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                // カーソルがあるかどうかで見た目が変わるのは, 記号のある行だけ
+                let cares = !l.marks.is_empty() || l.marker.is_some() || l.block != Block::Plain;
+                let (active, in_marker, block_active) = state[i];
+                LineKey { text: units[l.start.min(units.len())..l.end().min(units.len())].to_vec(), block: l.block, active: active && cares, in_marker, block_active, first: i == 0 }
+            })
+            .collect();
+        let env = (self.dpi, self.hide_marks, super::theme::is_dark());
+        let full = self.keys.is_empty() || env != self.env || units.is_empty();
+        // 変わった行(前と後ろの同じところを除く)
+        let (from, to) = if full {
+            (0, lines.len())
+        } else {
+            let max = keys.len().min(self.keys.len());
+            let p = keys.iter().zip(&self.keys).take_while(|(a, b)| a == b).count();
+            let q = keys.iter().rev().zip(self.keys.iter().rev()).take(max - p).take_while(|(a, b)| a == b).count();
+            let (mut f, mut t) = (p, keys.len() - q);
+            // 行が増減したら, 段落の書式が隣に移ることがあるので, 前後の1行も整える
+            if keys.len() != self.keys.len() {
+                f = f.saturating_sub(1);
+                t = (t + 1).min(keys.len());
+            }
+            (f, t)
+        };
+        if from >= to && !full {
+            DECOS.with(|d| {
+                let mut d = d.borrow_mut();
+                d.at = s0;
+                d.len = units.len();
+            });
+            self.keys = keys;
+            self.lines = lines.iter().map(|l| LineInfo { start: l.start, end: l.end(), marker_end: l.marker_end() }).collect();
+            self.shown = self.caret_state(s1).filter(|_| s0 == s1).or(caret_line.map(|i| (i, false)));
+            return t0.elapsed().as_secs_f64() * 1000.0;
+        }
         let m = Measure::new(self.hwnd, BODY_PX * self.dpi as i32 / 96, self.dc_dpi);
         let mut decos = Vec::new();
         let h = self.hwnd;
@@ -347,19 +417,24 @@ impl Compose {
             base.Base.crTextColor = rgb(pal().text);
             base.Base.yHeight = self.twips(BODY_PX as f32);
             Self::face(&mut base, body_face());
-            SendMessageW(h, EM_SETCHARFORMAT, Some(WPARAM(SCF_ALL as usize)), Some(LPARAM(&base as *const _ as isize)));
-            // 空のときに打つ字も同じにする
-            SendMessageW(h, EM_SETCHARFORMAT, Some(WPARAM(SCF_DEFAULT as usize)), Some(LPARAM(&base as *const _ as isize)));
-            self.set_sel(0, text.encode_utf16().count());
+            if full {
+                SendMessageW(h, EM_SETCHARFORMAT, Some(WPARAM(SCF_ALL as usize)), Some(LPARAM(&base as *const _ as isize)));
+                // 空のときに打つ字も同じにする
+                SendMessageW(h, EM_SETCHARFORMAT, Some(WPARAM(SCF_DEFAULT as usize)), Some(LPARAM(&base as *const _ as isize)));
+                self.set_sel(0, units.len());
+            } else {
+                self.set_sel(lines[from].start, (lines[to - 1].end() + 1).min(units.len()));
+                SendMessageW(h, EM_SETCHARFORMAT, Some(WPARAM(SCF_SELECTION as usize)), Some(LPARAM(&base as *const _ as isize)));
+            }
             let pf = self.pf();
             SendMessageW(h, EM_SETPARAFORMAT, Some(WPARAM(0)), Some(LPARAM(&pf as *const _ as isize)));
 
             for (i, l) in lines.iter().enumerate() {
-                let active = Some(i) == caret_line;
-                let in_marker = active && s0 == s1 && s1 >= l.start && s1 < l.marker_end();
-                let block_active = block_of[i].is_some() && block_of[i] == caret_block;
-                self.style_line(l, &text, active, in_marker, block_active, i == 0, &m, &mut decos);
+                let (active, in_marker, block_active) = state[i];
+                self.dry.set(i < from || i >= to);
+                self.style_line(l, &units, active, in_marker, block_active, i == 0, &m, &mut decos);
             }
+            self.dry.set(false);
 
             self.set_sel(s0, s1);
             SendMessageW(h, EM_SETSCROLLPOS, Some(WPARAM(0)), Some(LPARAM(&scroll as *const _ as isize)));
@@ -376,9 +451,11 @@ impl Compose {
         let line_h = m.line_h();
         drop(m);
         let dpi = self.dpi;
-        DECOS.with(|d| *d.borrow_mut() = Decos { items: decos, line_h, dpi, doc: self.doc.clone(), len: text.encode_utf16().count(), at: s0 });
+        DECOS.with(|d| *d.borrow_mut() = Decos { items: decos, line_h, dpi, doc: self.doc.clone(), len: units.len(), at: s0 });
+        self.keys = keys;
+        self.env = env;
         unsafe {
-            let _ = InvalidateRect(Some(h), None, true);
+            let _ = InvalidateRect(Some(h), None, false);
         }
         self.lines = lines.iter().map(|l| LineInfo { start: l.start, end: l.end(), marker_end: l.marker_end() }).collect();
         self.shown = self.caret_state(s1).filter(|_| s0 == s1).or(caret_line.map(|i| (i, false)));
@@ -386,9 +463,8 @@ impl Compose {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn style_line(&self, l: &Line, text: &str, active: bool, in_marker: bool, block_active: bool, first: bool, m: &Measure, decos: &mut Vec<Deco>) {
+    fn style_line(&self, l: &Line, units: &[u16], active: bool, in_marker: bool, block_active: bool, first: bool, m: &Measure, decos: &mut Vec<Deco>) {
         let (a, b) = (l.start, l.end());
-        let units: Vec<u16> = text.encode_utf16().collect();
         let sub = |x: usize, y: usize| String::from_utf16_lossy(&units[x.min(units.len())..y.min(units.len())]);
         let hide_inline = self.hide_marks && !active;
         // 箇条書きの印を絵にするか(カーソルが印の中になければ. 記号を隠さない設定なら絵にしない)

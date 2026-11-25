@@ -193,7 +193,7 @@ impl Icons {
                 }
                 for (key, path, size) in rx {
                     let t0 = std::time::Instant::now();
-                    let img = load_by_path(&path, size);
+                    let img = if by_type(&key) { load_by_type(&key, size) } else { load_by_path(&path, size) };
                     if t0.elapsed().as_millis() >= 500 {
                         super::storage::log(&format!("icon: {} ms for {path}", t0.elapsed().as_millis()));
                     }
@@ -237,7 +237,7 @@ impl Icons {
     pub fn prefetch<'a>(&mut self, paths: impl Iterator<Item = &'a str>) {
         for p in paths {
             let key = Self::key(p);
-            if !(key.starts_with('*') || key == FOLDER_KEY) {
+            if !by_type(&key) {
                 self.request(key, p);
             }
         }
@@ -284,26 +284,6 @@ impl Icons {
         if per_path { l } else { format!("*.{ext}") }
     }
 
-    /// 拡張子(またはフォルダー)のアイコンをシステムのイメージリストから引く
-    fn load_by_type(&self, key: &str) -> Option<Img> {
-        let _d = super::diag::doing(format!("icon {key}"));
-        unsafe {
-            let (name, attr) = if key == FOLDER_KEY { ("folder".to_string(), FILE_ATTRIBUTE_DIRECTORY) } else { (format!("x{}", &key[1..]), FILE_ATTRIBUTE_NORMAL) };
-            let w = WStr::new(&name);
-            let mut info = SHFILEINFOW::default();
-            let r = SHGetFileInfoW(w.pcwstr(), attr, Some(&mut info), std::mem::size_of::<SHFILEINFOW>() as u32, SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES);
-            if r == 0 {
-                return None;
-            }
-            let list: IImageList = SHGetImageList(SHIL_EXTRALARGE as i32).ok()?;
-            let icon = list.GetIcon(info.iIcon, ILD_TRANSPARENT.0).ok()?;
-            let img = read_icon(icon, self.size).and_then(|px| make_img(&px, self.size));
-            let _ = DestroyIcon(icon);
-            img
-        }
-    }
-
-
     /// ブックマークのアイコン(favicon. PNG)を描く. 一度読んだものは覚える. 描けなければfalse
     pub fn draw_png(&mut self, hdc: HDC, url: &str, png: Option<&[u8]>, x: i32, y: i32) -> bool {
         let key = format!("fav:{url}");
@@ -340,13 +320,8 @@ impl Icons {
         let key = Self::key(path);
         let img = match self.cache.get(&key) {
             Some(v) => *v,
-            None if key.starts_with('*') || key == FOLDER_KEY => {
-                let v = self.load_by_type(&key);
-                self.cache.insert(key, v);
-                v
-            }
             None => {
-                // パスごとのものは裏で読む. 読めるまでは文字のアイコン
+                // 裏で読む(種類ごとのものも, 初めは0.5秒かかることがある. K51). 読めるまでは文字のアイコン
                 self.request(key, path);
                 return false;
             }
@@ -407,5 +382,28 @@ fn load_by_path(path: &str, size: i32) -> Option<Img> {
         let px = read_bitmap(bmp, size);
         let _ = DeleteObject(bmp.into());
         make_img(&px?, size)
+    }
+}
+
+/// 種類(拡張子かフォルダー)ごとに覚えるアイコンか
+fn by_type(key: &str) -> bool {
+    key.starts_with('*') || key == FOLDER_KEY
+}
+
+/// 拡張子(またはフォルダー)のアイコンをシステムのイメージリストから引く
+fn load_by_type(key: &str, size: i32) -> Option<Img> {
+    unsafe {
+        let (name, attr) = if key == FOLDER_KEY { ("folder".to_string(), FILE_ATTRIBUTE_DIRECTORY) } else { (format!("x{}", &key[1..]), FILE_ATTRIBUTE_NORMAL) };
+        let w = WStr::new(&name);
+        let mut info = SHFILEINFOW::default();
+        let r = SHGetFileInfoW(w.pcwstr(), attr, Some(&mut info), std::mem::size_of::<SHFILEINFOW>() as u32, SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES);
+        if r == 0 {
+            return None;
+        }
+        let list: IImageList = SHGetImageList(SHIL_EXTRALARGE as i32).ok()?;
+        let icon = list.GetIcon(info.iIcon, ILD_TRANSPARENT.0).ok()?;
+        let img = read_icon(icon, size).and_then(|px| make_img(&px, size));
+        let _ = DestroyIcon(icon);
+        img
     }
 }

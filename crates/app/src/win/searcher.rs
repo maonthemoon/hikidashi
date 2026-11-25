@@ -77,7 +77,8 @@ fn worker(rx: Receiver<Job>, result: Arc<Mutex<Option<Done>>>, cancel_slot: Arc<
         let cancel = cancel_slot.lock().unwrap().clone();
         let t0 = Instant::now();
         // `ext:pdf`などの絞り込みを取り出し, 残りの語で探す
-        let (rest, filters) = parse_filters(&job.text);
+        let (rest, mut filters) = parse_filters(&job.text);
+        filters.expand_romaji(dict.get());
         let p = Prepared::new(&rest, dict.get());
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs().min(u32::MAX as u64) as u32);
         let mut hits = Vec::new();

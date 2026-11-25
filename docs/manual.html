@@ -1270,7 +1270,7 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
           <li>名前の一部を打ちます. 1文字打つごとに一覧が変わります.</li>
           <li><kbd>Enter</kbd>で1行目を開きます. ほかの行は<kbd>↑</kbd> <kbd>↓</kbd>で選びます.</li>
         </ol>
-        <p>開いたら窓は隠れます. 次に出したときは前回の入力が全選択で残っているので, そのまま打てば上書き, <kbd>Enter</kbd>なら同じものをもう一度開けます. 左に<code>file</code>などの印があったときも, 打ち始めると印は外れ, 全部を探す状態に戻ります.</p>
+        <p>開いたら窓は隠れます. 次に出したときは前回の入力が全選択で残っているので, そのまま打てば上書き, <kbd>Enter</kbd>なら同じものをもう一度開けます. 左に<code>file</code>などの印があったときも, 次に出したときは印が外れ, 全部を探す状態から始まります(文字は残ります).</p>
 
         <h3 id="match">一致のしかた</h3>
         <div class="demo" data-scenes="romaji"></div>
@@ -1329,7 +1329,7 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
           <table>
             <thead><tr><th>打つもの</th><th>絞り方</th></tr></thead>
             <tbody>
-              <tr><td><code>*.pdf</code>, <code>見積*</code></td><td>名前の形(<code>*</code>は何文字にでも合う)</td></tr>
+              <tr><td><code>*.pdf</code>, <code>見積*</code></td><td>名前の形(<code>*</code>は何文字にでも合う. <code>benkyo*</code>のようなローマ字は日本語の名前にも合う)</td></tr>
               <tr><td><code>ext:pdf</code>, <code>ext:docx,xlsx</code></td><td>拡張子</td></tr>
               <tr><td><code>in:案件</code></td><td>名前にその語を含むフォルダーの中</td></tr>
               <tr><td><code>modified:7d</code></td><td>7日以内に更新したもの(<code>h</code>は時間, <code>d</code>は日, <code>w</code>は週)</td></tr>
@@ -1431,7 +1431,7 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
             </tbody>
           </table>
         </div>
-        <p>ほかの窓をクリックして閉じたときは, 次に窓を出すと書きかけのまま開きます. 表は記号のまま並び, 画像, 数式, 図は出ません. ChatGPTには書いた文字(記号つき)をそのまま送ります. 貼り付けで入れたときは, 送ったあとクリップボードを元の中身に戻します. 記号を隠さず薄く見せたいときは, <a href="#settings">設定</a>の<code>Web</code>で<code>hide Markdown marks</code>のチェックを外します.</p>
+        <p>どの閉じ方でも書きかけは残り, 次に窓を出すと検索から始まります. <kbd>Shift</kbd>+<kbd>Enter</kbd>で続きを書けます. 表は記号のまま並び, 画像, 数式, 図は出ません. ChatGPTには書いた文字(記号つき)をそのまま送ります. 貼り付けで入れたときは, 送ったあとクリップボードを元の中身に戻します. 記号を隠さず薄く見せたいときは, <a href="#settings">設定</a>の<code>Web</code>で<code>hide Markdown marks</code>のチェックを外します.</p>
 
         <h2 id="window">WSLのファイルを探す</h2>
         <p><code>w </code>に続けて名前の一部を打つと, WSLのホームのファイルとフォルダーが出ます. 開き方はふだんのファイルと同じです. WSLの一覧は, 初めて<code>w </code>を打ったときと, 前に読んでから5分たっていたときに読み直します. 読んでいる間は一番下に<code>Reading WSL…</code>と出て, 前の一覧で探せます. WSLを使わない日はWSLを起こしません.</p>

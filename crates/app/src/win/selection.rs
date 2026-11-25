@@ -3,12 +3,13 @@
 use super::clipboard;
 use super::winlist;
 use hikidashi_core::selection::is_terminal;
+use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_INSERT, VK_LWIN, VK_MENU,
     VK_RWIN, VK_SHIFT,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, PeekMessageW, MSG, PEEK_MESSAGE_REMOVE_TYPE, PM_NOREMOVE, PM_QS_SENDMESSAGE};
 
 fn key(vk: VIRTUAL_KEY, up: bool, extended: bool) -> INPUT {
     let mut flags = if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) };
@@ -24,6 +25,24 @@ fn send(inputs: &[INPUT]) {
     }
 }
 
+/// 待つ. その間も, ほかのアプリからの問い合わせに答える(K51).
+/// クリップボードの持ち主がHikidashiのとき(前に戻したあと), コピーするアプリは`WM_DESTROYCLIPBOARD`の返事を待つ.
+/// 眠っていると, そのアプリの書き込みが読み終わりより後になる
+fn nap(ms: u64) {
+    let until = Instant::now() + Duration::from_millis(ms);
+    loop {
+        unsafe {
+            let mut m = MSG::default();
+            let _ = PeekMessageW(&mut m, None, 0, 0, PEEK_MESSAGE_REMOVE_TYPE(PM_NOREMOVE.0 | PM_QS_SENDMESSAGE.0));
+        }
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        std::thread::sleep(left.min(Duration::from_millis(5)));
+    }
+}
+
 const MODS: [VIRTUAL_KEY; 5] = [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN];
 
 fn held(vk: VIRTUAL_KEY) -> bool {
@@ -36,11 +55,11 @@ fn release_modifiers() {
         if !MODS.iter().any(|k| held(*k)) {
             return;
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        nap(10);
     }
     let ups: Vec<INPUT> = MODS.iter().filter(|k| held(**k)).map(|k| key(*k, true, false)).collect();
     send(&ups);
-    std::thread::sleep(std::time::Duration::from_millis(30));
+    nap(30);
 }
 
 /// 前面の窓のプロセスのexe
@@ -79,13 +98,13 @@ pub fn capture(hwnd: HWND) -> (Option<String>, Option<u32>) {
             changed = true;
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        nap(10);
     }
     let mut text = None;
     if changed {
         // アプリは「空にする→入れる」の順に書くので, 空のところを読まないよう, 読めるまで少しやり直す
         for _ in 0..8 {
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            nap(20);
             text = clipboard::read_text(hwnd).filter(|t| !t.is_empty());
             if text.is_some() {
                 break;
@@ -98,6 +117,9 @@ pub fn capture(hwnd: HWND) -> (Option<String>, Option<u32>) {
         // 変わらなかった(選んでいなかった). 何もしていないので目印は要らない
         (_, false) => None,
     };
+    if text.is_none() {
+        super::storage::log(if changed { "selection: copied, but no text" } else { "selection: the app did not copy" });
+    }
     (text, ignore)
 }
 

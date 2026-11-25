@@ -134,8 +134,6 @@ pub struct App {
     pub config_error: Option<String>,
     /// 塗ってある色がダークか
     themed_dark: bool,
-    /// 前回の印を残して出したところ(打ち始めたら印を外す. K50)
-    carry: bool,
     apps: Catalog,
     bookmarks: Catalog,
     /// ChromeとEdgeのBookmarksの更新日時(変わったときだけ読み直す)
@@ -630,6 +628,12 @@ impl App {
     }
 
     fn position_edit(&self) {
+        if !self.capture {
+            let t = cue_for(self.mode);
+            if CUE.get() != t {
+                set_cue(self.edit, t);
+            }
+        }
         let d = self.dpi;
         let x = scale(theme::PAD_X, d) + if self.chip_width() > 0 { self.chip_width() + scale(10, d) } else { 0 };
         let eh = scale(theme::INPUT_FONT + 10, d);
@@ -702,12 +706,11 @@ impl App {
             self.load_favicons();
         }
         self.history.reset();
-        // 印(モード)は引き継がない: 文字がなければ外し, 文字があれば打ち始めたときに外す(K50)
-        if select_all && self.mode != Mode::All && self.edit_text().is_empty() {
+        // 印(モード)は引き継がない. 出したときは, いつも全部を探す(文字は残す. K51)
+        if select_all && self.mode != Mode::All {
             self.mode = Mode::All;
             self.position_edit();
         }
-        self.carry = select_all && self.mode != Mode::All;
         self.refresh();
         if self.composing() {
             // 書きかけのまま閉じたので, 書く窓で開く(Q5のA). 日本語で書くことが多いのでIMEは変えない
@@ -748,7 +751,18 @@ impl App {
         self.menu = None;
         self.confirm = None;
         self.message = None;
+        // 書く窓で閉じても, 次は検索から始める(書きかけは残る. `Shift+Enter`で続き. K51)
         self.save_draft();
+        if let Some(c) = &mut self.compose {
+            if c.active {
+                c.active = false;
+                let ch = c.hwnd;
+                unsafe {
+                    let _ = ShowWindow(ch, SW_HIDE);
+                    let _ = ShowWindow(self.edit, SW_SHOW);
+                }
+            }
+        }
         if self.capture {
             self.end_capture(false);
         }
@@ -1386,26 +1400,6 @@ impl App {
         let room = EDIT_LIMIT.saturating_sub(self.edit_text().encode_utf16().count());
         let mut used = 0;
         Some(line.chars().take_while(|c| { used += c.len_utf16(); used <= room }).collect())
-    }
-
-    /// 前回の印(`file`など)を残して出しているとき, 全体を選んだまま打ち始めたら印を外す(K50)
-    fn drop_carry(&mut self) {
-        if !std::mem::take(&mut self.carry) || self.mode == Mode::All {
-            return;
-        }
-        let (mut s, mut e) = (0u32, 0u32);
-        unsafe {
-            SendMessageW(self.edit, EM_GETSEL, Some(WPARAM(&mut s as *mut _ as usize)), Some(LPARAM(&mut e as *mut _ as isize)));
-        }
-        let n = self.edit_text().encode_utf16().count() as u32;
-        if n > 0 && s.min(e) == 0 && s.max(e) >= n {
-            self.mode = Mode::All;
-            self.ext.reset();
-            self.position_edit();
-            unsafe {
-                let _ = InvalidateRect(Some(self.hwnd), None, false);
-            }
-        }
     }
 
     /// 整えて, 中身の高さを測り, 窓の大きさを合わせる
@@ -3009,6 +3003,22 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
 
 const CUE_SEARCH: &str = "Search apps, files, bookmarks, or paste a path";
 
+/// 入力欄が空のときの案内(種類ごと. K51)
+fn cue_for(m: Mode) -> &'static str {
+    match m {
+        Mode::All | Mode::ChatGpt => CUE_SEARCH,
+        Mode::App => "Search apps",
+        Mode::File => "Search files and folders",
+        Mode::Bookmark => "Search bookmarks",
+        Mode::Kill => "Choose a process to end",
+        Mode::Wsl => "Search your WSL home",
+        Mode::Box => "Search Box",
+        Mode::Google => "Search Google",
+        Mode::Clipboard => "Search clipboard history",
+        Mode::Calc => "Calculate: 0x1F, 10dBm, (12+3)*4, mipi",
+    }
+}
+
 thread_local! {
     /// 入力欄が空のときの案内の文字. 標準の案内はダークで色が暗く, 欠けることもあったので自分で描く(K43)
     static CUE: std::cell::Cell<&'static str> = const { std::cell::Cell::new(CUE_SEARCH) };
@@ -3077,9 +3087,6 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
         WM_IME_ENDCOMPOSITION => EDIT_IME.set(false),
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let sys = msg == WM_SYSKEYDOWN;
-            if wparam.0 as u16 == windows::Win32::UI::Input::KeyboardAndMouse::VK_DELETE.0 {
-                with_app(|app| app.drop_carry());
-            }
             if let Some(true) = with_app(|app| app.on_key(wparam.0 as u16, sys)) {
                 return LRESULT(0);
             }
@@ -3095,9 +3102,8 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
             if let Some(true) = with_app(|app| app.paste_multiline()) {
                 return LRESULT(0);
             }
-            with_app(|app| app.drop_carry());
-            // 標準の貼り付けは, クリップボードを開いたままEN_CHANGEを送る. その中で拡張に渡す文字を読むと,
-            // 標準の入力欄が使っている途中のメモリが解放されて落ちうるので, 先に読んで閉じてから入れる(K50)
+            // 標準の貼り付けは, クリップボードを開いたままEN_CHANGEを送る. その中で拡張に渡す文字を読むと
+            // 途中で閉じてしまうので, 先に読んで閉じてから入れる(K50)
             if let Some(Some(t)) = with_app(|app| app.paste_line()) {
                 let w = util::wide(&t);
                 unsafe { SendMessageW(hwnd, windows::Win32::UI::Controls::EM_REPLACESEL, Some(WPARAM(1)), Some(LPARAM(w.as_ptr() as isize))) };
@@ -3105,17 +3111,9 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
                 return LRESULT(0);
             }
         }
-        WM_CUT | WM_CLEAR | WM_IME_STARTCOMPOSITION => {
-            if msg == WM_IME_STARTCOMPOSITION {
-                EDIT_IME.set(true);
-            }
-            with_app(|app| app.drop_carry());
-        }
+        WM_IME_STARTCOMPOSITION => EDIT_IME.set(true),
         WM_CHAR | WM_SYSCHAR => {
             let c = wparam.0 as u32;
-            if msg == WM_CHAR && (c == 0x08 || c >= 0x20) && c != 0x7F {
-                with_app(|app| app.drop_carry());
-            }
             // 書く窓にしたあとに届いた文字(Ctrl+Vなど)は入れない
             let capture = with_app(|app| app.capture || app.composing()).unwrap_or(false);
             // Enter, Tab, Esc, Ctrl+Backspace, Ctrl+A, Ctrl+N/P の文字は入力欄に入れない(鳴らさない)
@@ -3162,14 +3160,6 @@ fn compose_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id:
         WM_PAINT => {
             let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
             compose::paint_decos(hwnd);
-            return r;
-        }
-        // 絵は上から描いているので, スクロールのあとは全体を描き直す(K50)
-        WM_VSCROLL | WM_MOUSEWHEEL => {
-            let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
-            unsafe {
-                let _ = InvalidateRect(Some(hwnd), None, false);
-            }
             return r;
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {
@@ -3420,7 +3410,6 @@ pub fn run() {
         config,
         config_error: err.map(|e| e.0),
         themed_dark: theme::is_dark(),
-        carry: false,
         apps: Catalog::new(vec![]),
         bookmarks: Catalog::new(vec![]),
         bookmarks_mtime: vec![],
@@ -3514,4 +3503,7 @@ pub fn run() {
         storage::save_history(&app.history);
         system::tray_remove(app.hwnd);
     });
+    // スレッドが動いているうちに片付ける(プロセスの終わりでは, 待つ相手がもういない. K51)
+    let app = APP.with(|a| a.borrow_mut().take());
+    drop(app);
 }
