@@ -5,6 +5,7 @@ pub mod appx;
 pub mod fuzzy;
 pub mod calc;
 pub mod pathlike;
+pub mod prompt;
 pub mod migemo;
 pub mod romaji;
 pub mod catalog;

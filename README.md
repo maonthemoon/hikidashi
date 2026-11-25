@@ -107,7 +107,7 @@ Hikidashiは自分を`%LOCALAPPDATA%\Hikidashi\Hikidashi.exe`に写してから,
 
 | 場所 | 中身 |
 |---|---|
-| `%APPDATA%\Hikidashi\config.toml` | 設定. トレイの`Settings`で設定画面が開き, `Save`ですぐ反映される. キーワード, エイリアス, 検索するフォルダーと除外するフォルダー, ブラウザー(既定のブラウザーかChromeかEdge, 新しい窓かタブか)など. 入力欄に`settings`と打っても設定画面が開く. メモ帳で直すこともでき, 書き方はファイルの中のコメントにある |
+| `%APPDATA%\Hikidashi\config.toml` | 設定. トレイの`Settings`で設定画面が開き, 変えるとすぐ反映される. `Copy setup prompt`で, ChatGPTなどに設定を直してもらうための文をコピーできる. キーワード, エイリアス, 検索するフォルダーと除外するフォルダー, ブラウザー(既定のブラウザーかChromeかEdge, 新しい窓かタブか)など. 入力欄に`settings`と打っても設定画面が開く. メモ帳で直すこともでき, 書き方はファイルの中のコメントにある |
 | `%APPDATA%\Hikidashi\learn.tsv` | 学習(何を打って何を開いたか) |
 | `%APPDATA%\Hikidashi\history.txt` | 入力の履歴 |
 | `%APPDATA%\Hikidashi\state.txt` | ホットキー |

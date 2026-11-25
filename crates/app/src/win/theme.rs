@@ -32,6 +32,9 @@ pub struct Palette {
     pub selected: u32,
     /// 設定画面の外したチェックボックスの枠(K44)
     pub off: u32,
+    /// 設定画面の「反映しました」の文字と地(K45)
+    pub ok: u32,
+    pub ok_bg: u32,
 }
 
 pub const LIGHT: Palette = Palette {
@@ -54,6 +57,8 @@ pub const LIGHT: Palette = Palette {
     card: 0xFFFFFF,
     selected: 0xDCD8CA,
     off: 0x87867F,
+    ok: 0x3F5A22,
+    ok_bg: 0xE1EAD2,
 };
 
 /// ダーク(暖かい黒. 紹介のページのダークと同じ系統. K39のQ1)
@@ -77,6 +82,8 @@ pub const DARK: Palette = Palette {
     card: 0x262624,
     selected: 0x3D3D3A,
     off: 0x8A8880,
+    ok: 0xC3DBA0,
+    ok_bg: 0x35412A,
 };
 
 static DARK_ON: AtomicBool = AtomicBool::new(false);

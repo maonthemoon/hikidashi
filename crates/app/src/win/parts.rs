@@ -112,7 +112,7 @@ pub fn round(hdc: HDC, rc: &RECT, radius: i32, border: Option<(u32, i32)>, fill:
 }
 
 /// つないだ線(チェックの印, プルダウンの印)
-fn stroke(hdc: HDC, pts: &[(f32, f32)], width: f32, color: u32) {
+pub fn stroke(hdc: HDC, pts: &[(f32, f32)], width: f32, color: u32) {
     let ok = with_graphics(hdc, |g| unsafe {
         let mut pen: *mut GpPen = std::ptr::null_mut();
         GdipCreatePen1(argb(color), width, UnitPixel, &mut pen);
@@ -160,7 +160,7 @@ fn font_of(h: HWND) -> HFONT {
     HFONT(unsafe { SendMessageW(h, WM_GETFONT, None, None) }.0 as *mut _)
 }
 
-fn draw_text(hdc: HDC, text: &str, font: HFONT, color: u32, rc: RECT, flags: DRAW_TEXT_FORMAT) {
+pub fn draw_text(hdc: HDC, text: &str, font: HFONT, color: u32, rc: RECT, flags: DRAW_TEXT_FORMAT) {
     let mut t: Vec<u16> = text.encode_utf16().collect();
     if t.is_empty() {
         return;
@@ -207,6 +207,33 @@ pub fn buffered(hdc: HDC, rc: &RECT, f: impl FnOnce(HDC)) {
         let _ = DeleteObject(bmp.into());
         let _ = DeleteDC(mem);
     }
+}
+
+/// 何行かの文字(はみ出すところは折り返す)
+pub fn draw_lines(hdc: HDC, text: &str, font: HFONT, color: u32, rc: RECT) {
+    let mut t: Vec<u16> = text.encode_utf16().collect();
+    let (mut rc, mut m) = (rc, rc);
+    unsafe {
+        let old = SelectObject(hdc, font.into());
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, rgb(color));
+        let h = DrawTextW(hdc, &mut t, &mut m, DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
+        rc.top += ((rc.bottom - rc.top - h) / 2).max(0);
+        DrawTextW(hdc, &mut t, &mut rc, DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS);
+        SelectObject(hdc, old);
+    }
+}
+
+/// 1行の文字の幅(px)
+pub fn text_width(hdc: HDC, text: &str, font: HFONT) -> i32 {
+    let mut t: Vec<u16> = text.encode_utf16().collect();
+    let mut rc = RECT::default();
+    unsafe {
+        let old = SelectObject(hdc, font.into());
+        DrawTextW(hdc, &mut t, &mut rc, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
+        SelectObject(hdc, old);
+    }
+    rc.right
 }
 
 // ---------------------------------------------------------------- 部品の色

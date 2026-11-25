@@ -869,6 +869,7 @@ impl App {
                 self.refresh();
             }
         }
+        settings::config_changed();
     }
 
     fn apply_apps(&mut self) {
@@ -2291,17 +2292,21 @@ impl App {
     /// exeに埋め込んだマニュアルを`%LOCALAPPDATA%\Hikidashi\manual.html`に書き出して, 既定のブラウザーで開く.
     /// exeは写して動くので, exeの隣のファイルを開く形(wakudori)は使わない.
     /// 設定画面(K16)
-    fn open_settings(&mut self) {
+    fn settings_args(&self) -> settings::OpenArgs {
         let mut apps: Vec<String> = self.apps.items.iter().map(|i| i.name.clone()).collect();
         apps.sort_by_key(|a| a.to_lowercase());
         apps.dedup();
-        settings::open(settings::OpenArgs {
+        settings::OpenArgs {
             config: self.config.clone(),
             error: self.config_error.clone(),
             hotkey: self.hotkey.map(|h| h.format()).unwrap_or_default(),
             exe: self.exe_path.clone(),
             apps,
-        });
+        }
+    }
+
+    fn open_settings(&mut self) {
+        settings::open(self.settings_args());
     }
 
     fn open_manual(&mut self) {

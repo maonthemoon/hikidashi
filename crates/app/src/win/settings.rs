@@ -1,6 +1,6 @@
-//! 設定画面(K16, K44). トレイの`Settings`で開く. 左に区分, 右に中身(カードの並び), 下にSaveとCancel.
+//! 設定画面(K16, K44). トレイの`Settings`で開く. 左に区分, 右に中身(カードの並び).
 //! 部品の見た目は`parts.rs`でそろえる. 位置はどれも96dpiの値で, 区分を作るときに決める.
-//! Saveで`config.toml`を書き直す(Q7. 手で書いた`#`の行は残らない). 書いたファイルは監視が読み直す.
+//! 変えるとすぐ`config.toml`を書き直す(K45)(Q7. 手で書いた`#`の行は残らない). 書いたファイルは監視が読み直す.
 
 use super::i18n::tr;
 use super::storage;
@@ -8,7 +8,7 @@ use super::system;
 use super::theme::*;
 use super::util::{from_wide, hiword, loword, rgb, WStr};
 use super::{actions, dark, paint, parts};
-use parts::{brush, drop_sel, s, set_drop, surface, tint, Btn, Color, Deco, Kind};
+use parts::{brush, drop_sel, s, set_drop, surface, tint, Btn, Deco, Kind};
 use hikidashi_core::builtin;
 use hikidashi_core::config::{self, parse_enter_key, Command, Config, Files, OpenWith, ENTER_KEY_CHOICES};
 use hikidashi_core::pathlike;
@@ -51,11 +51,17 @@ const ITEM_H: i32 = 30;
 const BAR_H: i32 = 44;
 const LIST_HEAD_H: i32 = 28;
 
+/// 設定ファイルが変わったので, 開いている設定画面と比べる
+const WM_SYNC: u32 = WM_APP + 1;
+/// 下の帯の知らせを出す, 消す
+const TIMER_SHOW: usize = 1;
+const TIMER_HIDE: usize = 2;
+
 // 部品の番号. 1と2はEnterとEscで押される(IsDialogMessage)
 const ID_SAVE: i32 = 1;
 const ID_CANCEL: i32 = 2;
 const ID_OPENFILE: i32 = 10;
-const ID_ERROR: i32 = 11;
+const ID_PROMPT: i32 = 11;
 const ID_SIDE: i32 = 20;
 const ID_HOTKEY: i32 = 100;
 const ID_HOTKEY_CHANGE: i32 = 101;
@@ -662,7 +668,7 @@ fn common_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<L
                 let d = &*(lparam.0 as *const DRAWITEMSTRUCT);
                 match (d.CtlType, d.CtlID as i32) {
                     (ODT_BUTTON, ID_SAVE) => parts::draw_button(d, Btn::Primary),
-                    (ODT_BUTTON, ID_OPENFILE) => parts::draw_button(d, Btn::Link),
+                    (ODT_BUTTON, ID_OPENFILE | ID_PROMPT) => parts::draw_button(d, Btn::Link),
                     (ODT_BUTTON, _) => parts::draw_button(d, Btn::Normal),
                     (ODT_LISTBOX, ID_SIDE) => parts::draw_side_item(d, &tr(SECTIONS.get(d.itemID as usize).copied().unwrap_or(""))),
                     (ODT_LISTBOX, _) => parts::draw_list_item(d),
@@ -720,11 +726,31 @@ struct Settings {
     /// Chromeのプロフィール(フォルダー名, 表示名)
     profiles: Vec<(String, String)>,
     edge_profiles: Vec<(String, String)>,
+    status: Status,
+    /// 知らせを今出しているか(続けて変えたときは, 一度消して出し直す)
+    status_on: bool,
+    /// 設定ファイルに書き間違いがあり, 初期値を出している. 上書きする前に聞く
+    broken: bool,
+    asking: bool,
+    /// 自分で書いた設定(読み直しの知らせが来ても作り直さない)
+    written: Vec<Config>,
+    ja: bool,
+}
+
+/// 下の帯の知らせ
+#[derive(Clone, PartialEq)]
+enum Status {
+    None,
+    Ok(String),
+    Error(String),
 }
 
 /// 借りている間にはできないこと(ほかの窓を出すなど). 借りるのをやめてから行う
 enum Task {
     AskClose,
+    /// 書き間違いのある設定ファイルを置き換えてよいか
+    AskReplace,
+    CopyPrompt,
     Pick { id: i32, title: &'static str },
     Editor(EditKind),
     ChangeHotkey,
@@ -755,6 +781,11 @@ fn editor_hwnd() -> Option<HWND> {
 
 /// 設定画面を開く. 開いていれば前に出す
 pub fn open(a: OpenArgs) {
+    open_at(a, 0, None, true);
+}
+
+/// 区分と窓の位置を決めて開く
+fn open_at(a: OpenArgs, section: usize, at: Option<POINT>, activate: bool) {
     if let Some(h) = settings_hwnd() {
         unsafe {
             let _ = ShowWindow(h, SW_RESTORE);
@@ -765,7 +796,10 @@ pub fn open(a: OpenArgs) {
     register_classes();
     let dpi = dpi_at_cursor();
     let style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
-    let r = centered(dpi, CLIENT_W, CLIENT_H, style);
+    let mut r = centered(dpi, CLIENT_W, CLIENT_H, style);
+    if let Some(p) = at {
+        r = RECT { left: p.x, top: p.y, right: p.x + r.right - r.left, bottom: p.y + r.bottom - r.top };
+    }
     let hinst = unsafe { GetModuleHandleW(None).unwrap_or_default() };
     let title = WStr::new(&tr("Hikidashi Settings"));
     let Ok(hwnd) = (unsafe {
@@ -775,15 +809,50 @@ pub fn open(a: OpenArgs) {
     };
     let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
     let mut st = build(hwnd, hinst.into(), a, dpi);
-    st.show_section(0);
+    st.show_section(section);
     dark::apply(hwnd);
     parts::hide_focus(hwnd);
     let side = st.side;
     SETTINGS.with(|s| *s.borrow_mut() = Some(st));
     unsafe {
-        let _ = ShowWindow(hwnd, SW_SHOW);
-        let _ = SetForegroundWindow(hwnd);
-        let _ = SetFocus(Some(side));
+        if activate {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = SetForegroundWindow(hwnd);
+            let _ = SetFocus(Some(side));
+        } else {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
+    }
+}
+
+/// 設定ファイルを読み直したら呼ぶ. ほかで変わっていれば, 開いている設定画面を作り直す
+pub fn config_changed() {
+    if let Some(h) = settings_hwnd() {
+        unsafe {
+            let _ = PostMessageW(Some(h), WM_SYNC, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+fn sync() {
+    if editor_hwnd().is_some() {
+        return;
+    }
+    let Some(Some(a)) = super::with_app(|a| Some(a.settings_args())) else { return };
+    let Some((hwnd, cur, same, lang)) = with_settings(|s| (s.hwnd, s.current, a.config == s.orig || s.written.contains(&a.config), s.ja != super::i18n::is_ja())) else { return };
+    if same && !lang {
+        return;
+    }
+    let mut r = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(hwnd, &mut r);
+    }
+    // メモ帳などで直しているときは, 前に出さない
+    let front = unsafe { GetForegroundWindow() } == hwnd;
+    close_settings();
+    open_at(a, cur, Some(POINT { x: r.left, y: r.top }), front);
+    if same {
+        with_settings(|s| s.say(Status::Ok(tr("Applied"))));
     }
 }
 
@@ -1207,23 +1276,17 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
     // 下の帯
     m.parent = hwnd;
     let open_file = m.button(ID_OPENFILE, "Open config file");
-    let err = m.raw(w!("STATIC"), "", (SS_LEFT.0 | SS_NOPREFIX.0) as u32, WINDOW_EX_STYLE(0), ID_ERROR, F_BODY);
-    tint(err, |p| p.danger);
-    if let Some(e) = &a.error {
-        set_text(err, &format!("{e}. Defaults are shown; Save replaces the file."));
-    }
-    let cancel = m.button(ID_CANCEL, "Cancel");
-    let save = m.button(ID_SAVE, "Save");
-    // 下の帯. 位置は右下から(`layout`で縦を決める)
-    let fx = SIDE_W + PAD;
-    let footer = [(open_file, fx, 2, 150, 28), (err, fx + 158, 0, BODY_W - 158 - 216, 40), (cancel, fx + BODY_W - 208, 0, 100, 32), (save, fx + BODY_W - 100, 0, 100, 32)]
-        .map(|(hwnd, x, y, w, h)| Pos { hwnd, x, y, w, h })
-        .to_vec();
-    for h in [open_file, err, cancel, save] {
+    let prompt = m.button(ID_PROMPT, "Copy setup prompt");
+    let close = m.button(ID_CANCEL, "Close");
+    // 下の帯. 縦は`layout`で決める. 知らせは`FOOT_STATUS`に描く
+    let footer = [(open_file, 20, 2, 138, 28), (prompt, 172, 2, 168, 28), (close, SIDE_W + PAD + BODY_W - 100, 0, 100, 32)].map(|(hwnd, x, y, w, h)| Pos { hwnd, x, y, w, h }).to_vec();
+    for h in [open_file, prompt, close] {
         unsafe {
             let _ = ShowWindow(h, SW_SHOW);
         }
     }
+    // ホットキーが使えないなどの知らせもあるので, ファイルの書き間違いかを確かめる
+    let broken = a.error.is_some() && std::fs::read_to_string(storage::config_path()).is_ok_and(|t| Config::parse(&t).is_err());
     let fonts = fonts_for(dpi);
     apply_fonts(&m.made, &fonts);
     parts::set_fonts(fonts[F_HINT as usize], fonts[F_BOLD as usize]);
@@ -1244,8 +1307,21 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         apps: a.apps,
         profiles,
         edge_profiles,
+        status: match &a.error {
+            Some(e) if broken => Status::Error(tr(&format!("{e}. Defaults are shown."))),
+            Some(e) => Status::Error(tr(e)),
+            None => Status::None,
+        },
+        status_on: true,
+        broken,
+        asking: false,
+        written: vec![],
+        ja: super::i18n::is_ja(),
     }
 }
+
+/// 下の帯の知らせの左と右(96dpi)
+const FOOT_STATUS: (i32, i32) = (352, SIDE_W + PAD + BODY_W - 112);
 
 impl Settings {
     fn layout(&self) {
@@ -1329,26 +1405,80 @@ impl Settings {
             FillRect(hdc, &side, brush(pal().bg_subtle));
             let line = RECT { left: 0, top: rc.bottom - s(FOOT_H, d), right: rc.right, bottom: rc.bottom - s(FOOT_H, d) + 1.max(s(1, d)) };
             FillRect(hdc, &line, brush(pal().border_faint));
+            self.paint_status(hdc, &rc);
             let _ = EndPaint(self.hwnd, &ps);
         }
     }
 
-    fn error(&self, msg: &str) {
-        self.footer_text(msg, |p| p.danger);
+    fn status_rect(&self, client: &RECT) -> RECT {
+        let d = self.dpi;
+        RECT { left: s(FOOT_STATUS.0, d), top: client.bottom - s(FOOT_H - 4, d), right: s(FOOT_STATUS.1, d), bottom: client.bottom - s(2, d) }
     }
 
-    /// 下の帯の文字(エラーは赤, 保存できた知らせは薄い色)
-    fn footer_text(&self, msg: &str, color: Color) {
-        let h = item(self.hwnd, ID_ERROR);
-        tint(h, color);
-        set_text(h, msg);
-        unsafe {
-            let _ = InvalidateRect(Some(h), None, true);
+    /// 反映できたら緑の帯, 間違いがあれば赤い文字
+    fn paint_status(&self, hdc: HDC, client: &RECT) {
+        if !self.status_on {
+            return;
+        }
+        let d = self.dpi;
+        let r = self.status_rect(client);
+        let hint = self.fonts[F_HINT as usize];
+        match &self.status {
+            Status::None => {}
+            Status::Error(t) => parts::draw_lines(hdc, t, hint, pal().danger, r),
+            Status::Ok(t) => {
+                let bold = self.fonts[F_BOLD as usize];
+                let w = (parts::text_width(hdc, t, bold) + s(50, d)).min(r.right - r.left);
+                let cy = (r.top + r.bottom) / 2;
+                let b = RECT { left: r.right - w, top: cy - s(16, d), right: r.right, bottom: cy + s(16, d) };
+                parts::round(hdc, &b, s(16, d), None, pal().ok_bg);
+                let k = d as f32 / 96.0;
+                let (x, y) = (b.left as f32 + 14.0 * k, cy as f32);
+                parts::stroke(hdc, &[(x, y + 0.5 * k), (x + 4.0 * k, y + 4.5 * k), (x + 11.0 * k, y - 4.5 * k)], 2.0 * k, pal().ok);
+                parts::draw_text(hdc, t, bold, pal().ok, RECT { left: b.left + s(34, d), right: b.right - s(12, d), ..b }, DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS);
+            }
         }
     }
 
-    /// 画面の値から設定を作る
-    fn collect(&self) -> Result<Config, String> {
+    fn redraw_status(&self) {
+        unsafe {
+            let mut rc = RECT::default();
+            let _ = GetClientRect(self.hwnd, &mut rc);
+            let r = self.status_rect(&rc);
+            let _ = InvalidateRect(Some(self.hwnd), Some(&r), false);
+        }
+    }
+
+    /// 下の帯に出す. できた知らせは少し消してから出し(続けて変えても気づくように), しばらくで消える
+    fn say(&mut self, st: Status) {
+        let ok = matches!(st, Status::Ok(_));
+        self.status = st;
+        self.status_on = !ok;
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), TIMER_SHOW);
+            let _ = KillTimer(Some(self.hwnd), TIMER_HIDE);
+            if ok {
+                SetTimer(Some(self.hwnd), TIMER_SHOW, 100, None);
+            }
+        }
+        self.redraw_status();
+    }
+
+    fn timer(&mut self, id: usize) {
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), id);
+            if id == TIMER_SHOW {
+                self.status_on = true;
+                SetTimer(Some(self.hwnd), TIMER_HIDE, 4000, None);
+            } else if matches!(self.status, Status::Ok(_)) {
+                self.status = Status::None;
+            }
+        }
+        self.redraw_status();
+    }
+
+    /// 画面の値から設定を作る. 間違いのある欄は前の値のままにし, 間違いの文も返す
+    fn collect(&self) -> (Config, Option<String>) {
         let h = self.hwnd;
         let mut c = self.work.clone();
         let t = |id: i32| text(item(h, id)).trim().to_string();
@@ -1388,46 +1518,80 @@ impl Settings {
         c.tools.terminal = self.terminal_name();
         c.chatgpt.send_enter = checked(item(h, ID_GPT_SEND));
         c.chatgpt.hide_marks = checked(item(h, ID_GPT_HIDE));
-        c.chatgpt.send_delay_ms = t(ID_GPT_DELAY).parse().map_err(|_| "Wait before Enter must be a number of ms.".to_string())?;
+        let mut err = None;
+        match t(ID_GPT_DELAY).parse() {
+            Ok(v) => c.chatgpt.send_delay_ms = v,
+            Err(_) => err = Some("Wait before Enter must be a number of ms.".to_string()),
+        }
         c.browser.browser = selected_key(item(h, ID_BROWSER), &BROWSERS);
         c.browser.open_in = selected_key(item(h, ID_OPEN_IN), &OPEN_IN);
         let dir = |list: &[(String, String)], id: i32| list.get(drop_sel(item(h, id))).map(|(d, _)| d.clone()).unwrap_or_else(|| "Default".into());
         c.browser.chrome_profile = dir(&self.profiles, ID_PROFILE);
         c.browser.edge_profile = dir(&self.edge_profiles, ID_EDGE_PROFILE);
         c.chatgpt.mode = selected_key(item(h, ID_GPT_MODE), &GPT_MODES);
-        c.validate()?;
-        Ok(c)
-    }
-
-    fn dirty(&self) -> bool {
-        match self.collect() {
-            Ok(c) => c != self.orig || checked(item(self.hwnd, ID_AUTOSTART)) != self.autostart,
-            Err(_) => true,
+        if let Err(e) = c.validate() {
+            err.get_or_insert(e);
+            c = self.without_mistakes(c);
         }
+        (c, err)
     }
 
-    fn save(&mut self) -> Vec<Task> {
-        let c = match self.collect() {
-            Ok(c) => c,
-            Err(e) => {
-                self.error(&e);
-                return vec![];
+    /// 間違いのある欄だけを前の値に戻す(ほかの欄は反映できるように)
+    fn without_mistakes(&self, c: Config) -> Config {
+        let o = &self.orig;
+        let reverts: [&dyn Fn(&mut Config); 3] = [&|c| c.prefix = o.prefix.clone(), &|c| c.chatgpt.send_delay_ms = o.chatgpt.send_delay_ms, &|c| c.keys = o.keys.clone()];
+        for f in reverts {
+            let mut t = c.clone();
+            f(&mut t);
+            if t.validate().is_ok() {
+                return t;
             }
-        };
-        if let Err(e) = storage::write_config(&config::to_toml(&c)) {
-            self.error(&format!("Cannot save config.toml: {e}"));
+        }
+        let mut t = c;
+        for f in reverts {
+            f(&mut t);
+        }
+        if t.validate().is_ok() { t } else { o.clone() }
+    }
+
+    /// 変わっていれば, すぐ設定ファイルに書く(K45)
+    fn apply(&mut self) -> Vec<Task> {
+        if self.asking {
             return vec![];
         }
+        let (c, err) = self.collect();
         let on = checked(item(self.hwnd, ID_AUTOSTART));
-        if on != self.autostart {
-            system::set_autostart(on, &self.exe);
+        let changed = c != self.orig;
+        if changed {
+            if self.broken {
+                self.asking = true;
+                return vec![Task::AskReplace];
+            }
+            let text = config::to_toml(&c);
+            if let Err(e) = storage::write_config(&text) {
+                self.say(Status::Error(tr(&format!("Cannot save config.toml: {e}"))));
+                return vec![];
+            }
+            // ファイルを読み直した形で持つ(読むだけの古い項目の違いで, 作り直さないように)
+            let c = Config::parse(&text).unwrap_or(c);
+            if self.written.len() >= 8 {
+                self.written.remove(0);
+            }
+            self.written.push(c.clone());
+            self.orig = c.clone();
+            self.work = c;
         }
-        // 保存しても閉じない(K28). 今の値を「保存した値」にして, 続けて直せるようにする
-        let lang_changed = c.ui.language != self.orig.ui.language;
-        self.orig = c.clone();
-        self.work = c;
-        self.autostart = on;
-        self.footer_text(if lang_changed { "Saved. Close and open Settings again to change the language." } else { "Saved. The changes are in effect now." }, |p| p.text_secondary);
+        let auto = on != self.autostart;
+        if auto {
+            system::set_autostart(on, &self.exe);
+            self.autostart = on;
+        }
+        match err {
+            Some(e) => self.say(Status::Error(tr(&e))),
+            None if changed || auto => self.say(Status::Ok(tr("Applied"))),
+            None if !self.broken && matches!(self.status, Status::Error(_)) => self.say(Status::None),
+            None => {}
+        }
         vec![]
     }
 
@@ -1667,7 +1831,17 @@ impl Settings {
         self.refresh_aliases(i);
     }
 
+    /// 部品からの知らせ. 押した, 選んだ, 打ち終えて離れたときは, 変わっていればすぐ反映する
     fn command(&mut self, id: i32, code: u32) -> Vec<Task> {
+        let mut tasks = self.handle(id, code);
+        if [BN_CLICKED, CBN_SELCHANGE, EN_KILLFOCUS].contains(&code) {
+            let first = self.apply();
+            tasks.splice(0..0, first);
+        }
+        tasks
+    }
+
+    fn handle(&mut self, id: i32, code: u32) -> Vec<Task> {
         match id {
             ID_SIDE if code == LBN_SELCHANGE => {
                 if let Some(i) = list_sel(self.side) {
@@ -1687,8 +1861,10 @@ impl Settings {
                         return self.edit_selected(t).into_iter().collect();
                     }
                 }
-                self.save()
+                // `Enter`では, 打っている欄を反映する(このあと`apply`)
+                vec![]
             }
+            ID_PROMPT => vec![Task::CopyPrompt],
             ID_CANCEL => vec![Task::AskClose],
             ID_OPENFILE => vec![Task::OpenFile],
             ID_HOTKEY_CHANGE => vec![Task::ChangeHotkey],
@@ -1753,14 +1929,55 @@ fn run_tasks(tasks: Vec<Task>) {
         let Some(hwnd) = settings_hwnd() else { return };
         match t {
             Task::AskClose => {
-                let dirty = with_settings(|s| s.dirty()).unwrap_or(false);
-                if !dirty || system::message_box_yes_no(hwnd, "Discard your changes?", "Hikidashi Settings") {
+                // 打っている途中の欄も反映してから閉じる(書き間違いのあるファイルは, 聞かずに置き換えない)
+                let left = with_settings(|s| {
+                    if s.broken {
+                        s.collect().0 != s.orig
+                    } else {
+                        s.apply();
+                        s.collect().1.is_some()
+                    }
+                });
+                if left != Some(true) || system::message_box_yes_no(hwnd, "Some changes are not applied. Close anyway?", "Hikidashi Settings") {
                     close_settings();
                 }
             }
+            Task::AskReplace => {
+                let yes = system::message_box_yes_no(hwnd, "config.toml has a mistake. Replace it with the settings shown here? The old file is kept as config.toml.bak.", "Hikidashi Settings");
+                let more = with_settings(|s| {
+                    s.asking = false;
+                    if !yes {
+                        return vec![];
+                    }
+                    let p = storage::config_path();
+                    if let Err(e) = std::fs::copy(&p, p.with_extension("toml.bak")) {
+                        s.say(Status::Error(tr(&format!("Cannot save config.toml: {e}"))));
+                        return vec![];
+                    }
+                    s.broken = false;
+                    s.apply()
+                });
+                run_tasks(more.unwrap_or_default());
+            }
+            Task::CopyPrompt => {
+                if !system::message_box_yes_no(hwnd, "Copy a prompt for an AI, with all your current settings? It includes folder names and web addresses.", "Hikidashi Settings") {
+                    continue;
+                }
+                with_settings(|s| {
+                    let p = hikidashi_core::prompt::config_prompt(&config::to_toml(&s.orig), super::i18n::is_ja());
+                    s.say(match actions::copy_text(s.hwnd, &p) {
+                        Ok(()) => Status::Ok(tr("Copied")),
+                        Err(e) => Status::Error(e),
+                    });
+                });
+            }
             Task::Pick { id, title } => {
                 if let Some(p) = pick(hwnd, true, title) {
-                    with_settings(|s| s.picked(id, p));
+                    let more = with_settings(|s| {
+                        s.picked(id, p);
+                        s.apply()
+                    });
+                    run_tasks(more.unwrap_or_default());
                 }
             }
             Task::Editor(kind) => open_editor(hwnd, kind),
@@ -1774,11 +1991,7 @@ fn run_tasks(tasks: Vec<Task>) {
                 super::with_app(|a| a.set_selection_hotkey(None));
             }
             Task::OpenFile => {
-                let dirty = with_settings(|s| s.dirty()).unwrap_or(false);
-                if dirty && !system::message_box_yes_no(hwnd, "Open config.toml and discard the changes made here?", "Hikidashi Settings") {
-                    continue;
-                }
-                close_settings();
+                // 開いたままでよい. 直して保存すると, この画面も作り直す(`sync`)
                 let p = storage::config_path();
                 let _ = actions::shell("open", "notepad.exe", &format!("\"{}\"", p.display()), "", false);
             }
@@ -1817,6 +2030,10 @@ fn settings_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
     if let Some(r) = common_proc(hwnd, msg, wparam, lparam) {
         return r;
     }
+    if msg == WM_SYNC {
+        sync();
+        return LRESULT(0);
+    }
     let mut tasks = vec![];
     let r = with_settings(|st| -> Option<LRESULT> {
         match msg {
@@ -1829,6 +2046,10 @@ fn settings_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESU
                 let id = loword(wparam.0) as i32;
                 let code = hiword(wparam.0) as u32;
                 tasks = st.command(id, code);
+                Some(LRESULT(0))
+            }
+            WM_TIMER => {
+                st.timer(wparam.0);
                 Some(LRESULT(0))
             }
             WM_CLOSE => {
@@ -2106,7 +2327,10 @@ fn editor_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT
                         let v = editor_values(hwnd, &kind);
                         match with_settings(|s| s.apply_edit(&v)) {
                             Some(Err(e)) => set_text(item(hwnd, E_ERROR), &e),
-                            _ => close_editor(),
+                            _ => {
+                                close_editor();
+                                run_tasks(with_settings(|s| s.apply()).unwrap_or_default());
+                            }
                         }
                     }
                 }
