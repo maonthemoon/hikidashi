@@ -97,6 +97,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("Clipboard history", "クリップボードの履歴"),
     ("Calculator", "計算"),
     ("Saved results", "保存した結果"),
+    ("Saved: {}", "保存しました: {0}"),
     ("Calendar", "予定"),
     ("Nothing here yet", "まだありません"),
     // 全般

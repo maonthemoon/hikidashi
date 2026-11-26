@@ -26,6 +26,7 @@ mod winlist;
 
 use hikidashi_core::builtin::{self, SysAction};
 use hikidashi_core::clip::{ClipHistory, ClipKind};
+use hikidashi_core::snapshot::{SnapRow, Snapshots};
 use hikidashi_core::scripts::{self as cscripts, RunOutcome, Script};
 use hikidashi_core::selection::{self as csel, Picked};
 use hikidashi_core::catalog::{Catalog, Item, Kind};
@@ -105,6 +106,10 @@ pub enum MenuAct {
     /// クリップボードの履歴の1件をクリップボードに入れるだけ
     ClipCopy(u64),
     ClipDelete(u64),
+    /// 保存した結果を開く(入力)
+    SnapOpen(String),
+    /// 保存した結果を消す(入力)
+    SnapDelete(String),
     Kill,
     ChatGpt,
     Google,
@@ -198,6 +203,10 @@ pub struct App {
     capture_sel: bool,
     /// クリップボードの履歴(メモリだけ)
     clips: ClipHistory,
+    /// 保存した結果(`snap `)
+    snaps: hikidashi_core::snapshot::Snapshots,
+    /// `snap `の一覧で開いて見返している保存の入力(Noneなら一覧)
+    snap_view: Option<String>,
     clip_listening: bool,
     /// この通し番号のクリップボードの更新は履歴に残さない(選んだ文字の取り込みで一時的に変えたもの)
     clip_ignore: Option<u32>,
@@ -472,6 +481,14 @@ impl App {
     fn special_rows(&mut self, text: &str) -> Option<Vec<Row>> {
         if self.mode == Mode::Clipboard {
             return Some(clip_rows(&self.clips, text));
+        }
+        // 保存した結果: 開いているときは保存した行, そうでなければ一覧
+        if self.mode == Mode::Snapshot {
+            if let Some(e) = self.snap_view.as_deref().and_then(|i| self.snaps.get(i)) {
+                return Some(hikidashi_core::snapshot::view_rows(e));
+            }
+            self.snap_view = None;
+            return Some(hikidashi_core::snapshot::rows(&self.snaps, text, util::now_secs(), util::tz_offset_secs()));
         }
         // 計算のモードの中でも, 計算の拡張(`mipi `)は使える(K43)
         if self.mode == Mode::Calc {
@@ -753,6 +770,7 @@ impl App {
 
     fn hide(&mut self) {
         self.script_view = false;
+        self.snap_view = None;
         self.ext.reset();
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_HIDE);
@@ -964,6 +982,8 @@ impl App {
         // 履歴から入れた文字はEN_CHANGEを通らないので, ここに来るのは自分で打ったとき
         self.history.reset();
         self.message = None;
+        // 保存した結果を見返していても, 打ったら一覧に戻る
+        self.snap_view = None;
         // 先頭に接頭辞とスペースを打ったら, 入力欄の左の印にする(K3)
         if self.mode == Mode::All {
             let (mode, rest) = router::parse(&text, &self.config.prefixes());
@@ -1265,6 +1285,12 @@ impl App {
                     self.delete_word();
                     return true;
                 }
+                // 保存した結果を見返しているときは, 空のBackspaceで一覧に戻る
+                if self.snap_view.is_some() && self.edit_text().is_empty() {
+                    self.snap_view = None;
+                    self.refresh();
+                    return true;
+                }
                 // 入力欄が空なら左の印を消す
                 if self.mode != Mode::All && self.edit_text().is_empty() {
                     self.mode = Mode::All;
@@ -1272,6 +1298,11 @@ impl App {
                     return true;
                 }
                 false
+            }
+            // Ctrl+S: 出ている結果(計算, 拡張, スクリプト)を保存する
+            v if ctrl && !shift && !alt && v == b'S' as u16 => {
+                self.save_snapshot();
+                true
             }
             v if ctrl && v == b'A' as u16 => {
                 unsafe {
@@ -1904,7 +1935,7 @@ impl App {
             Some(t.clone())
         } else if self.ext.view {
             self.ext.completes.get(self.sel).cloned().flatten()
-        } else if matches!(self.mode, Mode::Calc | Mode::Clipboard | Mode::Google) || self.script_view {
+        } else if matches!(self.mode, Mode::Calc | Mode::Clipboard | Mode::Google | Mode::Snapshot) || self.script_view {
             None
         } else {
             let is_dir = self.row_is_dir(&row) || row.tag == "folder";
@@ -2030,6 +2061,11 @@ impl App {
                 self.paste_clip(*id);
                 return;
             }
+            // 保存した結果: 入力欄はそのままで, 一覧だけ保存した行にする
+            Action::SnapOpen(input) => {
+                self.open_snapshot(input);
+                return;
+            }
             // 使い方の例: 入力欄に入れる(モードはそのまま)
             Action::Fill(t) => {
                 let t = t.clone();
@@ -2140,7 +2176,7 @@ impl App {
             }
             Action::BoxUrl { url, .. } => actions::open_url(url, &cfg),
             Action::Copy(s) | Action::ScriptLine(s) => actions::copy_text(hwnd, s),
-            Action::Clip(_) | Action::ScriptRun { .. } | Action::Fill(_) => Ok(()),
+            Action::Clip(_) | Action::SnapOpen(_) | Action::ScriptRun { .. } | Action::Fill(_) => Ok(()),
             Action::ChatGpt(q) => actions::ask_chatgpt(hwnd, q, &cfg),
             Action::Google(q) => actions::google(q, &cfg),
             Action::OpenUrl(u) => actions::open_url(u, &cfg),
@@ -2273,10 +2309,27 @@ impl App {
                 items.push(mi("Search Google", g::GLOBE, MenuAct::Google));
                 items.push(mi("Copy text", g::COPY, MenuAct::CopyText(q.clone())));
             }
+            // 保存した結果を見返している行
+            Action::Copy(s) if self.snap_view.is_some() => {
+                if !s.is_empty() {
+                    items.push(mi("Copy", g::COPY, MenuAct::CopyText(s.clone())));
+                }
+                if let Some(e) = self.snap_view.as_deref().and_then(|i| self.snaps.get(i)) {
+                    items.push(mi("Copy all", g::COPY, MenuAct::CopyText(Snapshots::copy_all(&e.rows))));
+                }
+            }
             Action::Copy(s) => {
                 if !s.is_empty() {
                     items.push(mi("Copy", g::COPY, MenuAct::CopyText(s.clone())));
                 }
+            }
+            // 保存した結果の一覧の行
+            Action::SnapOpen(input) => {
+                items.push(mi("Open", g::OPEN, MenuAct::SnapOpen(input.clone())));
+                if let Some(e) = self.snaps.get(input) {
+                    items.push(mi("Copy all", g::COPY, MenuAct::CopyText(Snapshots::copy_all(&e.rows))));
+                }
+                items.push(mi("Delete", g::KILL, MenuAct::SnapDelete(input.clone())));
             }
             Action::ScriptLine(l) => {
                 items.push(mi("Copy line", g::COPY, MenuAct::CopyText(l.clone())));
@@ -2312,6 +2365,16 @@ impl App {
         if let MenuAct::ClipDelete(id) = act {
             self.clips.remove(*id);
             self.refresh();
+            return;
+        }
+        if let MenuAct::SnapDelete(input) = act {
+            self.snaps.remove(input);
+            storage::save_snapshots(&self.snaps);
+            self.refresh();
+            return;
+        }
+        if let MenuAct::SnapOpen(input) = act {
+            self.open_snapshot(input);
             return;
         }
         let path = self.row_path(row);
@@ -2366,7 +2429,7 @@ impl App {
                 Some(e) => clipboard::set_kind(hwnd, &e.kind),
                 None => Ok(()),
             },
-            MenuAct::ClipDelete(_) => Ok(()),
+            MenuAct::ClipDelete(_) | MenuAct::SnapOpen(_) | MenuAct::SnapDelete(_) => Ok(()),
             MenuAct::Kill => {
                 let r = match &item {
                     Some(it) => actions::kill(&it.target.split(',').filter_map(|p| p.parse().ok()).collect::<Vec<u32>>()),
@@ -2667,6 +2730,57 @@ impl App {
     }
 
     /// 履歴の1件を貼る: 窓を閉じ, クリップボードに入れ, 前のアプリが前面に戻ってからShift+Insertを送る
+    /// `Ctrl+S`: 出ている結果を, そのときの入力と行ごと保存する. 行がなければ何もしない
+    fn save_snapshot(&mut self) {
+        let kind = if self.script_view {
+            "script"
+        } else if self.ext.view {
+            "ext"
+        } else if self.mode == Mode::Calc {
+            "calc"
+        } else {
+            return;
+        };
+        self.wait_pending();
+        if !self.wait_ext() {
+            return;
+        }
+        let ext = self.ext.view;
+        let rows: Vec<SnapRow> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| {
+                let copy = if ext {
+                    self.ext.copies.get(i).cloned().unwrap_or_default()
+                } else {
+                    match &r.action {
+                        Action::Copy(s) if !s.is_empty() => s.clone(),
+                        Action::ScriptLine(s) => s.clone(),
+                        _ => return None,
+                    }
+                };
+                Some(SnapRow { name: r.name.clone(), sub: r.sub.clone(), copy })
+            })
+            .collect();
+        let input = self.input();
+        if !self.snaps.add(&input, kind, rows, util::now_secs()) {
+            return;
+        }
+        storage::save_snapshots(&self.snaps);
+        self.message = Some((format!("Saved: {input}"), false));
+        self.layout();
+    }
+
+    /// 保存した結果を開く. 入力欄はそのままで, 一覧だけ保存した行にする
+    fn open_snapshot(&mut self, input: &str) {
+        if self.snaps.get(input).is_none() {
+            return;
+        }
+        self.snap_view = Some(input.to_string());
+        self.refresh();
+    }
+
     fn paste_clip(&mut self, id: u64) {
         let Some(e) = self.clips.get(id).cloned() else { return };
         // 消えたファイルは何もしない
@@ -3465,6 +3579,8 @@ pub fn run() {
         sel_registered: false,
         capture_sel: false,
         clips: ClipHistory::default(),
+        snaps: storage::load_snapshots(),
+        snap_view: None,
         clip_listening: false,
         clip_ignore: None,
         prev_fg: 0,

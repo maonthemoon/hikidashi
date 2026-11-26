@@ -111,6 +111,8 @@ pub enum Action {
     OpenUrl(String),
     /// 自作コマンドの実行
     Run(String),
+    /// 保存した結果の1件(入力). `Enter`で保存した行を出す
+    SnapOpen(String),
     /// クリップボードの履歴の1件(番号). `Enter`で貼る
     Clip(u64),
     /// スクリプト(`scripts`の番号)を実行する. `arg`は渡す文字(なければ空)
