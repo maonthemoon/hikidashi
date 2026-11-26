@@ -470,6 +470,52 @@ pub fn chatgpt_row(text: &str, cfg: &Config) -> Row {
     }
 }
 
+/// `?`だけを打ったときの一覧(K62): 使えるキーワードと自作コマンド. `Enter`(と`Tab`)でそのキーワードに入る.
+/// 拡張とスクリプトのキーワードは画面の側が足す
+pub fn help_rows(cfg: &Config) -> Vec<Row> {
+    let p = &cfg.prefix;
+    let list: [(&str, &str, &str); 12] = [
+        (&p.app, "Apps", "Search only apps"),
+        (&p.file, "Files and folders", "Search only files and folders"),
+        (&p.bookmark, "Bookmarks", "Search Chrome and Edge bookmarks"),
+        (&p.kill, "End a process", "Choose a running app to end"),
+        (&p.wsl, "WSL", "Search files in your WSL home"),
+        (&p.boxdrive, "Box", "Search files in Box Drive"),
+        (&p.google, "Google", "Search on Google"),
+        (&p.chatgpt, "ChatGPT", "Write a long question to ChatGPT"),
+        (&p.clipboard, "Clipboard history", "Text and files you copied"),
+        (&p.calc, "Calculator", "Numbers, formulas, RF"),
+        (&p.snapshot, "Saved results", "Results saved with Ctrl+S"),
+        (&p.calendar, "Calendar", "Outlook appointments"),
+    ];
+    let mut out: Vec<Row> = list
+        .iter()
+        .filter(|(k, _, _)| !k.is_empty())
+        .map(|(k, name, desc)| help_row(k, name, desc, "keyword"))
+        .collect();
+    for c in &cfg.command {
+        let title = c.title.clone().unwrap_or_else(|| c.name.clone());
+        let what = c.url.as_deref().or(c.run.as_deref()).unwrap_or("");
+        out.push(help_row(&c.name, &title, what, "command"));
+    }
+    out
+}
+
+/// `?`の一覧の1行. 2行目は`キーワード  説明`
+pub fn help_row(keyword: &str, name: &str, desc: &str, tag: &'static str) -> Row {
+    Row {
+        name: name.to_string(),
+        sub: if desc.is_empty() { keyword.to_string() } else { format!("{keyword}  {desc}") },
+        tag,
+        positions: vec![],
+        action: Action::Fill(format!("{keyword} ")),
+        learn_key: None,
+        warn: false,
+        icon: Icon::Kind(Kind::Command),
+        score: 0,
+    }
+}
+
 /// `g `のときの行: `Enter`でGoogle検索
 pub fn google_row(text: &str) -> Row {
     Row {
@@ -564,6 +610,9 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
     }
     if text_trim.is_empty() {
         return (mode, vec![]);
+    }
+    if mode == Mode::All && text_trim == "?" {
+        return (mode, help_rows(ctx.config));
     }
     if mode == Mode::Google {
         return (mode, vec![google_row(text_trim)]);
@@ -660,6 +709,22 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_lists_keywords_and_commands() {
+        let mut cfg = Config::parse("[[command]]\nname = \"jira\"\nurl = \"https://jira.example.com/browse/{q}\"\n").unwrap();
+        cfg.prefix.wsl = String::new();
+        let rows = help_rows(&cfg);
+        assert_eq!(rows[0].name, "Apps");
+        assert_eq!(rows[0].sub, "a  Search only apps");
+        assert_eq!(rows[0].action, Action::Fill("a ".into()));
+        // 空にしたキーワード(WSL)は出さない
+        assert!(!rows.iter().any(|r| r.name == "WSL"));
+        assert!(rows.iter().any(|r| r.name == "Saved results" && r.sub.starts_with("snap ")));
+        let last = rows.last().unwrap();
+        assert_eq!((last.name.as_str(), last.tag), ("jira", "command"));
+        assert_eq!(last.action, Action::Fill("jira ".into()));
+    }
     use crate::builtin;
     use std::sync::atomic::AtomicBool;
 

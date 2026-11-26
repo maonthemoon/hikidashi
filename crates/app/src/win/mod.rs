@@ -393,6 +393,16 @@ impl App {
         let (_, text) = router::parse(input, &self.config.prefixes());
         let prep = Prepared::new(text.trim(), self.dict.get());
         let (mode, mut rows) = self.with_ctx(tables, |ctx| router::build(input, ctx, &prep, hits));
+        // `?`の一覧には, 拡張とスクリプトのキーワードも足す(K62)
+        if mode == Mode::All && text.trim() == "?" {
+            rows.extend(self.ext.help_rows(&self.ext_taken()));
+            for s in &self.scripts {
+                if let Some(k) = s.keyword.as_deref().filter(|k| !k.is_empty()) {
+                    rows.push(router::help_row(k, &s.title, &s.stem, "script"));
+                }
+            }
+            return (mode, rows);
+        }
         // 引数を取るスクリプト(`ff 語`)の行は一番上に出す
         if mode == Mode::All {
             if let Some(r) = cscripts::arg_row(&self.scripts, text) {
@@ -988,6 +998,27 @@ impl App {
         self.refresh();
     }
 
+    /// 入力欄に入れる(使い方の例, `?`の一覧. K49, K62). キーワードなら左の印にする(打ったときと同じ)
+    fn fill(&mut self, t: &str) {
+        if self.mode == Mode::All {
+            let (mode, rest) = router::parse(t, &self.config.prefixes());
+            if mode == Mode::ChatGpt && self.compose.is_some() {
+                let rest = rest.to_string();
+                self.start_chatgpt(&rest);
+                return;
+            }
+            if mode != Mode::All {
+                self.mode = mode;
+                let rest = rest.to_string();
+                self.set_edit_text(&rest);
+                self.refresh();
+                return;
+            }
+        }
+        self.set_edit_text(t);
+        self.refresh();
+    }
+
     /// 入力欄の文字を変える(EN_CHANGEはwith_appが使用中なので無視される)
     fn set_edit_text(&mut self, s: &str) {
         let w = WStr::new(s);
@@ -1270,6 +1301,17 @@ impl App {
                     self.mode = Mode::All;
                     self.refresh();
                     return true;
+                }
+                // パスの`\`の後ろなら, 1つ上のフォルダーまで一度に戻る(K62)
+                if self.mode == Mode::All && self.menu.is_none() && self.caret_at_end() {
+                    let text = self.edit_text();
+                    if matches!(pathlike::detect(&text), Some(pathlike::Pasted::WinPath(_))) {
+                        if let Some(p) = pathlike::parent_dir_input(&text) {
+                            self.set_edit_text(&p);
+                            self.refresh();
+                            return true;
+                        }
+                    }
                 }
                 false
             }
@@ -1924,6 +1966,11 @@ impl App {
         };
         let Some(t) = t.filter(|t| *t != text) else { return };
         self.mode = mode;
+        // `?`の一覧などのキーワードは左の印にする(K62)
+        if matches!(row.action, Action::Fill(_)) {
+            self.fill(&t);
+            return;
+        }
         self.set_edit_text(&t);
         self.refresh();
     }
@@ -2033,8 +2080,7 @@ impl App {
             // 使い方の例: 入力欄に入れる(モードはそのまま)
             Action::Fill(t) => {
                 let t = t.clone();
-                self.set_edit_text(&t);
-                self.refresh();
+                self.fill(&t);
                 return;
             }
             // スクリプト: 窓は閉じずに動かして, 出力を行にする
@@ -2091,6 +2137,10 @@ impl App {
                         self.finish(key);
                         if a == SysAction::HikidashiSettings {
                             self.open_settings();
+                            return;
+                        }
+                        if a == SysAction::RestartHikidashi {
+                            self.restart();
                             return;
                         }
                         if let Err(e) = actions::system(a, hwnd) {
@@ -2381,6 +2431,16 @@ impl App {
         match r {
             Ok(()) => self.finish(row.learn_key.clone()),
             Err(e) => self.fail(e),
+        }
+    }
+
+    /// Hikidashiを起動し直す(K62): 自分のexeを`--restart`で起動し, 自分は終わる. 新しい方は前のものが終わるのを待つ
+    fn restart(&mut self) {
+        match std::process::Command::new(&self.exe_path).arg("--restart").spawn() {
+            Ok(_) => unsafe {
+                let _ = PostMessageW(Some(self.hwnd), WM_APP_QUIT, WPARAM(0), LPARAM(0));
+            },
+            Err(e) => self.fail(format!("Could not restart: {e}")),
         }
     }
 
@@ -3336,6 +3396,8 @@ pub fn run() {
     }
     // 置いた場所のexeがそのまま動く(K47. wakudoriと同じ)
     let updated = take_over();
+    // `--restart`(K62)は, 前のものが終わるのを待ってから始める(置き換えと同じ)
+    let restarting = std::env::args().any(|a| a == "--restart");
     unsafe {
         let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -3348,7 +3410,7 @@ pub fn run() {
             first = true;
             break;
         }
-        if !updated {
+        if !updated && !restarting {
             break;
         }
         // 前のものが終わるのを待つ

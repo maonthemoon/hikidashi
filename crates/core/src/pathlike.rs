@@ -215,9 +215,38 @@ pub fn split_name(path: &str) -> (&str, &str) {
     }
 }
 
+/// パスの`\`の後ろで`Backspace`を押したときに入れる, 1つ上のフォルダー(K62). `C:\Users\me\`→`C:\Users\`.
+/// 区切りで終わっていないとき, ドライブや`%APPDATA%\`, 共有フォルダーの根(`\\server\share\`)より上はNone
+pub fn parent_dir_input(text: &str) -> Option<String> {
+    if !text.ends_with(['\\', '/']) {
+        return None;
+    }
+    let t = &text[..text.len() - 1];
+    let i = t.rfind(['\\', '/'])?;
+    let parent = &t[..=i];
+    if parent.starts_with("\\\\") && parent[2..].matches('\\').count() < 2 {
+        return None;
+    }
+    Some(parent.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parent_of_typed_folder() {
+        assert_eq!(parent_dir_input(r"C:\Users\me\Documents\").as_deref(), Some(r"C:\Users\me\"));
+        assert_eq!(parent_dir_input(r"C:\Users\").as_deref(), Some(r"C:\"));
+        assert_eq!(parent_dir_input(r"C:\"), None);
+        assert_eq!(parent_dir_input(r"%APPDATA%\Hikidashi\").as_deref(), Some(r"%APPDATA%\"));
+        assert_eq!(parent_dir_input(r"%APPDATA%\"), None);
+        assert_eq!(parent_dir_input(r"\\server\share\dir\").as_deref(), Some(r"\\server\share\"));
+        assert_eq!(parent_dir_input(r"\\server\share\"), None);
+        assert_eq!(parent_dir_input("C:/work/a/").as_deref(), Some("C:/work/"));
+        // 区切りで終わっていなければ, ふつうの1文字の削除
+        assert_eq!(parent_dir_input(r"C:\Users\me"), None);
+    }
 
     fn win(s: &str) -> Pasted {
         Pasted::WinPath(s.into())

@@ -87,6 +87,25 @@ enum Atom<'a> {
     Folder(&'a str),
     Modified(u64),
     Glob(&'a str),
+    /// フォルダーだけ(`kind:folder`. K62)
+    Dir,
+}
+
+/// `kind:`の種類ごとの拡張子(K62). `kind:excel`は`ext:xlsx,xls,xlsm,csv`と同じ. フォルダーは別に扱う
+pub fn kind_exts(kind: &str) -> Option<&'static [&'static str]> {
+    Some(match lower_str(kind).as_str() {
+        "excel" | "xls" => &["xlsx", "xls", "xlsm", "xlsb", "csv"],
+        "word" | "doc" => &["docx", "doc", "docm", "rtf"],
+        "ppt" | "powerpoint" => &["pptx", "ppt", "pptm"],
+        "pdf" => &["pdf"],
+        "image" | "img" => &["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "tif", "tiff", "heic"],
+        "video" => &["mp4", "mov", "avi", "mkv", "wmv", "webm"],
+        "audio" => &["mp3", "wav", "m4a", "flac", "aac", "ogg"],
+        "zip" | "archive" => &["zip", "7z", "rar", "tar", "gz", "tgz", "lzh"],
+        "text" | "txt" => &["txt", "md", "log", "csv", "tsv", "json", "xml", "yaml", "yml", "toml", "ini"],
+        "code" => &["rs", "py", "js", "ts", "c", "h", "cpp", "cs", "java", "go", "sh", "ps1", "bat", "html", "css"],
+        _ => return None,
+    })
 }
 
 fn quoted(s: &str) -> Option<&str> {
@@ -111,6 +130,19 @@ impl<'a> Atom<'a> {
                     .collect::<Vec<_>>();
                 return if exts.is_empty() { Self::Name(text) } else { Self::Extension(exts) };
             }
+            if key.eq_ignore_ascii_case("kind") {
+                let Some(v) = value else { return Self::Name(text) };
+                if v.eq_ignore_ascii_case("folder") || v.eq_ignore_ascii_case("dir") {
+                    return Self::Dir;
+                }
+                // `kind:excel,pdf`のように並べてもよい. 知らない種類が1つでもあれば, ただの名前として扱う
+                let mut exts = Vec::new();
+                for k in v.split(',').filter(|k| !k.is_empty()) {
+                    let Some(list) = kind_exts(k) else { return Self::Name(text) };
+                    exts.extend(list.iter().map(|e| format!(".{e}")));
+                }
+                return if exts.is_empty() { Self::Name(text) } else { Self::Extension(exts) };
+            }
             if key.eq_ignore_ascii_case("in") {
                 return value.map_or(Self::Name(text), Self::Folder);
             }
@@ -132,6 +164,7 @@ impl<'a> Atom<'a> {
             Self::QuotedName(text) => Term::QuotedName(lower_str(text)),
             Self::Extension(exts) => Term::Extension(exts),
             Self::Folder(text) => Term::Folder(lower_str(text)),
+            Self::Dir => Term::Dir,
             // 更新日時が分からない項目(0)を除く.
             Self::Modified(secs) => Term::Modified(now.saturating_sub(secs.min(u32::MAX as u64) as u32).max(1)),
             Self::Glob(text) => {
@@ -273,6 +306,7 @@ enum Term {
     Folder(String),
     Modified(u32),
     Glob(Glob),
+    Dir,
 }
 
 pub(super) enum Matched {
@@ -356,6 +390,7 @@ impl Matcher<'_> {
                     Term::Folder(text) => table.in_folder(id, text),
                     Term::Modified(min) => table.mtime[id as usize] >= *min,
                     Term::Glob(glob) => glob.matches(lower),
+                    Term::Dir => flags & FLAG_DIR != 0,
                 };
                 matches.then_some(Matched::Filter)
             }),

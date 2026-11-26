@@ -140,6 +140,16 @@ impl Ext {
             .collect()
     }
 
+    /// `?`の一覧に足す, 拡張のキーワード(K62). 計算のモードの中だけで使うものも出す
+    pub fn help_rows(&self, taken: &[String]) -> Vec<Row> {
+        let Some(h) = self.host() else { return vec![] };
+        h.list()
+            .into_iter()
+            .filter(|m| !m.keyword.is_empty() && !taken.contains(&m.keyword.to_lowercase()))
+            .map(|m| hikidashi_core::router::help_row(&m.keyword, &m.title, &m.name, "extension"))
+            .collect()
+    }
+
     fn clear_rows(&mut self) {
         self.copies.clear();
         self.bands.clear();

@@ -506,6 +506,23 @@ mod tests {
     }
 
     #[test]
+    fn filter_by_kind() {
+        let t = filter_table();
+        let mut v = names(&t, "kind:pdf");
+        v.sort();
+        assert_eq!(v, vec!["notes.pdf", "report.pdf", "見積.PDF", "見積.pdf"]);
+        assert_eq!(names(&t, "memo & kind:word"), vec!["memo.docx"]);
+        assert_eq!(names(&t, "kind:zip"), vec!["backup.tar.gz"]);
+        assert_eq!(names(&t, "kind:word,zip").len(), 2);
+        // フォルダーだけ
+        let dirs = names(&t, "kind:folder");
+        assert!(!dirs.is_empty() && dirs.iter().all(|n| !n.contains('.')));
+        // 知らない種類は名前として扱う(式にならない)
+        assert!(!FileQuery::parse("kind:foo").is_structured());
+        assert!(FileQuery::parse("kind:excel").is_structured());
+    }
+
+    #[test]
     fn filter_by_glob() {
         let mut t = filter_table();
         let mut v = names(&t, "*.PDF");
