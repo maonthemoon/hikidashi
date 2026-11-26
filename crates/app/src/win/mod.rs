@@ -1370,6 +1370,8 @@ impl App {
                         if let Some(p) = pathlike::parent_dir_input(&text) {
                             self.set_edit_text(&p);
                             self.refresh();
+                            // 続いて届くBackspaceの文字で, 入れた`\`が消えないようにする
+                            EAT_BACK_CHAR.set(true);
                             return true;
                         }
                     }
@@ -2312,6 +2314,11 @@ impl App {
                         }
                         if let Err(e) = actions::system(a, hwnd) {
                             storage::log(&e);
+                        }
+                        // 自分あての知らせ(WM_SETTINGCHANGE)は処理中で受け取れないので, ここで追いかける(K62)
+                        if a == SysAction::ToggleDarkMode {
+                            theme::set_theme(&self.config.ui.theme);
+                            self.sync_theme();
                         }
                         return;
                     }
@@ -3494,6 +3501,8 @@ thread_local! {
     static CUE: std::cell::Cell<&'static str> = const { std::cell::Cell::new(CUE_SEARCH) };
     /// 前に描いたときに案内を出していたか
     static CUE_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// 次に届くBackspaceの文字(0x08)を捨てる. キーを自分で処理して入力欄の文字を変えたとき(K62)
+    static EAT_BACK_CHAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// 日本語入力で変換している間は案内を出さない
     static EDIT_IME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -3557,6 +3566,8 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
         WM_IME_ENDCOMPOSITION => EDIT_IME.set(false),
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let sys = msg == WM_SYSKEYDOWN;
+            // 前のキーの文字が届かなかったときに, 次のBackspaceを捨てないように
+            EAT_BACK_CHAR.set(false);
             if let Some(true) = with_app(|app| app.on_key(wparam.0 as u16, sys)) {
                 return LRESULT(0);
             }
@@ -3584,10 +3595,13 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
         WM_IME_STARTCOMPOSITION => EDIT_IME.set(true),
         WM_CHAR | WM_SYSCHAR => {
             let c = wparam.0 as u32;
+            if c == 0x08 && EAT_BACK_CHAR.replace(false) {
+                return LRESULT(0);
+            }
             // 書く窓にしたあとに届いた文字(Ctrl+Vなど)は入れない
             let capture = with_app(|app| app.capture || app.composing()).unwrap_or(false);
-            // Enter, Tab, Esc, Ctrl+Backspace, Ctrl+A, Ctrl+N/P の文字は入力欄に入れない(鳴らさない)
-            if capture || matches!(c, 0x0D | 0x09 | 0x1B | 0x7F | 0x01 | 0x0E | 0x10 | 0x0A) {
+            // Enter, Tab, Esc, Ctrl+Backspace, Ctrl+A, Ctrl+N/P, Ctrl+S の文字は入力欄に入れない(鳴らさない)
+            if capture || matches!(c, 0x0D | 0x09 | 0x1B | 0x7F | 0x01 | 0x0E | 0x10 | 0x0A | 0x13) {
                 return LRESULT(0);
             }
             if msg == WM_SYSCHAR {

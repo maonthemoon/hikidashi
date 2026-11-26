@@ -73,7 +73,7 @@ const SETTINGS: &[(&str, &str, &str, &str)] = &[
     ("Proxy", "プロキシ", "ms-settings:network-proxy", ""),
     ("Personalization", "個人用設定", "ms-settings:personalization", ""),
     ("Background", "背景 壁紙 wallpaper", "ms-settings:personalization-background", ""),
-    ("Colors", "色 カラー ダーク dark", "ms-settings:colors", ""),
+    ("Colors", "色 カラー accent アクセント", "ms-settings:colors", ""),
     ("Themes", "テーマ", "ms-settings:themes", ""),
     ("Lock screen", "ロック画面", "ms-settings:lockscreen", ""),
     ("Start menu", "スタート", "ms-settings:personalization-start", ""),
