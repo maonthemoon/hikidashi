@@ -74,6 +74,8 @@ const WM_APP_QUIT: u32 = 0x8000 + 3;
 const TIMER_GLOW: usize = 2;
 const TIMER_QUICK: usize = 3;
 const TIMER_SELECTION: usize = 77;
+/// 書く窓のまま, エクスプローラーに移ったあとを見張る(画像を落とせるように. K63)
+const TIMER_DROP_WAIT: usize = 78;
 /// 書く窓を整える頼み(K22. RichEditの通知の中では整えず, あとで行う)
 const WM_APP_COMPOSE: u32 = 0x8000 + 5;
 /// ブックマークのアイコンを読み終えた
@@ -1832,6 +1834,10 @@ impl App {
             return;
         }
         self.attach_files(&paths);
+        // 落としたあとは続けて書けるよう, 書く窓を前に出す(K63)
+        unsafe {
+            let _ = SetForegroundWindow(self.hwnd);
+        }
         if let Some(c) = &self.compose {
             unsafe {
                 let _ = SetFocus(Some(c.hwnd));
@@ -3283,9 +3289,15 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                 Some(LRESULT(0))
             }
             WM_ACTIVATE => {
-                // ほかの窓をクリックしたら隠す(A3)
+                // ほかの窓をクリックしたら隠す(A3). 書く窓でエクスプローラーに移ったときは, 画像を落とせるよう出したままにする(K63)
                 if loword(wparam.0) as u32 == WA_INACTIVE && app.visible() {
-                    app.hide();
+                    if app.composing() && is_explorer_window(unsafe { GetForegroundWindow() }) {
+                        unsafe {
+                            SetTimer(Some(hwnd), TIMER_DROP_WAIT, 300, None);
+                        }
+                    } else {
+                        app.hide();
+                    }
                 }
                 None
             }
@@ -3373,6 +3385,19 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                     }
                     TIMER_QUICK => app.on_quick_timer(),
                     TIMER_SELECTION => app.on_selection_timer(),
+                    TIMER_DROP_WAIT => {
+                        // 自分に戻った, 隠れた, ならやめる. エクスプローラー以外に移ったら隠す
+                        let fg = unsafe { GetForegroundWindow() };
+                        let done = !app.visible() || fg == hwnd || !is_explorer_window(fg);
+                        if done {
+                            unsafe {
+                                let _ = KillTimer(Some(hwnd), TIMER_DROP_WAIT);
+                            }
+                            if app.visible() && fg != hwnd {
+                                app.hide();
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 Some(LRESULT(0))
@@ -3684,6 +3709,18 @@ fn compose_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id:
         _ => {}
     }
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// エクスプローラー(デスクトップとタスクバーを含む)の窓か. 画像を落とすもとになる(K63)
+fn is_explorer_window(h: HWND) -> bool {
+    if h.0.is_null() {
+        return false;
+    }
+    let mut pid = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(h, Some(&mut pid));
+    }
+    winlist::process_path(pid).to_ascii_lowercase().ends_with("\\explorer.exe")
 }
 
 /// 窓(書く窓の中を含む)にファイルを落とした. 書く窓なら画像を添付にする
