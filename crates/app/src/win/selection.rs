@@ -49,6 +49,11 @@ fn held(vk: VIRTUAL_KEY) -> bool {
     (unsafe { GetAsyncKeyState(vk.0 as i32) }) < 0
 }
 
+/// Ctrl, Alt, Shift, Winのどれかが押されている
+pub fn modifiers_held() -> bool {
+    MODS.iter().any(|k| held(*k))
+}
+
 /// ホットキーの修飾キーが離されるのを待つ(最大0.5秒). まだ押されていたら, キーを離したことにして送る
 fn release_modifiers() {
     for _ in 0..50 {
@@ -118,7 +123,8 @@ pub fn capture(hwnd: HWND) -> (Option<String>, Option<u32>) {
         (_, false) => None,
     };
     if text.is_none() {
-        super::storage::log(if changed { "selection: copied, but no text" } else { "selection: the app did not copy" });
+        let name = exe.rsplit(['\\', '/']).next().unwrap_or_default();
+        super::storage::log(&format!("{} ({name})", if changed { "selection: copied, but no text" } else { "selection: the app did not copy" }));
     }
     (text, ignore)
 }

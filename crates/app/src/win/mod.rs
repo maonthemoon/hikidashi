@@ -201,6 +201,10 @@ pub struct App {
     clip_listening: bool,
     /// この通し番号のクリップボードの更新は履歴に残さない(選んだ文字の取り込みで一時的に変えたもの)
     clip_ignore: Option<u32>,
+    /// 窓を出す前に前面にあった窓. 窓が出ているときに選んだ文字を読むとき, ここへ戻す
+    prev_fg: isize,
+    /// 窓が出ているときに選んだ文字のホットキーが押された時刻. 修飾キーが離れるのを待っている
+    selection_wait: Option<Instant>,
     /// スクリプトのフォルダー
     scripts: Vec<Script>,
     scripts_sig: Vec<(String, Option<SystemTime>)>,
@@ -679,6 +683,10 @@ impl App {
         self.sync_theme();
         let t0 = self.stats.hotkey_at.take().unwrap_or_else(Instant::now);
         unsafe {
+            let fg = GetForegroundWindow();
+            if fg != self.hwnd && !self.visible() {
+                self.prev_fg = fg.0 as isize;
+            }
             let mut pt = POINT::default();
             let _ = GetCursorPos(&mut pt);
             // 窓が出たときにマウスの下の行が選ばれないよう, いまの位置を覚える
@@ -2524,11 +2532,12 @@ impl App {
         if self.capture {
             return;
         }
-        // 窓が出ているときは, いったん隠して前のアプリに戻ってから読む(K50)
+        // 窓が出ているときは, いったん隠して前のアプリに戻ってから読む(K50).
+        // 修飾キーを離すまでは隠さない. 隠したあとに離すと, Altが前のアプリに届いてメニューに入り, Ctrl+Cが効かない(確認15 N1)
         if self.visible() {
-            self.hide();
+            self.selection_wait = Some(Instant::now());
             unsafe {
-                SetTimer(Some(self.hwnd), TIMER_SELECTION, 150, None);
+                SetTimer(Some(self.hwnd), TIMER_SELECTION, 20, None);
             }
             return;
         }
@@ -2546,6 +2555,40 @@ impl App {
         };
         storage::log(&format!("selection hotkey: {what}"));
         self.show_with(picked);
+    }
+
+    /// 窓が出ているときに押された選んだ文字のホットキーの続き.
+    /// 修飾キーが離れたら(最大1.5秒), 前のアプリを前面に戻して窓を隠し, 0.15秒後に読む
+    fn on_selection_timer(&mut self) {
+        if let Some(t) = self.selection_wait {
+            if selection::modifiers_held() && t.elapsed().as_millis() < 1500 {
+                return;
+            }
+            self.selection_wait = None;
+            if !self.visible() {
+                unsafe {
+                    let _ = KillTimer(Some(self.hwnd), TIMER_SELECTION);
+                }
+                return;
+            }
+            unsafe {
+                let prev = HWND(self.prev_fg as *mut _);
+                if self.prev_fg != 0 && IsWindow(Some(prev)).as_bool() && IsWindowVisible(prev).as_bool() {
+                    let _ = SetForegroundWindow(prev);
+                }
+            }
+            self.hide();
+            unsafe {
+                SetTimer(Some(self.hwnd), TIMER_SELECTION, 150, None);
+            }
+            return;
+        }
+        unsafe {
+            let _ = KillTimer(Some(self.hwnd), TIMER_SELECTION);
+        }
+        if !self.visible() {
+            self.on_selection_hotkey();
+        }
     }
 
     /// `--query`で別のHikidashiから渡された文字
@@ -2927,14 +2970,7 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                         paint::invalidate_line(app);
                     }
                     TIMER_QUICK => app.on_quick_timer(),
-                    TIMER_SELECTION => {
-                        unsafe {
-                            let _ = KillTimer(Some(hwnd), TIMER_SELECTION);
-                        }
-                        if !app.visible() {
-                            app.on_selection_hotkey();
-                        }
-                    }
+                    TIMER_SELECTION => app.on_selection_timer(),
                     _ => {}
                 }
                 Some(LRESULT(0))
@@ -3427,6 +3463,8 @@ pub fn run() {
         clips: ClipHistory::default(),
         clip_listening: false,
         clip_ignore: None,
+        prev_fg: 0,
+        selection_wait: None,
         scripts: vec![],
         scripts_sig: vec![],
         lists: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
