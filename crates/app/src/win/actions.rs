@@ -444,6 +444,17 @@ pub fn google(q: &str, cfg: &Config) -> Result<(), String> {
 
 /// 自作コマンドの実行(H2). cmd.exeに渡す(窓は出さない)
 pub fn run_command(cmd: &str) -> Result<(), String> {
+    // ファイルやフォルダーを開くだけなら, 検索の結果と同じように直接開く(速い)
+    if let Some(p) = hikidashi_core::pathlike::command_target(cmd) {
+        let p = expand(&p);
+        if is_wsl_path(&p) {
+            return open_wsl(&p);
+        }
+        // ネットワークのパスは, ないときに調べると待たされるので, そのまま開く
+        if p.starts_with("\\\\") || std::path::Path::new(&p).exists() {
+            return shell("open", &p, "", "", false);
+        }
+    }
     std::process::Command::new("cmd.exe")
         .raw_arg(format!("/c {cmd}"))
         .creation_flags(CREATE_NO_WINDOW)

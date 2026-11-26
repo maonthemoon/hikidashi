@@ -54,6 +54,37 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// 自作コマンド(`[[command]]`の`run`)が, ファイルやフォルダーを開くだけのものなら, そのパスを返す.
+/// `C:\…`, `"C:\…"`, `explorer "C:\…"`, `start "" "C:\…"`の形. 環境変数はそのまま返す.
+/// 呼ぶ側で, あることを確かめてから直接開く(`cmd.exe`と`explorer.exe`を起こさない分, 速い)
+pub fn command_target(cmd: &str) -> Option<String> {
+    let mut s = cmd.trim();
+    let lower = s.to_ascii_lowercase();
+    if let Some(p) = ["explorer.exe ", "explorer "].into_iter().find(|p| lower.starts_with(p)) {
+        s = s[p.len()..].trim_start();
+    } else if lower.starts_with("start ") {
+        s = s[6..].trim_start();
+        if let Some(r) = s.strip_prefix("\"\"") {
+            s = r.trim_start();
+        }
+    }
+    // 引用符で囲んだときは, その後ろに何もないこと(引数の付いたコマンドは`cmd.exe`に渡す)
+    if let Some(r) = s.strip_prefix('"') {
+        let end = r.find('"')?;
+        if !r[end + 1..].trim().is_empty() {
+            return None;
+        }
+        s = &r[..end];
+    }
+    if s.contains('"') {
+        return None;
+    }
+    match detect(s)? {
+        Pasted::WinPath(p) => Some(p),
+        _ => None,
+    }
+}
+
 /// 入力がパスやBoxのURLの形なら, その種類を返す. 複数行のときは1行目だけを見る.
 pub fn detect(input: &str) -> Option<Pasted> {
     let first = input.lines().find(|l| !l.trim().is_empty())?;
@@ -262,5 +293,22 @@ mod tests {
         assert_eq!(wsl_to_unc("/home/me/a", "Ubuntu", None), r"\\wsl.localhost\Ubuntu\home\me\a");
         assert_eq!(wsl_to_unc("~/a", "Ubuntu", Some("/home/me")), r"\\wsl.localhost\Ubuntu\home\me\a");
         assert_eq!(split_name(r"C:\a\b.txt"), ("b.txt", r"C:\a"));
+    }
+
+    #[test]
+    fn command_that_only_opens_a_path() {
+        let t = |c: &str| command_target(c);
+        assert_eq!(t(r#"C:\Users\me\会議"#).as_deref(), Some(r"C:\Users\me\会議"));
+        assert_eq!(t(r#""C:\Program Files\x""#).as_deref(), Some(r"C:\Program Files\x"));
+        assert_eq!(t(r#"explorer "C:\Users\me\会議""#).as_deref(), Some(r"C:\Users\me\会議"));
+        assert_eq!(t(r#"Explorer.exe C:\a b"#).as_deref(), Some(r"C:\a b"));
+        assert_eq!(t(r#"start "" "%USERPROFILE%\見積.xlsx""#).as_deref(), Some(r"%USERPROFILE%\見積.xlsx"));
+        assert_eq!(t(r#"start \\server\share\a"#).as_deref(), Some(r"\\server\share\a"));
+        // 引数のあるもの, パスでないものは, cmd.exeに任せる
+        assert_eq!(t(r#""C:\tool.exe" --flag"#), None);
+        assert_eq!(t(r#"code "C:\Users\me\dotfile""#), None);
+        assert_eq!(t(r#"explorer /select,"C:\a.txt""#), None);
+        assert_eq!(t("notepad.exe"), None);
+        assert_eq!(t("https://example.com"), None);
     }
 }
