@@ -322,6 +322,8 @@ impl App {
             Mode::ChatGpt => &p.chatgpt,
             Mode::Clipboard => &p.clipboard,
             Mode::Calc => &p.calc,
+            Mode::Snapshot => &p.snapshot,
+            Mode::Calendar => &p.calendar,
             Mode::All => "",
         }
     }
@@ -3089,6 +3091,8 @@ fn cue_for(m: Mode) -> &'static str {
         Mode::Google => "Search Google",
         Mode::Clipboard => "Search clipboard history",
         Mode::Calc => "Calculate: 0x1F, 10dBm, (12+3)*4, mipi",
+        Mode::Snapshot => "Search saved results",
+        Mode::Calendar => "Search your Outlook calendar",
     }
 }
 

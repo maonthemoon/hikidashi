@@ -165,6 +165,10 @@ pub struct Prefix {
     pub clipboard: String,
     /// 計算(2026-11-25. `= 0x1F`). 計算の行はこの接頭辞のときだけ出す
     pub calc: String,
+    /// 保存した結果(K62. `snap `)
+    pub snapshot: String,
+    /// Outlookの予定(K62. `cal `)
+    pub calendar: String,
 }
 
 /// Enterに修飾キーを足したときにすること. 値は`Ctrl+Enter`のような形. 空ならその操作はキーでは行わない.
@@ -411,7 +415,7 @@ impl Default for Config {
 
 impl Default for Prefix {
     fn default() -> Self {
-        Prefix { app: "a".into(), file: "f".into(), bookmark: "b".into(), kill: "k".into(), wsl: "w".into(), boxdrive: "bx".into(), google: "g".into(), chatgpt: "c".into(), clipboard: "cb".into(), calc: "=".into() }
+        Prefix { app: "a".into(), file: "f".into(), bookmark: "b".into(), kill: "k".into(), wsl: "w".into(), boxdrive: "bx".into(), google: "g".into(), chatgpt: "c".into(), clipboard: "cb".into(), calc: "=".into(), snapshot: "snap".into(), calendar: "cal".into() }
     }
 }
 
@@ -556,6 +560,8 @@ impl Config {
             (self.prefix.chatgpt.clone(), Mode::ChatGpt),
             (self.prefix.clipboard.clone(), Mode::Clipboard),
             (self.prefix.calc.clone(), Mode::Calc),
+            (self.prefix.snapshot.clone(), Mode::Snapshot),
+            (self.prefix.calendar.clone(), Mode::Calendar),
         ];
         v.retain(|(p, _)| !p.is_empty());
         v.sort_by_key(|(p, _)| std::cmp::Reverse(p.len()));
@@ -622,7 +628,7 @@ pub fn to_toml(c: &Config) -> String {
     line("# calc is the only place where calculations are shown, e.g. \"= 0x1F\", \"= 10dBm\", \"= (12+3)*4\".");
     line("[prefix]");
     let p = &c.prefix;
-    for (k, v) in [("app", &p.app), ("file", &p.file), ("bookmark", &p.bookmark), ("kill", &p.kill), ("wsl", &p.wsl), ("box", &p.boxdrive), ("google", &p.google), ("chatgpt", &p.chatgpt), ("clipboard", &p.clipboard), ("calc", &p.calc)] {
+    for (k, v) in [("app", &p.app), ("file", &p.file), ("bookmark", &p.bookmark), ("kill", &p.kill), ("wsl", &p.wsl), ("box", &p.boxdrive), ("google", &p.google), ("chatgpt", &p.chatgpt), ("clipboard", &p.clipboard), ("calc", &p.calc), ("snapshot", &p.snapshot), ("calendar", &p.calendar)] {
         line(&format!("{k} = {}", q(v)));
     }
     line("");

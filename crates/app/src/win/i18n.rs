@@ -96,6 +96,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("End a process", "プロセスを終了"),
     ("Clipboard history", "クリップボードの履歴"),
     ("Calculator", "計算"),
+    ("Saved results", "保存した結果"),
+    ("Calendar", "予定"),
     ("Nothing here yet", "まだありません"),
     // 全般
     ("Startup", "起動"),
@@ -166,6 +168,8 @@ const PAIRS: &[(&str, &str)] = &[
     ("A long question to ChatGPT", "ChatGPTへの長い質問"),
     ("Text and files you copied", "コピーした文字とファイル"),
     ("Numbers, formulas, RF, MIPI", "進数, 式, RF, MIPI"),
+    ("Results saved with Ctrl+S", "Ctrl+Sで保存した結果"),
+    ("Outlook appointments", "Outlookの予定"),
     ("Copy file", "ファイルをコピー"),
     ("Open new window", "新しく起動"),
     ("Open the folder it is in", "場所を開く"),

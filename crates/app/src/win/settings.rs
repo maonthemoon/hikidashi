@@ -73,8 +73,8 @@ const ID_SELHK_CHANGE: i32 = 106;
 const ID_SELHK_CLEAR: i32 = 107;
 const ID_RECENT: i32 = 230;
 const ID_CLIPHIST: i32 = 231;
-const ID_PFX: i32 = 110; // 110〜119
-const ID_PFX_EX: i32 = 140; // 140〜149
+const ID_PFX: i32 = 700; // 700〜719(K62で12個にしたので, 110〜119から移した)
+const ID_PFX_EX: i32 = 720; // 720〜739
 const ID_KEYS: i32 = 120; // 120〜124
 const ID_ROOTS: i32 = 200;
 const ID_ROOTS_ADD: i32 = 201;
@@ -121,9 +121,9 @@ const E_APPS: i32 = 17;
 const E_BROWSE: i32 = 18;
 
 const SECTIONS: [&str; 8] = ["General", "Hotkeys", "Keywords", "Search", "Apps", "Actions", "Web", "Aliases"];
-const PREFIX_LABELS: [&str; 10] = ["Apps", "Files", "Bookmarks", "End a process", "WSL", "Box", "Google", "ChatGPT", "Clipboard history", "Calculator"];
+const PREFIX_LABELS: [&str; 12] = ["Apps", "Files", "Bookmarks", "End a process", "WSL", "Box", "Google", "ChatGPT", "Clipboard history", "Calculator", "Saved results", "Calendar"];
 /// キーワードで探すものの説明(K52)
-const PREFIX_NOTES: [&str; 10] = [
+const PREFIX_NOTES: [&str; 12] = [
     "Apps in the Start menu",
     "File and folder names",
     "Chrome and Edge bookmarks",
@@ -134,6 +134,8 @@ const PREFIX_NOTES: [&str; 10] = [
     "A long question to ChatGPT",
     "Text and files you copied",
     "Numbers, formulas, RF, MIPI",
+    "Results saved with Ctrl+S",
+    "Outlook appointments",
 ];
 const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows"), ("ja", "日本語"), ("en", "English")];
 /// ランチャーの窓, 書く窓, 設定画面, トレイのメニューの色(K39, K43)
@@ -1167,7 +1169,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         p.group("", "Type a keyword and a space to search only that kind. Leave it empty to turn it off.");
         p.card();
         let f = &c.prefix;
-        let vals = [&f.app, &f.file, &f.bookmark, &f.kill, &f.wsl, &f.boxdrive, &f.google, &f.chatgpt, &f.clipboard, &f.calc];
+        let vals = [&f.app, &f.file, &f.bookmark, &f.kill, &f.wsl, &f.boxdrive, &f.google, &f.chatgpt, &f.clipboard, &f.calc, &f.snapshot, &f.calendar];
         for (i, (label, v)) in PREFIX_LABELS.iter().zip(vals).enumerate() {
             let y = p.row(44);
             let l = p.m.label(label);
@@ -1503,6 +1505,8 @@ impl Settings {
         c.prefix.chatgpt = t(ID_PFX + 7);
         c.prefix.clipboard = t(ID_PFX + 8);
         c.prefix.calc = t(ID_PFX + 9);
+        c.prefix.snapshot = t(ID_PFX + 10);
+        c.prefix.calendar = t(ID_PFX + 11);
         c.search.recent = checked(item(h, ID_RECENT));
         c.search.clipboard_history = checked(item(h, ID_CLIPHIST));
         c.ui.language = selected_key(item(h, ID_LANG), &LANGS);
@@ -1918,7 +1922,7 @@ impl Settings {
             // 一覧をダブルクリック
             ID_ALIASES | ID_OPENWITH if code == LBN_DBLCLK => self.edit_selected(id).into_iter().collect(),
             // キーワードの例を, 打った文字に合わせる
-            _ if (ID_PFX..ID_PFX + 10).contains(&id) && code == EN_CHANGE => {
+            _ if (ID_PFX..ID_PFX + PREFIX_LABELS.len() as i32).contains(&id) && code == EN_CHANGE => {
                 let i = (id - ID_PFX) as usize;
                 let h = item(self.hwnd, ID_PFX_EX + i as i32);
                 set_raw_text(h, &prefix_note(i, &text(item(self.hwnd, id))));

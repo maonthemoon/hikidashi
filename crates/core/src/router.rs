@@ -35,6 +35,10 @@ pub enum Mode {
     Clipboard,
     /// 計算(`= 0x1F`, `= 10dBm`, `= (12+3)*4`). 計算の行はこのときだけ出す(2026-11-25)
     Calc,
+    /// 保存した結果(K62. `snap `). 行は画面の側が作る
+    Snapshot,
+    /// Outlookの予定(K62. `cal `). 行は画面の側が作る
+    Calendar,
 }
 
 impl Mode {
@@ -52,6 +56,8 @@ impl Mode {
             Mode::ChatGpt => "ChatGPT",
             Mode::Clipboard => "clipboard",
             Mode::Calc => "calc",
+            Mode::Snapshot => "snap",
+            Mode::Calendar => "calendar",
         }
     }
 }
@@ -598,7 +604,7 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
         Mode::Bookmark => &[Source::Bookmarks],
         Mode::Kill => &[Source::Processes],
         Mode::File => &[Source::Folders],
-        Mode::Wsl | Mode::Box | Mode::Google | Mode::ChatGpt | Mode::Clipboard | Mode::Calc => &[],
+        Mode::Wsl | Mode::Box | Mode::Google | Mode::ChatGpt | Mode::Clipboard | Mode::Calc | Mode::Snapshot | Mode::Calendar => &[],
     };
     for &s in sources {
         let cat = ctx.sources.get(s);
