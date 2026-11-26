@@ -367,6 +367,136 @@ pub fn ask_chatgpt_long(hwnd: HWND, text: &str, cfg: &Config) -> Result<(), Stri
     Ok(())
 }
 
+/// 画像つきの質問を送り終えた知らせ(K22). `lparam`は`Box<ImagesDone>`
+pub const WM_APP_IMAGES_DONE: u32 = 0x8000 + 8;
+
+pub struct ImagesDone {
+    /// 送る前のクリップボード. クリップボードがまだ`ours`なら戻す
+    pub saved: Option<super::clipboard::Saved>,
+    pub ours: u32,
+    /// ChatGPTの窓にならず, 画像を貼れなかった(最後の画像をクリップボードに残した)
+    pub failed: bool,
+}
+
+/// 前の窓がChatGPTで, 修飾キーが離れるまで待つ(250ミリ秒ごとに`tries`回). だめなら前の窓のタイトルを返す
+fn wait_chatgpt(tries: u32) -> Result<(), String> {
+    let mut last = String::new();
+    for _ in 0..tries {
+        last = window_text(unsafe { GetForegroundWindow() });
+        let held = [VK_SHIFT, VK_CONTROL, VK_MENU].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } < 0);
+        if last.contains("ChatGPT") && !held {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    Err(last)
+}
+
+/// 画像を添付した長い質問(K22)を送る. 文字は今まで通り`?q=`で入れ(長ければ貼る), `send_delay_ms`待って前の窓がChatGPTなら,
+/// 1枚ずつクリップボードに画像を入れて`Ctrl+V`を送る. 最後の1枚のあと`image_wait_ms`×枚数だけ待ってEnterを押す(`send_enter`がオフなら押さない).
+/// 終わったらクリップボードを元に戻す. ChatGPTの窓にならなければ貼らず, 最後の画像をクリップボードに残す.
+/// - 文字がないときも`?q=.`で開いて`.`を消す(`?q=`なしで開くと入力欄にカーソルがなく, 貼り付けが空振りした. 2026-11-24の会社PC).
+/// - 貼るたびに少し待つ. ブラウザーがクリップボードを読む前に次の画像に入れ替えると, 同じ画像が2回入ったり抜けたりするため.
+/// - `mode = "clipboard"`なら, 文字(なければ最後の画像)をコピーして開くだけ.
+pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::attach::Image], cfg: &Config) -> Result<(), String> {
+    use hikidashi_core::attach::{self, Fill};
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    let Some(last_img) = images.last() else { return ask_chatgpt_long(hwnd, &text, cfg) };
+    if cfg.chatgpt.mode == "clipboard" {
+        if text.trim().is_empty() {
+            super::clipboard::set_image(hwnd, last_img).ok_or("Could not copy the image to the clipboard")?;
+        } else {
+            copy_text(hwnd, &text.replace('\n', "\r\n"))?;
+        }
+        return open_url(&cfg.chatgpt.home, cfg);
+    }
+    let fill = attach::fill(&text, url_encode(&text), URL_Q_MAX);
+    // 送る前のクリップボード(画像のことも多い)を写しておく
+    let saved = super::clipboard::save(hwnd);
+    match &fill {
+        Fill::Url(enc) => open_url(&cfg.chatgpt.url.replace("{q}", enc), cfg)?,
+        Fill::Paste => {
+            copy_text(hwnd, &text.replace('\n', "\r\n"))?;
+            open_url(&cfg.chatgpt.url.replace("{q}", "."), cfg)?;
+        }
+        Fill::Dot => open_url(&cfg.chatgpt.url.replace("{q}", "."), cfg)?,
+    }
+    super::storage::log(&format!("chatgpt: question with {} image(s) ({} chars)", images.len(), text.chars().count()));
+    let images = images.to_vec();
+    let (h, delay, enter, per) = (hwnd.0 as isize, cfg.chatgpt.send_delay_ms, cfg.chatgpt.send_enter, cfg.chatgpt.image_wait_ms);
+    std::thread::spawn(move || {
+        let hwnd = HWND(h as *mut _);
+        let sleep = |ms: u64| std::thread::sleep(std::time::Duration::from_millis(ms));
+        let done = |d: ImagesDone| unsafe {
+            // 届かなければ捨てる(戻さない)
+            let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_IMAGES_DONE, WPARAM(0), LPARAM(Box::into_raw(Box::new(d)) as isize));
+        };
+        // 貼れなかった. 最後の画像をクリップボードに残す(自分で貼れるように)
+        let fail = |why: String, saved: Option<super::clipboard::Saved>| {
+            super::storage::log(&format!("chatgpt: images not pasted ({why})"));
+            let ours = super::clipboard::set_image(hwnd, images.last().unwrap()).unwrap_or(0);
+            done(ImagesDone { saved, ours, failed: true });
+        };
+        sleep(delay as u64);
+        // ページが遅いときのため, あと10秒まで待つ
+        if let Err(front) = wait_chatgpt(40) {
+            fail(format!("window in front: {front}"), saved);
+            return;
+        }
+        match fill {
+            Fill::Paste => {
+                // `.`を消して, 文字の全体を貼る
+                press(&[VK_CONTROL, VK_END]);
+                sleep(150);
+                press(&[VK_BACK]);
+                sleep(150);
+                press(&[VK_CONTROL, VK_V]);
+                super::storage::log(&format!("chatgpt: pasted a long question ({} chars)", text.chars().count()));
+                sleep(800);
+            }
+            Fill::Dot => {
+                press(&[VK_CONTROL, VK_END]);
+                sleep(150);
+                press(&[VK_BACK]);
+                sleep(300);
+            }
+            Fill::Url(_) => {}
+        }
+        let mut ours = 0;
+        for (i, img) in images.iter().enumerate() {
+            if let Err(front) = wait_chatgpt(20) {
+                fail(format!("before image {}, window in front: {front}", i + 1), saved);
+                return;
+            }
+            let Some(seq) = super::clipboard::set_image(hwnd, img) else {
+                fail(format!("could not put image {} on the clipboard", i + 1), saved);
+                return;
+            };
+            ours = seq;
+            sleep(150);
+            press(&[VK_CONTROL, VK_V]);
+            sleep(1000);
+        }
+        super::storage::log(&format!("chatgpt: pasted {} image(s)", images.len()));
+        // アップロードが終わるまで待つ
+        sleep(attach::wait_ms(images.len(), per));
+        if enter {
+            match wait_chatgpt(1) {
+                Ok(()) => {
+                    press_enter();
+                    super::storage::log("chatgpt: sent Enter");
+                    enter_again();
+                }
+                Err(front) => super::storage::log(&format!("chatgpt: Enter not sent (window in front: {front})")),
+            }
+        }
+        // 貼り付けが終わってから戻す
+        sleep(1500);
+        done(ImagesDone { saved, ours, failed: false });
+    });
+    Ok(())
+}
+
 /// 修飾キーと一緒にキーを押して離す(例: Ctrl+V)
 fn press(keys: &[VIRTUAL_KEY]) {
     let key = |vk: VIRTUAL_KEY, up: bool| INPUT {

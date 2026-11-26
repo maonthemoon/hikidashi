@@ -2,6 +2,7 @@
 //! ファイルのコピー(Explorerと同じ形)に使う. 履歴の持ち方と絞り込みは`hikidashi_core::clip`.
 
 use super::util::{wide, WStr};
+use hikidashi_core::attach::{self, Image, Paste};
 use hikidashi_core::clip::{ClipKind, MAX_TEXT_BYTES};
 use std::sync::OnceLock;
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
@@ -9,11 +10,14 @@ use windows::Win32::System::DataExchange::{
     CloseClipboard, CountClipboardFormats, EmptyClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT};
-use windows::Win32::System::Ole::{CF_HDROP, CF_UNICODETEXT};
+use windows::Win32::System::Ole::{CF_BITMAP, CF_DIB, CF_DIBV5, CF_HDROP, CF_UNICODETEXT};
 use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 
 const CF_TEXT_ID: u32 = CF_UNICODETEXT.0 as u32;
 const CF_HDROP_ID: u32 = CF_HDROP.0 as u32;
+const CF_DIB_ID: u32 = CF_DIB.0 as u32;
+/// 添付する画像1枚の大きさの上限(バイト. 4Kの画面の切り取りは32MBほど)
+const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 /// `DROPEFFECT_COPY`
 const DROPEFFECT_COPY: u32 = 1;
 
@@ -40,6 +44,8 @@ struct Formats {
     /// 値が0なら記録しない
     can_include: u32,
     drop_effect: u32,
+    /// 画像のPNG(Snipping Toolやブラウザーが付ける. ブラウザーは貼るときにこれを先に読む)
+    png: u32,
 }
 
 fn formats() -> &'static Formats {
@@ -54,6 +60,7 @@ fn formats() -> &'static Formats {
             viewer_ignore: reg("Clipboard Viewer Ignore"),
             can_include: reg("CanIncludeInClipboardHistory"),
             drop_effect: reg("Preferred DropEffect"),
+            png: reg("PNG"),
         }
     })
 }
@@ -120,7 +127,13 @@ fn files_open() -> Option<Vec<String>> {
             return None;
         }
         let h = GetClipboardData(CF_HDROP_ID).ok()?;
-        let hd = HDROP(h.0);
+        Some(drop_paths(HDROP(h.0)))
+    }
+}
+
+/// `HDROP`(クリップボードのファイルや, 窓に落としたファイル)のパス
+pub fn drop_paths(hd: HDROP) -> Vec<String> {
+    unsafe {
         let n = DragQueryFileW(hd, u32::MAX, None);
         let mut out = vec![];
         for i in 0..n.min(1000) {
@@ -129,8 +142,76 @@ fn files_open() -> Option<Vec<String>> {
             let got = DragQueryFileW(hd, i, Some(&mut buf)) as usize;
             out.push(String::from_utf16_lossy(&buf[..got.min(buf.len())]));
         }
-        Some(out)
+        out
     }
+}
+
+/// 開いている間に呼ぶ. その形式の中身(大きすぎるものは読まない)
+fn bytes_open(fmt: u32, max: usize) -> Option<Vec<u8>> {
+    unsafe {
+        if !available(fmt) {
+            return None;
+        }
+        let h = GetClipboardData(fmt).ok()?;
+        let hg = HGLOBAL(h.0);
+        let size = GlobalSize(hg);
+        if size == 0 || size > max {
+            return None;
+        }
+        let p = GlobalLock(hg) as *const u8;
+        if p.is_null() {
+            return None;
+        }
+        let v = std::slice::from_raw_parts(p, size).to_vec();
+        let _ = GlobalUnlock(hg);
+        Some(v)
+    }
+}
+
+/// 書く窓での貼り付けで何をするか(文字, 画像, ファイルの有無から決める)
+pub fn paste_kind(hwnd: HWND) -> Paste {
+    // 画像はCF_BITMAPやCF_DIBV5だけでも, Windowsが自動でCF_DIBにして渡す
+    let has_image = [CF_DIB_ID, CF_DIBV5.0 as u32, CF_BITMAP.0 as u32, formats().png].iter().any(|f| available(*f));
+    let has_text = available(CF_TEXT_ID);
+    let files = if available(CF_HDROP_ID) && open(hwnd) {
+        let f = files_open().unwrap_or_default();
+        unsafe {
+            let _ = CloseClipboard();
+        }
+        f
+    } else {
+        vec![]
+    };
+    attach::paste_kind(has_text, has_image, &files)
+}
+
+/// クリップボードの画像を, 添付の形(CF_DIBと, あればPNG)で読む. 読めなければ`None`
+pub fn read_image(hwnd: HWND) -> Option<Image> {
+    if !open(hwnd) {
+        return None;
+    }
+    let png = bytes_open(formats().png, MAX_IMAGE_BYTES).filter(|b| attach::png_size(b).is_some());
+    let dib = bytes_open(CF_DIB_ID, MAX_IMAGE_BYTES).filter(|b| attach::dib_size(b).is_some());
+    unsafe {
+        let _ = CloseClipboard();
+    }
+    let (width, height) = dib.as_deref().and_then(attach::dib_size).or_else(|| png.as_deref().and_then(attach::png_size))?;
+    Some(Image { width, height, dib, png })
+}
+
+/// 添付の画像をクリップボードに入れる(CF_DIBと, あればPNG). 入れたあとの通し番号を返す. 裏のスレッドからも呼ぶ
+pub fn set_image(hwnd: HWND, img: &Image) -> Option<u32> {
+    if !open(hwnd) {
+        return None;
+    }
+    let ok = unsafe {
+        let _ = EmptyClipboard();
+        let a = img.dib.as_deref().is_some_and(|b| set_open(CF_DIB_ID, b));
+        let b = img.png.as_deref().is_some_and(|b| set_open(formats().png, b));
+        let _ = CloseClipboard();
+        a || b
+    };
+    ok.then(sequence)
 }
 
 /// 履歴に記録する今の中身. Explorerでコピーしたファイルならパス, それ以外は文字. 画像だけのもの,

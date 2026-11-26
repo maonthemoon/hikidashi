@@ -407,8 +407,22 @@ fn paint_compose(hdc: HDC, app: &App, w: i32, h: i32) {
     let cw = text_width(hdc, app.fonts.sub, &count);
     let mut crc = RECT { left: w - s(PAD_X, d) - cw, top, right: w - s(PAD_X, d), bottom: h };
     draw_text(hdc, app.fonts.sub, &count, pal().text_tertiary, &mut crc, DT_VCENTER | DT_RIGHT);
-    let (t, err) = app.status_text().unwrap_or_else(|| ("Ctrl+↑  Earlier questions".into(), false));
-    let mut src = RECT { left: s(PAD_X, d), top, right: crc.left - s(12, d), bottom: h };
+    // 添付した画像(左に小さな箱). 知らせがなければ, 続けて外す方法を出す
+    let sizes: Vec<(u32, u32)> = app.images.iter().map(|i| (i.width, i.height)).collect();
+    let mut left = s(PAD_X, d);
+    if let Some(label) = hikidashi_core::attach::label(&sizes) {
+        let lw = text_width(hdc, app.fonts.sub, &label) + s(14, d);
+        let lh = s(20, d);
+        let lt = top + (h - top - lh) / 2;
+        let lrc = RECT { left, top: lt, right: (left + lw).min(crc.left - s(12, d)), bottom: lt + lh };
+        round_fill(hdc, &lrc, s(6, d), pal().bg_muted);
+        let mut trc = lrc;
+        draw_text(hdc, app.fonts.sub, &label, pal().text, &mut trc, DT_CENTER | DT_VCENTER | DT_END_ELLIPSIS);
+        left = lrc.right + s(10, d);
+    }
+    let hint = if sizes.is_empty() { "Ctrl+↑  Earlier questions" } else { hikidashi_core::attach::REMOVE_HINT };
+    let (t, err) = app.status_text().unwrap_or_else(|| (hint.into(), false));
+    let mut src = RECT { left, top, right: crc.left - s(12, d), bottom: h };
     draw_text(hdc, app.fonts.sub, &t, if err { pal().danger } else { pal().text_tertiary }, &mut src, DT_VCENTER | DT_END_ELLIPSIS);
     // 上の帯(K24のQ2): ChatGPTに送る窓だと分かるよう, 左に印(接頭辞の印と同じ形), 右にキーの案内
     let bh = s(COMPOSE_BAND, d);

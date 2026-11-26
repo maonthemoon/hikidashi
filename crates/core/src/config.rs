@@ -363,6 +363,8 @@ pub struct ChatGpt {
     pub send_enter: bool,
     /// Enterを送るまで待つ時間(ミリ秒. ページが読み込めたころ)
     pub send_delay_ms: u32,
+    /// 長い質問に添付した画像を貼ったあと, Enterを押すまで待つ時間(ミリ秒. 1枚ごとに足す. アップロードが終わるころ)
+    pub image_wait_ms: u32,
     /// 長い質問を書く窓(K22)で, カーソルのない行のMarkdownの記号を隠す. falseなら薄く見せる
     pub hide_marks: bool,
 }
@@ -473,7 +475,7 @@ impl Default for Chrome {
 
 impl Default for ChatGpt {
     fn default() -> Self {
-        ChatGpt { mode: "url".into(), url: "https://chatgpt.com/?q={q}".into(), home: "https://chatgpt.com/".into(), send_enter: true, send_delay_ms: 5000, hide_marks: true }
+        ChatGpt { mode: "url".into(), url: "https://chatgpt.com/?q={q}".into(), home: "https://chatgpt.com/".into(), send_enter: true, send_delay_ms: 5000, image_wait_ms: 3000, hide_marks: true }
     }
 }
 
@@ -708,6 +710,8 @@ pub fn to_toml(c: &Config) -> String {
     line("# With \"url\", press Enter in ChatGPT after it opens (only when the window in front is ChatGPT).");
     line(&format!("send_enter = {}", c.chatgpt.send_enter));
     line(&format!("send_delay_ms = {}", c.chatgpt.send_delay_ms));
+    line("# Long questions with images: wait this long for each image before pressing Enter (while it uploads).");
+    line(&format!("image_wait_ms = {}", c.chatgpt.image_wait_ms));
     line("# Long questions (Shift+Enter): hide Markdown marks such as ** and # except on the line you are editing. false shows them faintly.");
     line(&format!("hide_marks = {}", c.chatgpt.hide_marks));
     line("");
@@ -839,6 +843,9 @@ impl Config {
         if !(500..=30000).contains(&self.chatgpt.send_delay_ms) {
             return Err("Wait before Enter must be between 500 and 30000 ms.".into());
         }
+        if self.chatgpt.image_wait_ms > 60000 {
+            return Err("Wait per image must be between 0 and 60000 ms.".into());
+        }
         for (i, o) in self.open_with.iter().enumerate() {
             if o.name.trim().is_empty() {
                 return Err("Each \"Open with\" app needs a name.".into());
@@ -926,8 +933,13 @@ mod tests {
         c.tools.terminal = "Windows Terminal".into();
         c.chatgpt.send_enter = false;
         c.chatgpt.send_delay_ms = 5000;
+        c.chatgpt.image_wait_ms = 1500;
         c.chatgpt.hide_marks = false;
         assert_eq!(Config::parse(&to_toml(&c)).unwrap(), c);
+        assert_eq!(Config::parse("[chatgpt]\nsend_delay_ms = 4000\n").unwrap().chatgpt.image_wait_ms, 3000);
+        c.chatgpt.image_wait_ms = 60001;
+        assert!(c.validate().is_err());
+        c.chatgpt.image_wait_ms = 0;
         // 全部消したときは空のまま(初めの一覧に戻らない)
         c.open_with.clear();
         c.tools.terminal.clear();
