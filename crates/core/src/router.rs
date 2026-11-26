@@ -119,6 +119,8 @@ pub enum Action {
     ScriptRun { script: usize, arg: String },
     /// スクリプトの出力の1行. `Enter`でその行をコピー
     ScriptLine(String),
+    /// Outlookの予定(K62). `Enter`でOutlookで開く. `copy`は`→`のメニューのCopyで入れる1行
+    Appointment { entry_id: String, copy: String },
 }
 
 /// アイコンの手がかり(K2). 画面の側でWindowsのアイコンを引く.
@@ -136,6 +138,8 @@ pub enum Icon {
     Favicon(String),
     /// クリップボード
     Clip,
+    /// 予定(Outlook)
+    Calendar,
 }
 
 /// 一覧の1行

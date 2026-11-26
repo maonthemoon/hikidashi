@@ -263,6 +263,7 @@ fn icon_of(row: &Row) -> (Option<String>, char) {
         Icon::Web => (None, glyph::LINK),
         Icon::Favicon(_) => (None, glyph::BOOKMARK),
         Icon::Clip => (None, glyph::COPY),
+        Icon::Calendar => (None, glyph::CALENDAR),
     }
 }
 

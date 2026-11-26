@@ -38,6 +38,7 @@ pub mod glyph {
     pub const CODE: char = '\u{E943}';
     pub const ADMIN: char = '\u{E7EF}';
     pub const LINK: char = '\u{E71B}';
+    pub const CALENDAR: char = '\u{E787}';
 }
 
 /// フォルダーのアイコンを引くときの名前

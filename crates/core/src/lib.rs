@@ -25,6 +25,7 @@ pub mod compose;
 pub mod favicon;
 pub mod clip;
 pub mod snapshot;
+pub mod calendar;
 pub mod recent;
 pub mod scripts;
 pub mod selection;

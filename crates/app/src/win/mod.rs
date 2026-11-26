@@ -12,6 +12,7 @@ mod icons;
 mod i18n;
 mod indexer;
 mod net;
+mod outlook;
 mod paint;
 mod parts;
 mod scripts;
@@ -223,6 +224,8 @@ pub struct App {
     clip_listening: bool,
     /// この通し番号のクリップボードの更新は履歴に残さない(選んだ文字の取り込みで一時的に変えたもの)
     clip_ignore: Option<u32>,
+    /// Outlookの予定(`cal `. K62)
+    cal: outlook::Cal,
     /// 窓を出す前に前面にあった窓. 窓が出ているときに選んだ文字を読むとき, ここへ戻す
     prev_fg: isize,
     /// 窓が出ているときに選んだ文字のホットキーが押された時刻. 修飾キーが離れるのを待っている
@@ -513,6 +516,9 @@ impl App {
             self.snap_view = None;
             return Some(hikidashi_core::snapshot::rows(&self.snaps, text, util::now_secs(), util::tz_offset_secs()));
         }
+        if self.mode == Mode::Calendar {
+            return Some(self.calendar_rows(text));
+        }
         // 計算のモードの中でも, 計算の拡張(`mipi `)は使える(K43)
         if self.mode == Mode::Calc {
             if let Some(r) = self.ext_rows(text) {
@@ -542,6 +548,18 @@ impl App {
             (None, Some(e)) => vec![cscripts::error_row(e)],
             (None, None) => vec![cscripts::loading_row()],
         })
+    }
+
+    /// `cal `の一覧. 古ければ裏で読み直し, 読んでいる間は前の結果で出す(K62)
+    fn calendar_rows(&mut self, text: &str) -> Vec<Row> {
+        use hikidashi_core::calendar;
+        outlook::ensure(&self.cal, self.hwnd);
+        let g = self.cal.lock().unwrap();
+        match (&g.events, &g.error) {
+            (Some(ev), _) => calendar::rows(ev, text, util::now_secs(), util::tz_offset_secs()),
+            (None, Some(e)) if !g.running => vec![calendar::error_row(e)],
+            _ => vec![calendar::reading_row()],
+        }
     }
 
     /// 新しい行にする. 選んでいた項目がまだあれば選んだままにする
@@ -2240,6 +2258,10 @@ impl App {
             Action::BoxUrl { url, .. } => actions::open_url(url, &cfg),
             Action::Copy(s) | Action::ScriptLine(s) => actions::copy_text(hwnd, s),
             Action::Clip(_) | Action::SnapOpen(_) | Action::ScriptRun { .. } | Action::Fill(_) => Ok(()),
+            Action::Appointment { entry_id, .. } => {
+                outlook::open(entry_id);
+                Ok(())
+            }
             Action::ChatGpt(q) => actions::ask_chatgpt(hwnd, q, &cfg),
             Action::Google(q) => actions::google(q, &cfg),
             Action::OpenUrl(u) => actions::open_url(u, &cfg),
@@ -2413,6 +2435,10 @@ impl App {
                 items.push(mi("Copy", g::COPY, MenuAct::ClipCopy(*id)));
                 items.push(mi("Delete from history", g::KILL, MenuAct::ClipDelete(*id)));
             }
+            Action::Appointment { copy, .. } => {
+                items.push(mi("Open in Outlook", g::CALENDAR, MenuAct::Open));
+                items.push(mi("Copy", g::COPY, MenuAct::CopyText(copy.clone())));
+            }
             Action::ScriptRun { .. } | Action::Fill(_) => {}
             Action::BoxUrl { url, .. } => {
                 items.push(mi("Open in browser", g::GLOBE, MenuAct::Open));
@@ -2484,6 +2510,10 @@ impl App {
             },
             MenuAct::Open => match (&row.action, &item) {
                 (Action::BoxUrl { url, .. }, _) | (Action::OpenUrl(url), _) => actions::open_url(url, &cfg),
+                (Action::Appointment { entry_id, .. }, _) => {
+                    outlook::open(entry_id);
+                    Ok(())
+                }
                 (_, Some(it)) if it.kind == Kind::Bookmark => actions::open_url_with(&it.target, &cfg, actions::Browser::from_key(&it.args)),
                 (_, Some(it)) if it.kind == Kind::Setting => actions::open_setting(&it.target, &it.args),
                 _ => Ok(()),
@@ -3029,6 +3059,13 @@ impl App {
     }
 
     /// `list`のスクリプトの結果がそろった. その一覧を見ているなら出し直す
+    /// Outlookの予定を読み終えた. 窓が出ていて`cal `のままなら一覧を作り直す
+    fn on_calendar(&mut self) {
+        if self.visible() && !self.composing() && self.menu.is_none() && self.mode == Mode::Calendar {
+            self.refresh();
+        }
+    }
+
     fn on_script_list(&mut self) {
         if self.visible() && !self.composing() && !self.script_view && self.menu.is_none() && self.mode == Mode::All {
             let text = self.edit_text();
@@ -3129,6 +3166,10 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             }
             scripts::WM_APP_SCRIPT_LIST => {
                 app.on_script_list();
+                Some(LRESULT(0))
+            }
+            outlook::WM_APP_CALENDAR => {
+                app.on_calendar();
                 Some(LRESULT(0))
             }
             WM_ACTIVATE => {
@@ -3713,6 +3754,7 @@ pub fn run() {
         snap_view: None,
         clip_listening: false,
         clip_ignore: None,
+        cal: Default::default(),
         prev_fg: 0,
         selection_wait: None,
         scripts: vec![],
