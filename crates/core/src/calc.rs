@@ -182,21 +182,48 @@ fn resonance(s: &str) -> Option<Calc> {
     Some(Calc { rows: vec![r] })
 }
 
+/// |Γ|が1とみなせるか(開放, 短絡, 純リアクタンス)
+fn unit_mag(m: f64) -> bool {
+    (m - 1.0).abs() <= 1e-9
+}
+
+/// |Γ|からVSWR. scikit-rfと同じく(1+|Γ|)/(1-|Γ|)で, |Γ|=1は∞, |Γ|>1は負になる.
+fn fmt_vswr(m: f64) -> String {
+    if unit_mag(m) { "∞".into() } else { sig4((1.0 + m) / (1.0 - m)) }
+}
+
+/// |Γ|からリターンロス -20log|Γ|. |Γ|=0は∞, |Γ|>1は負になる(scikit-rfの`-s_db`).
+fn fmt_rl(m: f64) -> String {
+    if m < 1e-12 {
+        return "∞ dB".into();
+    }
+    let rl = if unit_mag(m) { 0.0 } else { -20.0 * m.log10() };
+    format!("{} dB", fixed2(rl + 0.0))
+}
+
+/// 2行目の説明. |Γ|>1(反射が入射より大きい)ときは注記を付ける.
+fn gain_note(base: &str, m: f64) -> String {
+    if m > 1.0 && !unit_mag(m) { format!("{base} · |Γ| > 1 (reflection gain)") } else { base.to_string() }
+}
+
 fn reflection_rows(g: f64, rows: &mut Vec<CalcRow>, skip: &str) {
-    let vswr = (1.0 + g) / (1.0 - g);
-    let rl = -20.0 * g.max(1e-12).log10();
-    let ml = -10.0 * (1.0 - g * g).max(1e-12).log10();
     if skip != "vswr" {
-        rows.push(row(sig4(vswr), "VSWR"));
+        rows.push(row(fmt_vswr(g), &gain_note("VSWR", g)));
     }
     if skip != "rl" {
-        rows.push(row(format!("{} dB", fixed2(rl)), "Return loss"));
+        rows.push(row(fmt_rl(g), &gain_note("Return loss", g)));
     }
     if skip != "gamma" {
         rows.push(row(format!("{:.3}", g), "|Γ| reflection coefficient"));
     }
-    rows.push(row(format!("{} %", fixed2(g * g * 100.0)), "Reflected power"));
-    rows.push(row(format!("{} dB", sig4(ml)), "Mismatch loss"));
+    rows.push(row(format!("{} %", fixed2(g * g * 100.0)), &gain_note("Reflected power", g)));
+    // ミスマッチロス -10log(1-|Γ|²)は|Γ|>1では定まらないので出さない
+    if unit_mag(g) {
+        rows.push(row("∞ dB".into(), "Mismatch loss"));
+    } else if g < 1.0 {
+        let ml = -10.0 * (1.0 - g * g).log10();
+        rows.push(row(format!("{} dB", sig4(ml + 0.0)), "Mismatch loss"));
+    }
 }
 
 /// 基準インピーダンス`z0`にその電力をかけたときの電圧の振幅(ピーク). 2行目に実効値とピークtoピーク
@@ -219,21 +246,17 @@ fn through_loss(lower: &str) -> Option<Calc> {
             g_out = match kind {
                 0 if v >= 1.0 => Some((v - 1.0) / (v + 1.0)),
                 1 => Some(10f64.powf(-v.abs() / 20.0)),
-                2 if (0.0..1.0).contains(&v) => Some(v),
+                2 if (0.0..=1.0).contains(&v) => Some(v),
                 _ => None,
             };
             break;
         }
     }
     let g_out = g_out?;
-    let vswr_out = (1.0 + g_out) / (1.0 - g_out);
-    let rl_out = -20.0 * g_out.max(1e-12).log10();
     let g_in = g_out * 10f64.powf(-2.0 * il / 20.0);
-    let rl_in = -20.0 * g_in.max(1e-12).log10();
-    let vswr_in = (1.0 + g_in) / (1.0 - g_in);
     let rows = vec![
-        row(sig4(vswr_in), &format!("VSWR at input · output VSWR {} (RL {} dB) through {} dB loss", sig4(vswr_out), fixed2(rl_out), sig4(il))),
-        row(format!("{} dB", fixed2(rl_in)), "Return loss at input"),
+        row(fmt_vswr(g_in), &format!("VSWR at input · output VSWR {} (RL {}) through {} dB loss", fmt_vswr(g_out), fmt_rl(g_out), sig4(il))),
+        row(fmt_rl(g_in), "Return loss at input"),
         row(format!("{:.3}", g_in), "|Γ| at input"),
     ];
     Some(Calc { rows })
@@ -382,15 +405,18 @@ fn network(desc: &str, w: Option<f64>, z0: f64) -> Option<Calc> {
     if compact.is_empty() {
         return None;
     }
-    let (form, z, y): (Form, Cx, Cx);
+    // z, yのNoneは∞(Z=∞は開放, Y=∞は短絡). 両方Noneにはならない
+    let (form, z, y): (Form, Option<Cx>, Option<Cx>);
     if compact.contains('\u{1}') {
-        // 並列: 各部分は直列の和. アドミタンスを足す
-        let mut ysum = (0.0, 0.0);
+        // 並列: 各部分は直列の和. アドミタンスを足す. 0Ωの部分があれば全体が短絡
+        let mut ysum = Some((0.0, 0.0));
         let mut n = 0;
         for part in compact.split('\u{1}') {
             let (zi, _, _) = sum_terms(part, w, false)?;
-            let yi = cx_inv(zi)?;
-            ysum = (ysum.0 + yi.0, ysum.1 + yi.1);
+            ysum = match (ysum, cx_inv(zi)) {
+                (Some(s), Some(yi)) => Some((s.0 + yi.0, s.1 + yi.1)),
+                _ => None,
+            };
             n += 1;
         }
         if n < 2 {
@@ -398,11 +424,12 @@ fn network(desc: &str, w: Option<f64>, z0: f64) -> Option<Calc> {
         }
         form = Form::Parallel;
         y = ysum;
-        z = cx_inv(y)?;
+        z = y.map_or(Some((0.0, 0.0)), cx_inv);
     } else if y_prefix || split_terms(&compact).iter().any(|t| matches!(parse_term(t), Some(Term { unit: Unit::Siemens, .. }))) {
         form = Form::Y;
-        y = sum_terms(&compact, w, true)?.0;
-        z = cx_inv(y)?;
+        let yy = sum_terms(&compact, w, true)?.0;
+        y = Some(yy);
+        z = cx_inv(yy);
     } else {
         let (zz, elem, marked) = sum_terms(&compact, w, false)?;
         // 実部だけの数(`50`)は`@`か単位がないと対象にしない
@@ -410,14 +437,14 @@ fn network(desc: &str, w: Option<f64>, z0: f64) -> Option<Calc> {
             return None;
         }
         form = if elem { Form::Series } else { Form::Z };
-        z = zz;
-        y = cx_inv(z)?;
+        z = Some(zz);
+        y = cx_inv(zz);
     }
     let at = w.map(|w| format!(" at {}", fmt_si(w / (2.0 * PI), "Hz"))).unwrap_or_default();
-    let z_row = Some(cx_row(format!("Z = {}", fmt_z(z)), fmt_z(z), "Impedance"));
-    let y_row = Some(cx_row(format!("Y = {}", fmt_y(y)), fmt_y(y), "Admittance"));
-    let series = w.and_then(|w| series_eq(z, w)).map(|s| cx_row(s.clone(), s, &format!("Series equivalent{at}")));
-    let parallel = w.and_then(|w| parallel_eq(y, w)).map(|s| cx_row(s.clone(), s, &format!("Parallel equivalent{at}")));
+    let z_row = Some(z_line(z, "Impedance"));
+    let y_row = Some(y_line(y, "Admittance"));
+    let series = w.zip(z).and_then(|(w, z)| series_eq(z, w)).map(|s| cx_row(s.clone(), s, &format!("Series equivalent{at}")));
+    let parallel = w.zip(y).and_then(|(w, y)| parallel_eq(y, w)).map(|s| cx_row(s.clone(), s, &format!("Parallel equivalent{at}")));
     let rows: Vec<CalcRow> = match form {
         Form::Z => vec![series, y_row, parallel],
         Form::Y => vec![parallel, z_row, series],
@@ -429,7 +456,8 @@ fn network(desc: &str, w: Option<f64>, z0: f64) -> Option<Calc> {
     .collect();
     // 反射係数Γ, VSWR, リターンロスも添える
     let mut rows = rows;
-    if let Some(g) = z_to_gamma(z, z0) {
+    // 開放(Z=∞)はΓ=1
+    if let Some(g) = z.map_or(Some((1.0, 0.0)), |z| z_to_gamma(z, z0)) {
         rows.extend(gamma_head(g, z0));
         rows.extend(gamma_tail(g, z0));
     }
@@ -438,6 +466,22 @@ fn network(desc: &str, w: Option<f64>, z0: f64) -> Option<Calc> {
 
 fn cx_row(value: String, copy: String, note: &str) -> CalcRow {
     CalcRow { value, copy, note: note.to_string(), base: None }
+}
+
+/// Zの行. Noneは開放(`Z = ∞ (open)`. コピーは`∞`).
+fn z_line(z: Option<Cx>, note: &str) -> CalcRow {
+    match z {
+        Some(z) => cx_row(format!("Z = {}", fmt_z(z)), fmt_z(z), note),
+        None => cx_row("Z = ∞ (open)".into(), "∞".into(), note),
+    }
+}
+
+/// Yの行. Noneは短絡(`Y = ∞ (short)`. コピーは`∞`).
+fn y_line(y: Option<Cx>, note: &str) -> CalcRow {
+    match y {
+        Some(y) => cx_row(format!("Y = {}", fmt_y(y)), fmt_y(y), note),
+        None => cx_row("Y = ∞ (short)".into(), "∞".into(), note),
+    }
 }
 
 /// `R ± jX`の文字(接頭辞は大きい方に合わせ, 単位は最後に1つ). 例: `50 + j50 Ω`
@@ -598,34 +642,18 @@ fn gamma_head(g: Cx, z0: f64) -> Vec<CalcRow> {
     ]
 }
 
-/// VSWRとリターンロスの行. |Γ|>1のときは出さない.
+/// VSWRとリターンロスの行. scikit-rfと同じ式で, |Γ|>1のときは負の値に注記を付けて出す.
 fn gamma_tail(g: Cx, z0: f64) -> Vec<CalcRow> {
     let m = g.0.hypot(g.1);
-    let mut rows = Vec::new();
-    if !m.is_finite() || m > 1.0 + 1e-9 {
-        return rows;
+    if !m.is_finite() {
+        return Vec::new();
     }
-    let vswr = if m >= 1.0 - 1e-9 { "∞".to_string() } else { sig4((1.0 + m) / (1.0 - m)) };
-    rows.push(row(vswr, &z0_note("VSWR", z0)));
-    let rl = if m < 1e-12 { "∞ dB".to_string() } else { format!("{} dB", fixed2((-20.0 * m.log10()).max(0.0) + 0.0)) };
-    rows.push(row(rl, &z0_note("Return loss", z0)));
-    rows
+    vec![row(fmt_vswr(m), &z0_note(&gain_note("VSWR", m), z0)), row(fmt_rl(m), &z0_note(&gain_note("Return loss", m), z0))]
 }
 
-/// ΓからZ, Y(開放や短絡は`open`)
+/// ΓからZ, Y(開放はZ = ∞, 短絡はY = ∞)
 fn gamma_zy_rows(g: Cx, z0: f64) -> Vec<CalcRow> {
-    let z = gamma_to_z(g, z0);
-    let y = gamma_to_y(g, z0);
-    let (zn, yn) = (z0_note("Impedance", z0), z0_note("Admittance", z0));
-    let zr = match z {
-        Some(z) => cx_row(format!("Z = {}", fmt_z(z)), fmt_z(z), &zn),
-        None => cx_row("Z = open".into(), "open".into(), &zn),
-    };
-    let yr = match y {
-        Some(y) => cx_row(format!("Y = {}", fmt_y(y)), fmt_y(y), &yn),
-        None => cx_row("Y = open".into(), "open".into(), &yn),
-    };
-    vec![zr, yr]
+    vec![z_line(gamma_to_z(g, z0), &z0_note("Impedance", z0)), y_line(gamma_to_y(g, z0), &z0_note("Admittance", z0))]
 }
 
 /// `gamma 0.2+j0.4`, `gamma 0.2 0.4`, `gamma 0.4472<63.43`(`∠`も可. `@2G`で等価回路も). 値が1つだけのときは読まない.
@@ -700,7 +728,8 @@ fn gamma_input(t: &str, z0: f64) -> Option<Calc> {
 /// RFの計算. 合わなければNone.
 fn rf(s: &str, z0: f64) -> Option<Calc> {
     let t = s.trim();
-    let lower = t.to_ascii_lowercase();
+    // 大文字のΓも小文字のγと同じに読む(`Γ 0.2`, `|Γ| 0.2`)
+    let lower = t.to_ascii_lowercase().replace('Γ', "γ");
     let mut rows = Vec::new();
     // 複素数の反射係数: gamma 0.2+j0.4, gamma 0.2 0.4, gamma 0.4472<63.43(値が1つだけのときは下の大きさの扱い)
     if let Some(c) = gamma_input(t, z0) {
@@ -788,8 +817,9 @@ fn rf(s: &str, z0: f64) -> Option<Calc> {
         reflection_rows(10f64.powf(-rl / 20.0), &mut rows, "rl");
         return Some(Calc { rows });
     }
+    // |Γ|は1も1より大きい値も読む(scikit-rfと同じくVSWRは∞や負になる)
     if let Some(v) = after(&["gamma", "γ", "|γ|", "g"]) {
-        if (0.0..1.0).contains(&v) {
+        if v >= 0.0 {
             reflection_rows(v, &mut rows, "gamma");
             return Some(Calc { rows });
         }
@@ -999,6 +1029,44 @@ mod tests {
     }
 
     #[test]
+    fn reflection_edges() {
+        // 整合: RLは∞(240 dBにしない)
+        assert_eq!(vals("gamma 0"), vec!["1", "∞ dB", "0.00 %", "0 dB"]);
+        assert_eq!(vals("vswr 1"), vec!["∞ dB", "0.000", "0.00 %", "0 dB"]);
+        // 全反射: VSWRとミスマッチロスは∞
+        assert_eq!(vals("rl 0"), vec!["∞", "1.000", "100.00 %", "∞ dB"]);
+        assert_eq!(vals("gamma 1"), vec!["∞", "0.00 dB", "100.00 %", "∞ dB"]);
+        // |Γ|>1: 負のVSWRとリターンロス. ミスマッチロスは出さない
+        assert_eq!(vals("gamma 1.2"), vec!["-11", "-1.58 dB", "144.00 %"]);
+        // 大文字のΓ
+        assert_eq!(vals("Γ 0.2"), vals("gamma 0.2"));
+        assert_eq!(vals("|Γ| 0.2"), vals("gamma 0.2"));
+        // 損失を通す: 出力側が全反射
+        let c = evaluate("gamma 1 il 1").unwrap();
+        assert!(c.rows[0].note.contains("output VSWR ∞ (RL 0.00 dB)"), "{}", c.rows[0].note);
+        assert_eq!(c.rows[1].value, "2.00 dB");
+    }
+
+    #[test]
+    fn network_short_open() {
+        // 0Ωは短絡: Γ=-1, Y=∞
+        let v = vals("0+j0");
+        assert_eq!(v[0], "Y = ∞ (short)");
+        assert_eq!(v[1], "Γ = -1");
+        // 0Sは開放: Z=∞, Γ=1
+        let v = vals("0mS");
+        assert_eq!(v[0], "Z = ∞ (open)");
+        assert!(v.contains(&"Γ = 1".to_string()), "{v:?}");
+        // LCの並列共振(1.592 GHz付近)は開放に近い大きなZ. ちょうど打ち消し合えば∞
+        assert!(vals("10nH||1pF@1.592G").iter().any(|x| x.starts_with("Z = ") && x.contains("kΩ")));
+        let v = vals("j50||-j50");
+        assert_eq!(v[0], "Z = ∞ (open)");
+        assert!(v.contains(&"Γ = 1".to_string()), "{v:?}");
+        // 0Ωの枝があれば全体が短絡
+        assert_eq!(vals("0ohm||50ohm")[..2], ["Z = 0 Ω".to_string(), "Y = ∞ (short)".to_string()]);
+    }
+
+    #[test]
     fn reflection_through_loss() {
         // 出力でVSWR 10, 間に2dBの損失: 入力から見たリターンロスは1.74+4dB
         let v = vals("vswr 10 IL 2dB");
@@ -1098,14 +1166,20 @@ mod tests {
     #[test]
     fn gamma_edges() {
         // 開放と短絡
-        assert_eq!(vals("gamma 1 0"), vec!["Γ = 1", "1 ∠ 0°", "Z = open", "Y = 0 S", "∞", "0.00 dB"]);
+        assert_eq!(vals("gamma 1 0"), vec!["Γ = 1", "1 ∠ 0°", "Z = ∞ (open)", "Y = 0 S", "∞", "0.00 dB"]);
         let v = vals("gamma -1 0");
         assert_eq!(v[2], "Z = 0 Ω");
-        assert_eq!(v[3], "Y = open");
+        assert_eq!(v[3], "Y = ∞ (short)");
+        assert_eq!(evaluate("gamma -1 0").unwrap().rows[3].copy, "∞");
         assert_eq!(v[4], "∞");
-        // |Γ|>1: Z, Yは出し, VSWRとリターンロスは出さない
+        // |Γ|>1: scikit-rfと同じくVSWRとリターンロスは負. 2行目に注記
         let v = vals("gamma 2 0");
-        assert_eq!(v, vec!["Γ = 2", "2 ∠ 0°", "Z = -150 Ω", "Y = -6.667 mS"]);
+        assert_eq!(v, vec!["Γ = 2", "2 ∠ 0°", "Z = -150 Ω", "Y = -6.667 mS", "-3", "-6.02 dB"]);
+        let c = evaluate("gamma 1+j1").unwrap();
+        assert_eq!(c.rows[4].value, "-5.828");
+        assert_eq!(c.rows[5].value, "-3.01 dB");
+        assert!(c.rows[4].note.contains("|Γ| > 1"), "{}", c.rows[4].note);
+        assert!(!evaluate("gamma 0.2+j0.4").unwrap().rows[4].note.contains("|Γ| > 1"));
         // 等価回路は開放や短絡では出さない
         assert!(!vals("gamma 1 0@2G").iter().any(|x| x.contains("nH") || x.contains("pF")));
         assert!(evaluate("gamma abc").is_none());
@@ -1143,8 +1217,8 @@ mod tests {
         // 抵抗だけ, 素子だけ
         assert_eq!(core("50@2G"), vec!["50 Ω", "Y = 20 mS", "50 Ω"]);
         assert_eq!(core("j50@2G"), vec!["3.979 nH", "Y = -j20 mS", "3.979 nH"]);
-        // 0除算は行を出さない
-        assert!(evaluate("0@2G").is_none());
+        // 0Ωは短絡(scikit-rfと同じくΓ=-1)
+        assert_eq!(core("0@2G"), vec!["0 Ω", "Y = ∞ (short)"]);
     }
 
     #[test]
