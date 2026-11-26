@@ -95,9 +95,12 @@ git clone https://github.com/maonthemoon/hikidashi.git
 | `f ` | ファイルとフォルダー | `g ` | Googleで検索する |
 | `b ` | ブックマーク | `c ` | ChatGPTへの長い質問 |
 | `k ` | プロセス(`Enter`で確認なしに終わらせる) | `cb ` | クリップボードの履歴 |
-| `w ` | WSLのホーム | `= ` | 計算 |
+| `w ` | WSLのホーム | `= ` | 計算(結果は`Ctrl+S`で保存) |
+| `snap ` | `Ctrl+S`で保存した結果 | `cal ` | Outlookの予定 |
 
-ファイルは, `*.pdf`, `ext:docx,xlsx`, `in:案件`, `modified:7d`でも絞れます. 複数の条件をすべて満たすものは`&`でつなぎます. たとえば`*.pdf & in:案件`は案件フォルダー内のPDF, `*.pdf | *.pptx`はPDFまたはPowerPointを探します.
+`?`だけを打つと, 使えるキーワードの一覧が出ます.
+
+ファイルは, `*.pdf`, `ext:docx,xlsx`, `kind:excel`, `in:案件`, `modified:7d`でも絞れます. 複数の条件をすべて満たすものは`&`でつなぎます. たとえば`*.pdf & in:案件`は案件フォルダー内のPDF, `*.pdf | *.pptx`はPDFまたはPowerPointを探します.
 
 キーと先頭の文字は, トレイの`Settings`で変えられます.
 
@@ -107,6 +110,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 |---|---|
 | `%APPDATA%\Hikidashi\config.toml` | 設定. 設定画面で変える(メモ帳でも直せる) |
 | `%APPDATA%\Hikidashi\learn.tsv`, `history.txt`, `compose.json` | 学習, 入力の履歴, 長い質問の書きかけと送った文 |
+| `%APPDATA%\Hikidashi\snapshots.json` | `Ctrl+S`で保存した結果 |
 | `%APPDATA%\Hikidashi\state.txt`, `apps.txt`, `hikidashi.log` | ホットキー, アプリの一覧, 件数と時間とエラーの記録 |
 | `%LOCALAPPDATA%\Hikidashi` | 同梱の拡張の写しと, 取ってきた辞書(exeの隣に辞書がないときだけ) |
 
