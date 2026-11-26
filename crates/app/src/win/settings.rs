@@ -139,7 +139,7 @@ const LANGS: [(&str, &str); 3] = [("auto", "Same as Windows"), ("ja", "日本語
 /// ランチャーの窓, 書く窓, 設定画面, トレイのメニューの色(K39, K43)
 const THEMES: [(&str, &str); 3] = [("auto", "Same as Windows"), ("light", "Light"), ("dark", "Dark")];
 /// Tabのメニューの項目(`config::MENU_ITEMS`の順)と種類
-const MENU_LABELS: [&str; 8] = ["Copy file", "Open new window", "Open in another app", "Open the folder it is in", "Copy path", "Copy WSL path (only with WSL)", "Run as administrator", "Open in Explorer"];
+const MENU_LABELS: [&str; 11] = ["Copy file", "Open new window", "Open in another app", "Open the folder it is in", "Copy path", "Copy WSL path (only with WSL)", "Run as administrator", "Open in Explorer", "Open with... (list of apps)", "Share...", "Attach to new mail (Outlook)"];
 const MENU_KINDS: [&str; 3] = ["app", "file", "folder"];
 /// Enterに修飾キーを足したときの操作(2026-11-24. 設定の`[keys]`の順)
 const KEY_LABELS: [&str; 5] = ["Ask ChatGPT", "Search Google", "Long question", "Run as admin", "Open in terminal"];

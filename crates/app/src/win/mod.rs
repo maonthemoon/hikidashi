@@ -18,6 +18,7 @@ mod scripts;
 mod searcher;
 mod selection;
 mod settings;
+mod shellmenu;
 mod storage;
 mod system;
 mod theme;
@@ -101,6 +102,16 @@ pub enum MenuAct {
     NewInstance,
     /// ファイルそのものをクリップボードへ(Explorerでコピーしたのと同じ形)
     CopyFile,
+    /// 「プログラムから開く」の一覧にメニューの中身を替える
+    OpenWithList,
+    /// 一覧の1件(`App::assoc`の番号)で開く
+    AssocInvoke(usize),
+    /// Windowsの「別のアプリを選ぶ」画面
+    ChooseApp,
+    /// Windowsの共有のウィンドウ
+    Share,
+    /// Outlookの新しいメールに添付
+    Mail,
     CopyText(String),
     /// クリップボードの履歴の1件をクリップボードに入れるだけ
     ClipCopy(u64),
@@ -165,6 +176,8 @@ pub struct App {
     gen: u64,
     pending: Option<(u64, Vec<Row>)>,
     pub menu: Option<Menu>,
+    /// 「プログラムから開く」の一覧(メニューの`AssocInvoke`の番号で引く)
+    assoc: Vec<shellmenu::Handler>,
     pub confirm: Option<String>,
     pub capture: bool,
     pub message: Option<(String, bool)>,
@@ -2198,6 +2211,10 @@ impl App {
                 if on("copy_file") && path.is_some() {
                     items.push(mi("Copy file", g::COPY, MenuAct::CopyFile));
                 }
+                // 「プログラムから開く」(Explorerの右クリックと同じ一覧). ファイルだけ
+                if on("choose_app") && path.is_some() {
+                    items.push(mi("Open with…", g::OPEN, MenuAct::OpenWithList));
+                }
                 if let Action::BoxUrl { url, .. } = &row.action {
                     items.push(mi("Open in browser", g::GLOBE, MenuAct::Open));
                     items.push(mi("Copy URL", g::COPY, MenuAct::CopyText(url.clone())));
@@ -2226,6 +2243,13 @@ impl App {
                 }
                 if on("admin") {
                     items.push(mi("Run as administrator", g::ADMIN, MenuAct::Admin));
+                }
+                if on("share") && path.is_some() {
+                    items.push(mi("Share…", g::LINK, MenuAct::Share));
+                }
+                // Outlookが見つからないときは出さない
+                if on("mail") && path.is_some() && shellmenu::outlook_exe().is_some() {
+                    items.push(mi("Attach to new mail", g::FILE, MenuAct::Mail));
                 }
             }
             Action::Item { source, index } => {
@@ -2313,11 +2337,36 @@ impl App {
             return;
         }
         let path = self.row_path(row);
+        // 一覧に替えるだけは, 窓を閉じない
+        if let MenuAct::OpenWithList = act {
+            self.show_open_with_list(row, path);
+            return;
+        }
         let item = match &row.action {
             Action::Item { source, index } => self.item(*source, *index),
             _ => None,
         };
         let r: Result<(), String> = match act {
+            MenuAct::OpenWithList => Ok(()),
+            MenuAct::AssocInvoke(i) => match (self.assoc.get(*i), &path) {
+                (Some(h), Some(p)) => {
+                    storage::log(&format!("open with {}: {p}", h.name));
+                    shellmenu::invoke_handler(&h.handler, p)
+                }
+                _ => Ok(()),
+            },
+            MenuAct::ChooseApp => match &path {
+                Some(p) => shellmenu::choose_another_app(hwnd, p),
+                None => Ok(()),
+            },
+            MenuAct::Share => match &path {
+                Some(p) => shellmenu::share(hwnd, p),
+                None => Ok(()),
+            },
+            MenuAct::Mail => match &path {
+                Some(p) => shellmenu::attach_to_new_mail(p),
+                None => Ok(()),
+            },
             MenuAct::Open => match (&row.action, &item) {
                 (Action::BoxUrl { url, .. }, _) | (Action::OpenUrl(url), _) => actions::open_url(url, &cfg),
                 (_, Some(it)) if it.kind == Kind::Bookmark => actions::open_url_with(&it.target, &cfg, actions::Browser::from_key(&it.args)),
@@ -2380,6 +2429,25 @@ impl App {
             Ok(()) => self.finish(row.learn_key.clone()),
             Err(e) => self.fail(e),
         }
+    }
+
+    /// メニューの中身を, そのファイルの拡張子に関連付いたアプリの一覧にする.
+    /// 既定のアプリが先頭, おすすめが続き, 最後に`Choose another app…`
+    fn show_open_with_list(&mut self, row: &Row, path: Option<String>) {
+        use icons::glyph as g;
+        let Some(p) = path else { return };
+        let list = match shellmenu::open_with_handlers(&p) {
+            Ok(l) => l,
+            Err(e) => {
+                self.fail(e);
+                return;
+            }
+        };
+        let mut items: Vec<MenuItem> = list.iter().enumerate().map(|(i, h)| MenuItem { label: h.name.clone(), glyph: g::OPEN, act: MenuAct::AssocInvoke(i) }).collect();
+        items.push(MenuItem { label: "Choose another app…".into(), glyph: g::SETTING, act: MenuAct::ChooseApp });
+        self.assoc = list;
+        self.menu = Some(Menu { title: format!("Open with: {}", row.name), items, sel: 0, row: row.clone() });
+        self.layout();
     }
 
     /// 設定画面(K16)
@@ -3506,6 +3574,7 @@ pub fn run() {
         gen: 0,
         pending: None,
         menu: None,
+        assoc: Vec::new(),
         confirm: None,
         capture: false,
         message: None,

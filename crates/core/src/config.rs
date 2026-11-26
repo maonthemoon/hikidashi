@@ -68,7 +68,7 @@ impl Default for Hotkeys {
 }
 
 /// 操作のメニュー(→)の項目の名前(K24). 並び順はこの順
-pub const MENU_ITEMS: [&str; 8] = ["copy_file", "new_window", "open_with", "reveal", "copy_path", "copy_wsl_path", "admin", "explorer"];
+pub const MENU_ITEMS: [&str; 11] = ["copy_file", "new_window", "open_with", "reveal", "copy_path", "copy_wsl_path", "admin", "explorer", "choose_app", "share", "mail"];
 
 /// 操作のメニュー(→)に出すもの(K24). 種類ごとに`MENU_ITEMS`の名前を並べる. 種類に合わないものは出さない
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -84,7 +84,7 @@ impl Default for Menu {
         let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect();
         Menu {
             app: v(&["new_window", "reveal", "copy_path", "admin"]),
-            file: v(&["copy_file", "reveal", "copy_path", "copy_wsl_path"]),
+            file: v(&["copy_file", "reveal", "copy_path", "copy_wsl_path", "choose_app", "share", "mail"]),
             folder: v(&["copy_file", "copy_path", "copy_wsl_path"]),
         }
     }
@@ -108,6 +108,8 @@ pub fn menu_item_fits(kind: &str, item: &str) -> bool {
         "new_window" => kind == "app",
         "copy_file" => kind != "app",
         "open_with" | "copy_wsl_path" => kind != "app",
+        // 「プログラムから開く」「共有」「メールに添付」はファイルだけ
+        "choose_app" | "share" | "mail" => kind == "file",
         "admin" => kind != "folder",
         "explorer" => kind == "folder",
         _ => true,
@@ -738,7 +740,8 @@ pub fn to_toml(c: &Config) -> String {
     }
     line("");
     line("# What the actions menu (the right arrow key) shows for apps, files and folders. Items: copy_file (copy the file itself), new_window (apps), open_with (\"Open in ...\"),");
-    line("# reveal (open the folder it is in), copy_path, copy_wsl_path (only when WSL is installed), admin, explorer (folders).");
+    line("# reveal (open the folder it is in), copy_path, copy_wsl_path (only when WSL is installed), admin, explorer (folders),");
+    line("# choose_app (\"Open with...\" list of apps), share (Windows share window), mail (attach to a new Outlook mail). The last three are for files only.");
     line("[menu]");
     line(&format!("app = {}", list(&c.menu.app)));
     line(&format!("file = {}", list(&c.menu.file)));
@@ -1106,5 +1109,21 @@ mod tests {
         assert_eq!(MENU_ITEMS[0], "copy_file");
         let c = Config::parse("[menu]\nfile = [\"copy_file\", \"reveal\"]\n").unwrap();
         assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn shell_items_are_for_files_and_on_by_default() {
+        let m = Menu::default();
+        for it in ["choose_app", "share", "mail"] {
+            assert!(MENU_ITEMS.contains(&it));
+            assert!(m.has("file", it));
+            assert!(!m.has("folder", it));
+            assert!(menu_item_fits("file", it));
+            assert!(!menu_item_fits("folder", it));
+            assert!(!menu_item_fits("app", it));
+        }
+        // 既存の設定ファイルに書いてある一覧には, 新しい項目は勝手に足されない(copy_fileと同じ)
+        let c = Config::parse("[menu]\nfile = [\"copy_file\"]\n").unwrap();
+        assert!(!c.menu.has("file", "share"));
     }
 }
