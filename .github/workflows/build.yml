@@ -1,6 +1,7 @@
 # テストと, Linux(mingw-w64)でのWindows向けのビルドとZIP.
 # v で始まるタグ(例: v0.1.0)をpushすると, ZIPをReleasesに置き,
 # bin/Hikidashi.exe をそのexeに差し替えて main にcommitする(gitで取ってきた人がすぐ使えるように).
+# v0.1.0-rc.1 のように - の付くタグは試しの版: Releaseはプレリリースにし, bin/ は差し替えない.
 name: build
 
 on:
@@ -33,7 +34,8 @@ jobs:
       - name: Check tag matches version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          if [ "v${{ steps.version.outputs.version }}" != "${{ github.ref_name }}" ]; then
+          tag="${{ github.ref_name }}"
+          if [ "v${{ steps.version.outputs.version }}" != "${tag%%-*}" ]; then
             echo "タグ ${{ github.ref_name }} と Cargo.toml のバージョン ${{ steps.version.outputs.version }} が違います"
             exit 1
           fi
@@ -80,15 +82,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          pre=()
+          case "${{ github.ref_name }}" in *-*) pre=(--prerelease) ;; esac
           gh release create "${{ github.ref_name }}" Hikidashi-*.zip \
             --repo "${{ github.repository }}" \
             --title "Hikidashi ${{ github.ref_name }}" \
-            --generate-notes
+            --generate-notes "${pre[@]}"
       - uses: actions/checkout@v7
+        if: ${{ !contains(github.ref_name, '-') }}
         with:
           ref: main
           path: repo
       - name: Commit bin/Hikidashi.exe to main
+        if: ${{ !contains(github.ref_name, '-') }}
         run: |
           mkdir -p repo/bin
           cp dist/Hikidashi.exe repo/bin/Hikidashi.exe
