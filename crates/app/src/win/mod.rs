@@ -2789,7 +2789,6 @@ impl App {
         }
     }
 
-    /// 履歴の1件を貼る: 窓を閉じ, クリップボードに入れ, 前のアプリが前面に戻ってからShift+Insertを送る
     /// `Ctrl+S`: 出ている結果を, そのときの入力と行ごと保存する. 行がなければ何もしない
     fn save_snapshot(&mut self) {
         let kind = if self.script_view {
@@ -2841,6 +2840,7 @@ impl App {
         self.refresh();
     }
 
+    /// 履歴の1件を貼る: 窓を閉じ, クリップボードに入れ, 前のアプリが前面に戻ってからShift+Insertを送る
     fn paste_clip(&mut self, id: u64) {
         let Some(e) = self.clips.get(id).cloned() else { return };
         // 消えたファイルは何もしない
