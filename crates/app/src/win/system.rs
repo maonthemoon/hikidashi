@@ -33,7 +33,8 @@ fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
     d.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     d.uCallbackMessage = WM_APP_TRAY;
     d.hIcon = app_icon();
-    let tip = wide("Hikidashi");
+    // ポインターを置いたときの文字. 版も出す(K65. wakudoriと同じ). 例: `Hikidashi 0.2.3`
+    let tip = wide(&format!("Hikidashi {}", env!("CARGO_PKG_VERSION")));
     d.szTip[..tip.len()].copy_from_slice(&tip);
     d
 }
