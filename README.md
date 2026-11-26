@@ -97,7 +97,9 @@ git clone https://github.com/maonthemoon/hikidashi.git
 | `k ` | プロセス(`Enter`で確認なしに終わらせる) | `cb ` | クリップボードの履歴 |
 | `w ` | WSLのホーム | `= ` | 計算 |
 
-ファイルは, `*.pdf`, `ext:docx,xlsx`, `in:案件`, `modified:7d`でも絞れます. キーと先頭の文字は, トレイの`Settings`で変えられます.
+ファイルは, `*.pdf`, `ext:docx,xlsx`, `in:案件`, `modified:7d`でも絞れます. 複数の条件をすべて満たすものは`&`でつなぎます. たとえば`*.pdf & in:案件`は案件フォルダー内のPDF, `*.pdf | *.pptx`はPDFまたはPowerPointを探します.
+
+キーと先頭の文字は, トレイの`Settings`で変えられます.
 
 ### 保存されるもの
 

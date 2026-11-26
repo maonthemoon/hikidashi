@@ -4,7 +4,7 @@
 use crate::calc;
 use crate::catalog::{Catalog, Hit, Item, Kind};
 use crate::config::Config;
-use crate::files::{parse_filters, FileHit, FileTable};
+use crate::files::{FileHit, FileQuery, FileTable};
 use crate::learn::Learn;
 use crate::pathlike::{self, Pasted};
 use crate::search::Prepared;
@@ -583,8 +583,8 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
     }
     let mut rows: Vec<Row> = Vec::new();
     let mut head: Vec<Row> = Vec::new();
-    // `ext:pdf`などの絞り込みがあるときはファイルだけを出す(アプリなどにはかけられない)
-    let filtered = matches!(mode, Mode::All | Mode::File | Mode::Box | Mode::Wsl) && !parse_filters(text_trim).1.is_empty();
+    // 絞り込みや式はファイルの索引にかける.
+    let filtered = matches!(mode, Mode::All | Mode::File | Mode::Box | Mode::Wsl) && FileQuery::parse(text_trim).is_structured();
     if mode == Mode::All && !filtered {
         if let Some(r) = command_with_arg(text_trim, ctx.config) {
             head.push(r);
@@ -733,10 +733,10 @@ mod tests {
             env: &FakeEnv,
         };
         let (_, text) = parse(input, &w.cfg.prefixes());
-        let (rest, filters) = crate::files::parse_filters(text.trim());
-        let prep = Prepared::new(&rest, None);
+        let prep = Prepared::new(text.trim(), None);
+        let query = FileQuery::parse(text.trim()).prepare(None, 0);
         let cancel = AtomicBool::new(false);
-        let hits: Vec<(usize, FileHit)> = w.table.search_opt(&prep, 50, &cancel, false, &filters, 0).into_iter().map(|h| (0, h)).collect();
+        let hits: Vec<(usize, FileHit)> = w.table.search_query(&query, 50, &cancel, false).into_iter().map(|h| (0, h)).collect();
         build(input, &ctx, &prep, &hits)
     }
 
@@ -977,8 +977,16 @@ mod tests {
         let (_, rows) = run(&w, "ext:xlsx");
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|r| r.tag == "file"));
-        let (_, rows) = run(&w, "budget ext:xlsx");
+        let (_, rows) = run(&w, "budget & ext:xlsx");
         assert_eq!(names(&rows), vec!["2024_budget.xlsx"]);
+        let (_, rows) = run(&w, "f (*.docx | *.xlsx) & !budget");
+        assert_eq!(names(&rows), vec!["proposal.docx", "定例会議.xlsx"]);
+        let (_, rows) = run(&w, "*.xlsx & !in:Documents");
+        assert!(rows.is_empty());
+        let (_, rows) = run(&w, "budget ext:xlsx");
+        assert!(rows.iter().all(|r| r.tag != "file"));
+        let (_, rows) = run(&w, "g budget & ext:xlsx");
+        assert_eq!(rows[0].action, Action::Google("budget & ext:xlsx".into()));
         // 値のない`ext:`は普通の語
         let (_, rows) = run(&w, "ext:");
         assert!(rows.iter().all(|r| r.tag != "file"));

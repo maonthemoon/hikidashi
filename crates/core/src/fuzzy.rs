@@ -113,6 +113,16 @@ fn bonus_at(orig: &[char], j: usize) -> i32 {
     }
 }
 
+/// 引用符で囲んだ語は, 空白も含めて連続して一致する範囲を返す.
+pub(crate) fn match_contiguous(text: &str, name: &str, lower: &str) -> Option<Match> {
+    let offset = lower.find(text)?;
+    let start = lower[..offset].chars().count();
+    let len = text.chars().count();
+    let original: Vec<char> = name.chars().take(start + 1).collect();
+    let score = len as i32 * BASE + (len as i32 - 1) * BONUS_CONSEC + bonus_at(&original, start);
+    Some(Match { score, positions: (start as u32..(start + len) as u32).collect() })
+}
+
 /// 名前`name`に検索語`query`(prepare_query済み)が一致すれば点数と位置を返す.
 /// `lower`は`lower_str(name)`(呼ぶ側で覚えておけば毎回作らずに済む).
 pub fn score(query: &[char], name: &str, lower: &str) -> Option<Match> {

@@ -3,7 +3,11 @@
 
 use crate::fuzzy::{self, lower_str};
 use crate::migemo::{self, Dict};
-use crate::search::{match_name, Prepared, TopK};
+use crate::search::{Prepared, TopK};
+
+mod query;
+pub use query::{FileQuery, FileSearch};
+use query::{Matched, Matcher};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -121,7 +125,7 @@ impl FileTable {
         self.mtime.shrink_to_fit();
     }
 
-    fn search_range(&self, p: &Prepared, range: std::ops::Range<usize>, k: usize, cancel: &AtomicBool, dirs_only: bool, f: &Filters, min_mtime: u32) -> TopK<FileHit> {
+    fn search_range(&self, matcher: Matcher<'_>, range: std::ops::Range<usize>, k: usize, cancel: &AtomicBool, dirs_only: bool) -> TopK<FileHit> {
         let mut top = TopK::new(k);
         for i in range {
             if i % 8192 == 0 && cancel.load(Ordering::Relaxed) {
@@ -132,74 +136,46 @@ impl FileTable {
             if self.parent[i] == NO_PARENT || (dirs_only && fl & FLAG_DIR == 0) {
                 continue;
             }
-            if min_mtime > 0 && self.mtime[i] < min_mtime {
-                continue;
-            }
-            let lower = self.lower(id);
-            if !f.exts.is_empty() && (fl & FLAG_DIR != 0 || !f.exts.iter().any(|e| lower.ends_with(e.as_str()))) {
-                continue;
-            }
-            if !f.globs.iter().all(|g| g.matches(lower)) {
-                continue;
-            }
-            if p.is_empty() {
-                // 検索語がなく絞り込みだけのとき: 更新が新しい順
-                if self.in_ok(id, f) {
-                    let score = self.mtime[i].min(i32::MAX as u32) as i32;
-                    top.push(score, FileHit { id, score, positions: vec![] });
-                }
-                continue;
-            }
-            let name = self.name(id);
-            if let Some(m) = match_name(p, name, lower, fl & FLAG_ASCII != 0) {
-                if !self.in_ok(id, f) {
-                    continue;
-                }
-                let score = fuzzy::rank_score(&m, name);
-                top.push(score, FileHit { id, score, positions: m.positions });
-            }
+            let Some(m) = matcher.matches(self, id, fl) else { continue };
+            let (score, positions) = match m {
+                // 条件だけに一致したときは更新が新しい順.
+                Matched::Filter => (self.mtime[i].min(i32::MAX as u32) as i32, vec![]),
+                Matched::Name(m) => (fuzzy::rank_score(&m, self.name(id)), m.positions),
+            };
+            top.push(score, FileHit { id, score, positions });
         }
         top
     }
 
-    /// `in:`の絞り込み: 親をたどって, 名前に語を含むフォルダーが(語ごとに)1つはあるか. 自分自身は数えない.
-    fn in_ok(&self, id: u32, f: &Filters) -> bool {
-        if f.dirs.is_empty() {
-            return true;
-        }
-        let mut need: Vec<bool> = vec![false; f.dirs.len()];
+    /// 親をたどって, 名前にこの語を含むフォルダーがあるか調べる.
+    fn in_folder(&self, id: u32, text: &str) -> bool {
         let mut cur = self.parent(id);
-        while let Some(c) = cur {
-            let l = self.lower(c);
-            for (i, d) in f.dirs.iter().enumerate() {
-                if !need[i] && l.contains(d.as_str()) {
-                    need[i] = true;
-                }
-            }
-            if need.iter().all(|x| *x) {
+        while let Some(parent) = cur {
+            if self.lower(parent).contains(text) {
                 return true;
             }
-            cur = self.parent(c);
+            cur = self.parent(parent);
         }
         false
     }
 
     /// 上位k件を探す. 件数が多いときはCPUの数に分けて並べて探す. `cancel`が立ったら途中でやめる(J1: 新しい入力で古い検索を捨てる).
     pub fn search(&self, p: &Prepared, k: usize, cancel: &AtomicBool) -> Vec<FileHit> {
-        self.search_opt(p, k, cancel, false, &Filters::default(), 0)
+        self.search_matching(Matcher::Name(p), k, cancel, false)
     }
 
-    /// 絞り込み付きの検索. `now`は今のUNIX秒(`modified:`の基準). 検索語が空でも絞り込みがあれば, 条件に合うものを新しい順に返す.
-    pub fn search_opt(&self, p: &Prepared, k: usize, cancel: &AtomicBool, dirs_only: bool, f: &Filters, now: u32) -> Vec<FileHit> {
-        if p.is_empty() && f.is_empty() {
+    pub fn search_query(&self, search: &FileSearch, k: usize, cancel: &AtomicBool, dirs_only: bool) -> Vec<FileHit> {
+        self.search_matching(search.matcher(), k, cancel, dirs_only)
+    }
+
+    fn search_matching(&self, matcher: Matcher<'_>, k: usize, cancel: &AtomicBool, dirs_only: bool) -> Vec<FileHit> {
+        if matcher.is_empty() {
             return vec![];
         }
-        // 更新日時が0(分からない)ものは`modified:`で外すので, 下限は1以上にする
-        let min_mtime = f.modified_secs.map_or(0, |s| now.saturating_sub(s.min(u32::MAX as u64) as u32).max(1));
         let n = self.len();
         let threads = std::thread::available_parallelism().map(|t| t.get()).unwrap_or(1).min(8);
         if n < 20_000 || threads == 1 {
-            return self.search_range(p, 0..n, k, cancel, dirs_only, f, min_mtime).into_sorted().into_iter().map(|(_, h)| h).collect();
+            return self.search_range(matcher, 0..n, k, cancel, dirs_only).into_sorted().into_iter().map(|(_, h)| h).collect();
         }
         let chunk = n.div_ceil(threads);
         let mut all = TopK::new(k);
@@ -207,7 +183,7 @@ impl FileTable {
             let handles: Vec<_> = (0..threads)
                 .map(|t| {
                     let range = t * chunk..((t + 1) * chunk).min(n);
-                    s.spawn(move || self.search_range(p, range, k, cancel, dirs_only, f, min_mtime))
+                    s.spawn(move || self.search_range(matcher, range, k, cancel, dirs_only))
                 })
                 .collect();
             for h in handles {
@@ -218,19 +194,6 @@ impl FileTable {
         });
         all.into_sorted().into_iter().map(|(_, h)| h).collect()
     }
-}
-
-/// 打った文字から取り出した絞り込み(`ext:pdf`, `in:案件`, `modified:7d`).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Filters {
-    /// 拡張子(`.pdf`, `.tar.gz`のように先頭に`.`を付けた小文字). どれかに合えばよい. フォルダーは除く
-    pub exts: Vec<String>,
-    /// パスの途中にあるフォルダー名の部分(小文字). すべてについて, 含む親のフォルダーがあること
-    pub dirs: Vec<String>,
-    /// `*`を含む名前の形(小文字. `*.pdf`). すべてに合うこと(K50)
-    pub globs: Vec<Glob>,
-    /// 更新が今から何秒以内か
-    pub modified_secs: Option<u64>,
 }
 
 /// `*`で区切った名前の形. 区切りごとに, どれかに合えばよい語を持つ(ローマ字なら日本語にも広げる. K51)
@@ -260,67 +223,13 @@ impl Glob {
             }
         })
     }
-}
-
-impl Filters {
-    /// `benkyo*`のようなローマ字を, 日本語の名前にも合うように広げる
-    pub fn expand_romaji(&mut self, dict: Option<&Dict>) {
-        for g in &mut self.globs {
-            for seg in &mut g.segs {
-                let e = migemo::expand(&seg[0], dict);
-                seg.extend(e.words().iter().map(|w| w.to_lowercase()));
-            }
+    /// ローマ字を日本語の名前にも広げる.
+    fn expand_romaji(&mut self, dict: Option<&Dict>) {
+        for seg in &mut self.segs {
+            let e = migemo::expand(&seg[0], dict);
+            seg.extend(e.words().iter().map(|w| w.to_lowercase()));
         }
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.exts.is_empty() && self.dirs.is_empty() && self.globs.is_empty() && self.modified_secs.is_none()
-    }
-}
-
-/// `7d`(日), `12h`(時間), `2w`(週)を秒にする.
-fn parse_age(v: &str) -> Option<u64> {
-    let unit = v.chars().last()?;
-    let n: u64 = v[..v.len() - unit.len_utf8()].parse().ok()?;
-    let mul = match unit.to_ascii_lowercase() {
-        'h' => 3600,
-        'd' => 86_400,
-        'w' => 604_800,
-        _ => return None,
-    };
-    Some(n.saturating_mul(mul))
-}
-
-/// 入力から`ext:`, `in:`, `modified:`の語と, `*`を含む語(`*.pdf`)を取り出す. 返すのは(残りの検索語, 絞り込み).
-/// 値が空(`ext:`だけ)や読めない値(`modified:abc`)の語は絞り込みにせず, 普通の語として残す.
-pub fn parse_filters(input: &str) -> (String, Filters) {
-    let mut f = Filters::default();
-    let mut rest: Vec<&str> = Vec::new();
-    for w in input.split_whitespace() {
-        let lw = w.to_lowercase();
-        if let Some(v) = lw.strip_prefix("ext:") {
-            let exts: Vec<String> = v.split(',').map(|e| e.trim_start_matches('.')).filter(|e| !e.is_empty()).map(|e| format!(".{e}")).collect();
-            if !exts.is_empty() {
-                f.exts.extend(exts);
-                continue;
-            }
-        } else if let Some(v) = lw.strip_prefix("in:") {
-            if !v.is_empty() {
-                f.dirs.push(v.to_string());
-                continue;
-            }
-        } else if let Some(v) = lw.strip_prefix("modified:") {
-            if let Some(s) = parse_age(v) {
-                f.modified_secs = Some(s);
-                continue;
-            }
-        } else if lw.contains('*') && lw.chars().any(|c| c != '*') {
-            f.globs.push(Glob::new(&lw));
-            continue;
-        }
-        rest.push(w);
-    }
-    (rest.join(" "), f)
 }
 
 /// 走査で除く名前(D1). 大文字小文字は区別しない. `*`は何文字にでも合う(K44)
@@ -497,7 +406,7 @@ mod tests {
         assert_eq!(t.name(h[0].id), "Documents");
         let h = t.search(&Prepared::new("会議", None), 8, &cancel);
         assert_eq!(t.name(h[0].id), "会議資料.xlsx");
-        let h = t.search_opt(&Prepared::new("o", None), 8, &cancel, true, &Filters::default(), 0);
+        let h = t.search_query(&FileQuery::parse("o").prepare(None, 0), 8, &cancel, true);
         assert!(h.iter().all(|x| t.is_dir(x.id)));
     }
 
@@ -562,27 +471,25 @@ mod tests {
     }
 
     fn names(t: &FileTable, q: &str) -> Vec<String> {
-        let (rest, f) = parse_filters(q);
+        let query = FileQuery::parse(q).prepare(None, NOW);
         let cancel = AtomicBool::new(false);
-        t.search_opt(&Prepared::new(&rest, None), 50, &cancel, false, &f, NOW).iter().map(|h| t.name(h.id).to_string()).collect()
+        t.search_query(&query, 50, &cancel, false).iter().map(|h| t.name(h.id).to_string()).collect()
     }
 
     #[test]
-    fn parse_filter_words() {
-        let (rest, f) = parse_filters("kaigi ext:PDF,.docx in:案件 modified:7d");
-        assert_eq!(rest, "kaigi");
-        assert_eq!(f.exts, vec![".pdf", ".docx"]);
-        assert_eq!(f.dirs, vec!["案件"]);
-        assert_eq!(f.modified_secs, Some(7 * 86_400));
-        assert_eq!(parse_filters("modified:12h").1.modified_secs, Some(12 * 3600));
-        assert_eq!(parse_filters("modified:2w").1.modified_secs, Some(14 * 86_400));
-        // 値が空や読めないときは普通の語
-        for q in ["ext:", "in:", "modified:", "modified:abc", "modified:7", "ext:,", "report ext:"] {
-            let (rest, f) = parse_filters(q);
-            assert!(f.is_empty(), "{q}");
-            assert_eq!(rest, q);
+    fn only_complete_search_expressions_are_structured() {
+        for q in ["*.pdf", "EXT:PDF,.docx", "modified:12H", "modified:2w", "(見積)", "in:\"Project Alpha\"", "!in:private"] {
+            assert!(FileQuery::parse(q).is_structured(), "{q}");
         }
-        assert_eq!(parse_filters("a  ext:pdf   b").0, "a b");
+        for q in [
+            "ext:", "in:", "modified:", "modified:abc", "modified:7", "ext:,", "report ext:",
+            "*.pdf in:案件", "見積 2026", "R&D", "report(2026)", "2 ** 3", "*", "a &", "a |",
+            "()", "(a | b", "a )", "in:\"Project Alpha",
+        ] {
+            assert!(!FileQuery::parse(q).is_structured(), "{q}");
+        }
+        let too_deep = format!("{}*.pdf{}", "(".repeat(64), ")".repeat(64));
+        assert!(!FileQuery::parse(&too_deep).is_structured());
     }
 
     #[test]
@@ -593,31 +500,30 @@ mod tests {
         assert_eq!(v, vec!["notes.pdf", "report.pdf", "見積.PDF", "見積.pdf"]);
         assert_eq!(names(&t, "ext:tar.gz"), vec!["backup.tar.gz"]);
         assert_eq!(names(&t, "ext:gz"), vec!["backup.tar.gz"]);
-        assert_eq!(names(&t, "memo ext:docx"), vec!["memo.docx"]);
-        assert!(names(&t, "memo ext:pdf").is_empty());
+        assert_eq!(names(&t, "memo & ext:docx"), vec!["memo.docx"]);
+        assert!(names(&t, "memo & ext:pdf").is_empty());
         assert_eq!(names(&t, "ext:docx,gz").len(), 2);
     }
 
     #[test]
     fn filter_by_glob() {
-        let t = filter_table();
+        let mut t = filter_table();
         let mut v = names(&t, "*.PDF");
         v.sort();
         assert_eq!(v, vec!["notes.pdf", "report.pdf", "見積.PDF", "見積.pdf"]);
         assert_eq!(names(&t, "re*.pdf"), vec!["report.pdf"]);
-        assert_eq!(names(&t, "見積* in:reports"), vec!["見積.pdf"]);
+        assert_eq!(names(&t, "見積* & in:reports"), vec!["見積.pdf"]);
         assert_eq!(names(&t, "*port*.pdf"), vec!["report.pdf"]);
-        assert!(names(&t, "*.pdf memo").is_empty());
+        assert!(names(&t, "*.pdf & memo").is_empty());
+        t.push(Some(0), "報告(最終)版.pdf", false, NOW);
+        assert_eq!(names(&t, "(報告(最終)*.pdf | *.gz) & !in:private"), vec!["報告(最終)版.pdf"]);
         // ローマ字は日本語の名前にも合う
-        let (_, mut f) = parse_filters("kaigi*.pdf");
+        let mut glob = Glob::new("kaigi*.pdf");
         let dict = Dict::parse("かいぎ /会議/\n");
-        assert!(!f.globs[0].matches("会議資料.pdf"));
-        f.expand_romaji(Some(&dict));
-        assert!(f.globs[0].matches("会議資料.pdf") && f.globs[0].matches("カイギ.pdf") && f.globs[0].matches("kaigi.pdf"));
-        assert!(!f.globs[0].matches("会議資料.docx") && !f.globs[0].matches("定例会議.pdf"));
-        // `*`だけは絞り込みにしない
-        assert!(parse_filters("*").1.is_empty());
-        assert!(parse_filters("2 ** 3").1.is_empty());
+        assert!(!glob.matches("会議資料.pdf"));
+        glob.expand_romaji(Some(&dict));
+        assert!(glob.matches("会議資料.pdf") && glob.matches("カイギ.pdf") && glob.matches("kaigi.pdf"));
+        assert!(!glob.matches("会議資料.docx") && !glob.matches("定例会議.pdf"));
     }
 
     #[test]
@@ -628,14 +534,40 @@ mod tests {
         v.sort();
         assert_eq!(v, vec!["memo.docx", "見積.pdf"]);
         assert_eq!(names(&t, "in:案件").len(), 4);
-        assert_eq!(names(&t, "in:案件 in:report").len(), 2);
+        assert_eq!(names(&t, "in:案件 & in:report").len(), 2);
         // 新しい順. 日時のない(0の)ものは外す
         assert_eq!(names(&t, "modified:7d"), vec!["backup.tar.gz", "見積.pdf", "report.pdf"]);
         assert_eq!(names(&t, "modified:12h"), vec!["backup.tar.gz"]);
-        assert_eq!(names(&t, "modified:1w ext:pdf in:private"), vec!["report.pdf"]);
-        assert_eq!(names(&t, "ext:pdf modified:30d in:案件"), vec!["見積.pdf"]);
+        assert_eq!(names(&t, "modified:1w & ext:pdf & in:private"), vec!["report.pdf"]);
+        assert_eq!(names(&t, "ext:pdf & modified:30d & in:案件"), vec!["見積.pdf"]);
         // 残りの語はあいまい一致のまま
-        assert_eq!(names(&t, "mem in:案件 modified:30d"), vec!["memo.docx"]);
+        assert_eq!(names(&t, "mem & in:案件 & modified:30d"), vec!["memo.docx"]);
+    }
+
+    #[test]
+    fn operators_and_grouping() {
+        let t = filter_table();
+        assert_eq!(names(&t, "ext:gz | ext:pdf & in:reports"), vec!["backup.tar.gz", "見積.pdf"]);
+        assert_eq!(names(&t, "(ext:gz | ext:pdf) & in:reports"), vec!["見積.pdf"]);
+        assert_eq!(names(&t, "(*.pdf | *.docx) & modified:7d & !in:private"), vec!["見積.pdf"]);
+        assert_eq!(names(&t, "!(in:private | ext:pdf) & ext:docx"), vec!["memo.docx"]);
+        assert_eq!(names(&t, "ext:pdf & !modified:7d & in:案件"), vec!["notes.pdf"]);
+        assert_eq!(names(&t, "pdf & report"), vec!["report.pdf"]);
+        assert!(names(&t, "pdf report").is_empty());
+        assert!(names(&t, "*.pdf in:案件").is_empty());
+    }
+
+    #[test]
+    fn quoted_names_and_filter_values() {
+        let mut t = filter_table();
+        let project = t.push(Some(0), "Project Alpha", true, 0);
+        let id = t.push(Some(project), "会議 Plan & Review.pdf", false, NOW);
+        t.push(Some(project), "Plans & Review.pdf", false, NOW);
+        assert_eq!(names(&t, "in:\"project alpha\" & \"Plan & Review\""), vec!["会議 Plan & Review.pdf"]);
+        let query = FileQuery::parse("\"Plan & Review\" & ext:pdf").prepare(None, NOW);
+        let hits = t.search_query(&query, 50, &AtomicBool::new(false), false);
+        assert_eq!(hits[0].id, id);
+        assert_eq!(hits[0].positions, (3..16).collect::<Vec<_>>());
     }
 
     /// 検索の速さ. 50万件で, 前から1文字ずつ打つように検索する(29回). `[profile.test] opt-level = 2`(ルートのCargo.toml)で最適化している.

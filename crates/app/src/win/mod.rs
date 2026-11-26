@@ -385,9 +385,7 @@ impl App {
 
     fn build_rows(&self, input: &str, hits: &[(usize, hikidashi_core::files::FileHit)], tables: &[Arc<FileTable>]) -> (Mode, Vec<Row>) {
         let (_, text) = router::parse(input, &self.config.prefixes());
-        // 絞り込み(`ext:pdf`など)の語は検索の語に含めない
-        let (rest, _) = hikidashi_core::files::parse_filters(text.trim());
-        let prep = Prepared::new(&rest, self.dict.get());
+        let prep = Prepared::new(text.trim(), self.dict.get());
         let (mode, mut rows) = self.with_ctx(tables, |ctx| router::build(input, ctx, &prep, hits));
         // 引数を取るスクリプト(`ff 語`)の行は一番上に出す
         if mode == Mode::All {
@@ -432,8 +430,7 @@ impl App {
         }
         let (_, quick) = self.build_rows(&input, &[], &[]);
         let qlen = text.trim().chars().count();
-        // 絞り込みがあれば, 残りの語が短くても(空でも)探す
-        let filtered = !hikidashi_core::files::parse_filters(text.trim()).1.is_empty();
+        let filtered = hikidashi_core::files::FileQuery::parse(text.trim()).is_structured();
         let want_files = match self.mode {
             Mode::All => (qlen >= 2 || filtered) && pathlike::detect(&input).is_none(),
             Mode::File | Mode::Box | Mode::Wsl => qlen >= 1,
