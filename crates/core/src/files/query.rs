@@ -41,6 +41,11 @@ impl<'a> FileQuery<'a> {
 pub struct FileSearch(Expr<Term>);
 
 impl FileSearch {
+    /// 式に名前の語があるか. あれば, 条件だけに合ったものは名前で合ったものより下に並べる.
+    pub(super) fn has_name(&self) -> bool {
+        self.0.any(&|t| matches!(t, Term::Name(_) | Term::QuotedName(_)))
+    }
+
     pub(super) fn matcher(&self) -> Matcher<'_> {
         match &self.0 {
             Expr::Term(Term::Name(p)) => Matcher::Name(p),
@@ -57,6 +62,14 @@ enum Expr<T> {
 }
 
 impl<T> Expr<T> {
+    fn any(&self, f: &impl Fn(&T) -> bool) -> bool {
+        match self {
+            Self::Term(t) => f(t),
+            Self::Not(e) => e.any(f),
+            Self::And(es) | Self::Or(es) => es.iter().any(|e| e.any(f)),
+        }
+    }
+
     fn map<U>(self, f: &impl Fn(T) -> U) -> Expr<U> {
         match self {
             Self::Term(term) => Expr::Term(f(term)),
@@ -319,6 +332,14 @@ pub(super) enum Matcher<'a> {
 impl Matcher<'_> {
     pub(super) fn is_empty(self) -> bool {
         matches!(self, Self::Name(p) if p.is_empty())
+    }
+
+    /// 条件だけに合ったものの点数. 更新が新しい順. 式に名前の語があれば, 名前で合ったもの(点数は数百ほど)より下にする.
+    pub(super) fn filter_score(self, mtime: u32) -> i32 {
+        match self {
+            Self::Expression(search) if search.has_name() => i32::MIN / 2 + (mtime / 4) as i32,
+            _ => mtime.min(i32::MAX as u32) as i32,
+        }
     }
 
     pub(super) fn matches(self, table: &FileTable, id: u32, flags: u8) -> Option<Matched> {

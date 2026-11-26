@@ -138,8 +138,8 @@ impl FileTable {
             }
             let Some(m) = matcher.matches(self, id, fl) else { continue };
             let (score, positions) = match m {
-                // 条件だけに一致したときは更新が新しい順.
-                Matched::Filter => (self.mtime[i].min(i32::MAX as u32) as i32, vec![]),
+                // 条件だけに一致したときは更新が新しい順(名前で合ったものより下).
+                Matched::Filter => (matcher.filter_score(self.mtime[i]), vec![]),
                 Matched::Name(m) => (fuzzy::rank_score(&m, self.name(id)), m.positions),
             };
             top.push(score, FileHit { id, score, positions });
@@ -555,6 +555,8 @@ mod tests {
         assert_eq!(names(&t, "pdf & report"), vec!["report.pdf"]);
         assert!(names(&t, "pdf report").is_empty());
         assert!(names(&t, "*.pdf in:案件").is_empty());
+        // 名前で合ったものを, 条件だけに合ったものより上に出す. 条件だけのものは新しい順
+        assert_eq!(names(&t, "memo | ext:gz | ext:pdf & in:reports"), vec!["memo.docx", "backup.tar.gz", "見積.pdf"]);
     }
 
     #[test]

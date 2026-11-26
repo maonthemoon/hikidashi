@@ -1359,7 +1359,7 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
         <p>入力欄が空のときに<kbd>Backspace</kbd>を押すと, 印が消えて全部を探す状態に戻ります. プロセス, WSL, Boxは, 絞ったときだけ出ます. BoxとWSLはファイルが多く, ふだんの検索に混ぜると一覧が埋まるためです. 文字は<a href="#settings">設定</a>の<code>Keywords</code>で変えられます.</p>
 
         <h3 id="filter">ファイルを条件で絞る</h3>
-        <p>条件だけで探すと, 新しい順に並びます. 名前と条件を組み合わせるときは, <code>見積 &amp; *.pdf</code>のように<code>&amp;</code>でつなぎます.</p>
+        <p>条件だけで探すと, 新しい順に並びます. <code>kaigi | *.pptx</code>のように名前と条件を<code>|</code>でまぜたときは, 名前で合ったものが先に並びます. 名前と条件を組み合わせるときは, <code>見積 &amp; *.pdf</code>のように<code>&amp;</code>でつなぎます.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>打つもの</th><th>絞り方</th></tr></thead>
@@ -1540,7 +1540,7 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
         <p>結果は有効数字4桁です.</p>
 
         <h3 id="calc-mipi">MIPI RFFE</h3>
-        <p>計算のモードで<code>mipi</code>と空白のあとに打ちます. ビット列はフレームとビットに分けて見せ, 値からはビット列を作ります. <kbd>Tab</kbd>で候補を入力欄に入れられるので, 名前や順番を覚えなくても打てます.</p>
+        <p>計算のモードで<code>mipi</code>と空白のあとに打ちます. ビット列はフレームとビットに分けて見せ, 値からはビット列を作ります. <kbd>Tab</kbd>で候補を入力欄に入れられるので, 名前や順番を覚えなくても打てます. 値を打ったあとの<kbd>Tab</kbd>では, 空白と次の名前が入ります.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>打つもの</th><th>出るもの</th></tr></thead>

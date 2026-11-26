@@ -132,6 +132,9 @@ fn mipiの補完() {
     assert_eq!(fills("cmd=w "), vec!["mipi cmd=w sa=", "mipi cmd=w addr=", "mipi cmd=w data="]);
     assert_eq!(fills("cmd=w sa=6 "), vec!["mipi cmd=w sa=6 addr=", "mipi cmd=w sa=6 data="]);
     assert_eq!(fills("cmd=w sa=6 a"), vec!["mipi cmd=w sa=6 addr="]);
+    // 値を打った直後でも, Tabで次の名前へ進める
+    assert_eq!(fills("cmd=w sa=6"), vec!["mipi cmd=w sa=6 addr=", "mipi cmd=w sa=6 data="]);
+    assert_eq!(fills("cmd=w sa=6 addr=1C data=3"), Vec::<String>::new());
     assert_eq!(fills("cmd=w sa=6 addr=1"), vec!["mipi cmd=w sa=6 addr=1C ", "mipi cmd=w sa=6 addr=1D ", "mipi cmd=w sa=6 addr=1E ", "mipi cmd=w sa=6 addr=1F "]);
     assert!(fills("cmd=er sa=6 addr=40 ").contains(&"mipi cmd=er sa=6 addr=40 bytes=".to_string()));
     assert!(fills("s").contains(&"mipi sa=".to_string()));

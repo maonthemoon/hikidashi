@@ -321,15 +321,18 @@ function fromArgs(tokens, open, mask) {
     }
   }
   // 補完: まだ書いていない名前(必要なものを先に)
-  if (half || !open) {
+  const names = (prefix, typed) => {
     const want = v.cmd ? CMDS.find((c) => c.key === v.cmd).need : ["sa", "addr", "data"];
     const all = [...want, ...Object.keys(KEYS).filter((k) => want.indexOf(k) < 0)];
     for (const k of all) {
-      if (known.indexOf(k) >= 0 || (k === "mask" && !mask) || !k.startsWith(last.toLowerCase())) continue;
+      if (known.indexOf(k) >= 0 || (k === "mask" && !mask) || !k.startsWith(typed)) continue;
       if (v.cmd && want.indexOf(k) < 0 && !(k === "bytes" && /^er/.test(v.cmd)) && !(k === "data" && /^e?rl?$/.test(v.cmd))) continue;
-      rows.push({ title: `${k}=`, subtitle: KEYS[k], fill: `${before}${k}=`, copy: "" });
+      rows.push({ title: `${k}=`, subtitle: KEYS[k], fill: `${prefix}${k}=`, copy: "" });
     }
-  }
+  };
+  if (half || !open) names(before, last.toLowerCase());
+  // 値を打った直後(空白の前)でほかに出すものがなければ, 次の名前を出す. Tabで空白と名前が入る
+  else if (!rows.length && m && m[2] !== "") names(`${before}${last} `, "");
   if (!rows.length && m && m[2] === "") rows.push({ title: KEYS[key] || "Type the value", subtitle: "Type the value", copy: "" });
   if (!rows.length) rows.push({ title: half ? "Use sa= addr= data= (hex), or type bits" : "Type the next value", subtitle: "Example: mipi sa=6 addr=1C data=38", copy: "" });
   return rows;
