@@ -28,7 +28,7 @@ pub fn config_prompt(toml: &str, ja: bool) -> String {
 - [[open_with]]: name, exe(VS Code, WezTerm, Windows Terminalは空でよい), args({{path}} は選んだもの, {{dir}} はそのフォルダー. 空ならふつうの渡し方).
 - [tools] terminal: [[open_with]] の name のどれか, または空.
 - [browser] browser: default, chrome, edge. open_in: window, tab.
-- [chatgpt] mode: url, clipboard. send_delay_ms: 500〜30000.
+- [chatgpt] mode: url, clipboard. send_delay_ms: 500〜30000. image_wait_ms: 0〜60000(長い質問に添付した画像1枚ごとに, Enterの前に待つ時間).
 - [ui] language: auto, ja, en. theme: auto, light, dark.
 - [hotkeys] selection: Ctrl+Alt+Space のような形, または空.
 
@@ -57,7 +57,7 @@ pub fn config_prompt(toml: &str, ja: bool) -> String {
 - [[open_with]]: name, exe (can be empty for VS Code, WezTerm and Windows Terminal), args ({{path}} is the selected item, {{dir}} is its folder; empty is the usual way).
 - [tools] terminal: the name of one of [[open_with]], or empty.
 - [browser] browser: default, chrome, edge. open_in: window, tab.
-- [chatgpt] mode: url, clipboard. send_delay_ms: 500 to 30000.
+- [chatgpt] mode: url, clipboard. send_delay_ms: 500 to 30000. image_wait_ms: 0 to 60000 (wait for each image attached to a long question, before Enter).
 - [ui] language: auto, ja, en. theme: auto, light, dark.
 - [hotkeys] selection: like Ctrl+Alt+Space, or empty.
 
@@ -81,7 +81,7 @@ mod tests {
             let p = config_prompt(&toml, ja);
             assert!(p.contains(toml.trim_end()));
             assert!(p.contains("{q}") && p.contains("{path}") && p.contains("{dir}") && !p.contains("{{"));
-            assert!(p.contains("Ctrl+Alt+Shift+Enter") && p.contains("copy_wsl_path"));
+            assert!(p.contains("Ctrl+Alt+Shift+Enter") && p.contains("copy_wsl_path") && p.contains("image_wait_ms"));
             // 説明した区分は, どれも今のファイルにある
             for sec in ["prefix", "files", "apps", "keys", "menu", "tools", "browser", "chatgpt", "ui", "hotkeys", "alias"] {
                 assert!(p.contains(&format!("- [{sec}]")) || p.contains(&format!(", [{sec}]")), "{sec}");

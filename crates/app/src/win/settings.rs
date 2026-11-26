@@ -105,6 +105,7 @@ const ID_GPT_MODE: i32 = 510;
 const ID_GPT_SEND: i32 = 513;
 const ID_GPT_DELAY: i32 = 514;
 const ID_GPT_HIDE: i32 = 515;
+const ID_GPT_IMAGE_WAIT: i32 = 516;
 const ID_ALIASES: i32 = 600;
 const ID_ALIAS_ADD: i32 = 601;
 const ID_ALIAS_EDIT: i32 = 602;
@@ -1273,6 +1274,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         p.select(ID_GPT_MODE, "How to send a question", "If it fails, use \"Copy, then open\"", key_items(&GPT_MODES, &c.chatgpt.mode));
         p.check(ID_GPT_SEND, "Press Enter automatically", "Only when ChatGPT is in front", c.chatgpt.send_enter);
         p.number(ID_GPT_DELAY, "Wait before Enter", "Milliseconds", &c.chatgpt.send_delay_ms.to_string());
+        p.number(ID_GPT_IMAGE_WAIT, "Wait per image", "Milliseconds, added before Enter for each attached image", &c.chatgpt.image_wait_ms.to_string());
         p.check(ID_GPT_HIDE, "Hide Markdown marks", "In long questions, except on the line you edit", c.chatgpt.hide_marks);
         p.end_card();
         sections.push(p.finish());
@@ -1538,6 +1540,12 @@ impl Settings {
             Ok(v) => c.chatgpt.send_delay_ms = v,
             Err(_) => err = Some("Wait before Enter must be a number of ms.".to_string()),
         }
+        match t(ID_GPT_IMAGE_WAIT).parse() {
+            Ok(v) => c.chatgpt.image_wait_ms = v,
+            Err(_) => {
+                err.get_or_insert("Wait per image must be a number of ms.".to_string());
+            }
+        }
         c.browser.browser = selected_key(item(h, ID_BROWSER), &BROWSERS);
         c.browser.open_in = selected_key(item(h, ID_OPEN_IN), &OPEN_IN);
         let dir = |list: &[(String, String)], id: i32| list.get(drop_sel(item(h, id))).map(|(d, _)| d.clone()).unwrap_or_else(|| "Default".into());
@@ -1554,7 +1562,12 @@ impl Settings {
     /// 間違いのある欄だけを前の値に戻す(ほかの欄は反映できるように)
     fn without_mistakes(&self, c: Config) -> Config {
         let o = &self.orig;
-        let reverts: [&dyn Fn(&mut Config); 3] = [&|c| c.prefix = o.prefix.clone(), &|c| c.chatgpt.send_delay_ms = o.chatgpt.send_delay_ms, &|c| c.keys = o.keys.clone()];
+        let reverts: [&dyn Fn(&mut Config); 4] = [
+            &|c| c.prefix = o.prefix.clone(),
+            &|c| c.chatgpt.send_delay_ms = o.chatgpt.send_delay_ms,
+            &|c| c.chatgpt.image_wait_ms = o.chatgpt.image_wait_ms,
+            &|c| c.keys = o.keys.clone(),
+        ];
         for f in reverts {
             let mut t = c.clone();
             f(&mut t);

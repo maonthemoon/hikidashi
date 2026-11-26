@@ -22,6 +22,7 @@ pub mod hotkey;
 pub mod openwith;
 pub mod markdown;
 pub mod compose;
+pub mod attach;
 pub mod favicon;
 pub mod clip;
 pub mod snapshot;

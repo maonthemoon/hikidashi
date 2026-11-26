@@ -2,6 +2,7 @@
 
 mod actions;
 mod apps;
+mod attach;
 mod clipboard;
 mod compose;
 mod dark;
@@ -32,6 +33,7 @@ use hikidashi_core::snapshot::{SnapRow, Snapshots};
 use hikidashi_core::scripts::{self as cscripts, RunOutcome, Script};
 use hikidashi_core::selection::{self as csel, Picked};
 use hikidashi_core::catalog::{Catalog, Item, Kind};
+use hikidashi_core::attach::{self as cattach, Image, Paste};
 use hikidashi_core::compose::{Browse, Drafts};
 use hikidashi_core::markdown::{self, NewLine};
 use hikidashi_core::config::{self, Config, KeyAction, KEY_ALT, KEY_CTRL, KEY_SHIFT};
@@ -210,6 +212,8 @@ pub struct App {
     recalled: String,
     /// 書く窓の中身の高さ(EN_REQUESTRESIZE)
     compose_h: i32,
+    /// 書く窓に添付した画像(メモリだけ. 書く窓を閉じても書きかけと一緒に残し, 送ったら消す)
+    pub images: Vec<Image>,
     /// 選んだ文字で開くホットキー(設定の`[hotkeys] selection`)と, 登録できているか
     sel_hotkey: Option<Hotkey>,
     sel_registered: bool,
@@ -1654,6 +1658,13 @@ impl App {
                 true
             }
             v if v == VK_TAB.0 && !ctrl => self.compose_indent(shift),
+            // 最後に添付した画像を外す
+            v if v == VK_BACK.0 && ctrl && shift && !self.images.is_empty() => {
+                self.images.pop();
+                self.message = None;
+                self.layout();
+                true
+            }
             // 空でBackspaceなら検索に戻る
             v if v == VK_BACK.0 && !ctrl && empty => {
                 self.leave_compose();
@@ -1753,12 +1764,77 @@ impl App {
         self.compose_changed();
     }
 
-    /// 貼り付けは字だけにする(書式や画像は入れない)
+    /// 貼り付けは字だけにする(書式は入れない). 文字のない画像と, 画像のファイルは添付にする
     fn compose_paste(&mut self) {
+        match clipboard::paste_kind(self.hwnd) {
+            Paste::Files(f) => return self.attach_files(&f),
+            Paste::Image => return self.attach_clipboard_image(),
+            Paste::Text => {}
+        }
         let Some(t) = actions::clipboard_text(self.hwnd) else { return };
         let Some(c) = &self.compose else { return };
         c.replace_sel(&t);
         self.compose_changed();
+    }
+
+    /// 添付を足したあと, 知らせと下の帯を直す
+    fn attached(&mut self, msg: Option<String>) {
+        self.message = msg.map(|m| (m, true));
+        self.layout();
+    }
+
+    /// クリップボードの画像を添付する
+    fn attach_clipboard_image(&mut self) {
+        if cattach::room(self.images.len()) == 0 {
+            return self.attached(Some(format!("Up to {} images", cattach::MAX_IMAGES)));
+        }
+        match clipboard::read_image(self.hwnd) {
+            Some(img) => {
+                storage::log(&format!("compose: attached an image from the clipboard ({}x{})", img.width, img.height));
+                self.images.push(img);
+                self.attached(None);
+            }
+            None => self.attached(Some("Couldn't read the image on the clipboard".into())),
+        }
+    }
+
+    /// 画像のファイルを添付する(貼り付けと, 落としたファイル). 画像でないものは除く
+    fn attach_files(&mut self, paths: &[String]) {
+        let imgs: Vec<&String> = paths.iter().filter(|p| cattach::is_image_path(p)).collect();
+        if imgs.is_empty() {
+            return self.attached(Some("Only images (png, jpg, gif, webp) can be attached".into()));
+        }
+        let mut msg = None;
+        for p in imgs {
+            if cattach::room(self.images.len()) == 0 {
+                msg = Some(format!("Up to {} images", cattach::MAX_IMAGES));
+                break;
+            }
+            match attach::load_file(p) {
+                Ok(img) => {
+                    storage::log(&format!("compose: attached {p} ({}x{})", img.width, img.height));
+                    self.images.push(img);
+                }
+                Err(e) => {
+                    storage::log(&format!("compose: {e}"));
+                    msg = Some(e);
+                }
+            }
+        }
+        self.attached(msg);
+    }
+
+    /// 窓に落としたファイル(書く窓のときだけ添付にする)
+    fn on_drop_files(&mut self, paths: Vec<String>) {
+        if !self.composing() || paths.is_empty() {
+            return;
+        }
+        self.attach_files(&paths);
+        if let Some(c) = &self.compose {
+            unsafe {
+                let _ = SetFocus(Some(c.hwnd));
+            }
+        }
     }
 
     /// Ctrl+↑/Ctrl+↓: 送った文を呼び出す
@@ -1785,13 +1861,19 @@ impl App {
         let Some(c) = &self.compose else { return };
         let text = c.text();
         let q = text.trim();
-        if q.is_empty() {
+        if q.is_empty() && self.images.is_empty() {
             return;
         }
         let q = q.replace('\r', "\n");
-        match actions::ask_chatgpt_long(self.hwnd, &q.replace('\n', "\r\n"), &self.config) {
+        let sent = if self.images.is_empty() {
+            actions::ask_chatgpt_long(self.hwnd, &q.replace('\n', "\r\n"), &self.config)
+        } else {
+            actions::ask_chatgpt_images(self.hwnd, &q.replace('\n', "\r\n"), &self.images, &self.config)
+        };
+        match sent {
             Ok(()) => {
                 self.drafts.push_sent(&q);
+                self.images.clear();
                 self.drafts.draft.clear();
                 storage::save_drafts(&self.drafts);
                 self.browse.reset();
@@ -1808,6 +1890,24 @@ impl App {
                 self.hide();
             }
             Err(e) => self.fail(e),
+        }
+    }
+
+    /// 画像つきの質問を送り終えた. 貼れなかったら知らせ(次に窓を出したときに見える), 貼れたらクリップボードを元に戻す
+    fn on_images_done(&mut self, d: actions::ImagesDone) {
+        if d.failed {
+            self.message = Some((cattach::NOT_ATTACHED.into(), true));
+            if self.visible() {
+                self.layout();
+            }
+            return;
+        }
+        if let Some(saved) = d.saved.filter(|s| !s.abort) {
+            // その間にほかの物をコピーしていたら戻さない
+            if d.ours != 0 && clipboard::sequence() == d.ours {
+                // 元に戻しただけなので, 履歴の先頭に出し直さない
+                self.clip_ignore = Some(clipboard::restore(self.hwnd, &saved));
+            }
         }
     }
 
@@ -3121,6 +3221,9 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             REQ_H.set(Some(rc.bottom - rc.top));
         }
     }
+    if msg == WM_DROPFILES {
+        return on_drop(wparam);
+    }
     let handled: Option<Option<LRESULT>> = with_app(|app| -> Option<LRESULT> {
         match msg {
             WM_PAINT => {
@@ -3203,6 +3306,13 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                 app.icons.clear_favicons();
                 unsafe {
                     let _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                Some(LRESULT(0))
+            }
+            actions::WM_APP_IMAGES_DONE => {
+                if lparam.0 != 0 {
+                    let d = unsafe { Box::from_raw(lparam.0 as *mut actions::ImagesDone) };
+                    app.on_images_done(*d);
                 }
                 Some(LRESULT(0))
             }
@@ -3555,9 +3665,20 @@ fn compose_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id:
                 return LRESULT(0);
             }
         }
+        // 書く窓に落としたファイル(RichEditには渡さない)
+        WM_DROPFILES => return on_drop(wparam),
         _ => {}
     }
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// 窓(書く窓の中を含む)にファイルを落とした. 書く窓なら画像を添付にする
+fn on_drop(wparam: WPARAM) -> LRESULT {
+    let hd = windows::Win32::UI::Shell::HDROP(wparam.0 as *mut _);
+    let paths = clipboard::drop_paths(hd);
+    unsafe { windows::Win32::UI::Shell::DragFinish(hd) };
+    with_app(|app| app.on_drop_files(paths));
+    LRESULT(0)
 }
 
 /// 窓の枠の色(Windows 11). ライトとダークで変える(K39)
@@ -3724,6 +3845,13 @@ pub fn run() {
     }
 
     set_border_color(hwnd);
+    // エクスプローラーから画像のファイルを落として添付する(書く窓のときだけ使う). RichEditはOLEの受け取りを外してあるので, WM_DROPFILESで受ける
+    unsafe {
+        windows::Win32::UI::Shell::DragAcceptFiles(hwnd, true);
+        if let Some(c) = &compose {
+            windows::Win32::UI::Shell::DragAcceptFiles(c.hwnd, true);
+        }
+    }
     let shared = Shared::new(config.clone());
     let dict: Arc<OnceLock<Dict>> = Arc::new(OnceLock::new());
     dict::start(hwnd, shared.clone(), dict.clone());
@@ -3819,6 +3947,7 @@ pub fn run() {
         browse: Browse::default(),
         recalled: String::new(),
         compose_h: 0,
+        images: Vec::new(),
         restyle_text: false,
         restyle_sel: false,
     };
