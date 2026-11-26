@@ -160,6 +160,20 @@ pub fn save_drafts(d: &hikidashi_core::compose::Drafts) {
     write("compose.json", &d.to_json());
 }
 
+/// 保存した結果(`snap `). 読めない・壊れていれば空として扱い, ログに書く
+pub fn load_snapshots() -> hikidashi_core::snapshot::Snapshots {
+    let Some(text) = read("snapshots.json") else { return Default::default() };
+    let (s, err) = hikidashi_core::snapshot::Snapshots::from_json(&text);
+    if let Some(e) = err {
+        log(&format!("snapshots.json is broken, treated as empty: {e}"));
+    }
+    s
+}
+
+pub fn save_snapshots(s: &hikidashi_core::snapshot::Snapshots) {
+    write("snapshots.json", &s.to_json());
+}
+
 /// 動いている場所(`%LOCALAPPDATA%\Hikidashi`). リポジトリの`bin\Hikidashi.exe`を
 /// ここに写してから動かすので, 動かしたまま`git pull`でexeを置き換えられる.
 pub fn install_dir() -> PathBuf {
