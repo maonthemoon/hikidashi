@@ -621,8 +621,13 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
     let mut rows: Vec<Row> = Vec::new();
     let mut head: Vec<Row> = Vec::new();
     // 絞り込みや式はファイルの索引にかける.
-    let filtered = matches!(mode, Mode::All | Mode::File | Mode::Box | Mode::Wsl) && FileQuery::parse(text_trim).is_structured();
-    if mode == Mode::All && !filtered {
+    let (filtered, implicit_and_only) = if matches!(mode, Mode::All | Mode::File | Mode::Box | Mode::Wsl) {
+        let query = FileQuery::parse(text_trim);
+        (query.is_structured(), query.is_implicit_and_only())
+    } else {
+        (false, false)
+    };
+    if mode == Mode::All && (!filtered || implicit_and_only) {
         if let Some(r) = command_with_arg(text_trim, ctx.config) {
             head.push(r);
         }
@@ -984,6 +989,41 @@ mod tests {
     }
 
     #[test]
+    fn command_with_file_filter_argument_stays_first() {
+        let mut w = world();
+        let cfg = Config::parse("[[command]]\nname = 'gh'\nurl = 'https://example.com/search?q={q}'\n").unwrap();
+        w.cfg.command.extend(cfg.command);
+        w.cmds = Catalog::new(command_items(&w.cfg));
+        let title = w.table.push(Some(0), "title", true, 0);
+        w.table.push(Some(title), "gh.pdf", false, 0);
+
+        for (arg, encoded) in [("in:title", "in%3Atitle"), ("*.pdf", "%2A.pdf")] {
+            let (mode, rows) = run(&w, &format!("gh {arg}"));
+            assert_eq!(mode, Mode::All);
+            assert_eq!(names(&rows), vec![arg, "gh.pdf"]);
+            assert_eq!(rows[0].action, Action::OpenUrl(format!("https://example.com/search?q={encoded}")));
+        }
+    }
+
+    #[test]
+    fn explicit_file_expression_takes_precedence_over_a_command() {
+        let mut w = world();
+        let cfg = Config::parse("[[command]]\nname = 'report'\nurl = 'https://example.com/search?q={q}'\n").unwrap();
+        w.cfg.command.extend(cfg.command);
+        w.cmds = Catalog::new(command_items(&w.cfg));
+        w.table.push(Some(0), "annual_report.pdf", false, 0);
+        w.table.push(Some(0), "annual_report.docx", false, 0);
+
+        let (_, rows) = run(&w, "report & ext:pdf");
+        assert_eq!(names(&rows), vec!["annual_report.pdf"]);
+        assert_eq!(rows[0].tag, "file");
+
+        let (_, rows) = run(&w, "report ext:pdf");
+        assert_eq!(names(&rows), vec!["ext:pdf", "annual_report.pdf"]);
+        assert_eq!(rows[0].action, Action::OpenUrl("https://example.com/search?q=ext%3Apdf".into()));
+    }
+
+    #[test]
     fn settings_and_system() {
         let w = world();
         let (_, rows) = run(&w, "display");
@@ -1046,7 +1086,8 @@ mod tests {
         let (_, rows) = run(&w, "*.xlsx & !in:Documents");
         assert!(rows.is_empty());
         let (_, rows) = run(&w, "budget ext:xlsx");
-        assert!(rows.iter().all(|r| r.tag != "file"));
+        assert_eq!(names(&rows), vec!["2024_budget.xlsx"]);
+        assert_eq!(rows[0].tag, "file");
         let (_, rows) = run(&w, "g budget & ext:xlsx");
         assert_eq!(rows[0].action, Action::Google("budget & ext:xlsx".into()));
         // 値のない`ext:`は普通の語

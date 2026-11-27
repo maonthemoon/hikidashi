@@ -8,26 +8,32 @@ use crate::search::{match_name, Prepared};
 pub struct FileQuery<'a> {
     input: &'a str,
     expression: Option<Expr<Atom<'a>>>,
+    implicit_and_only: bool,
 }
 
 impl<'a> FileQuery<'a> {
     pub fn parse(input: &'a str) -> Self {
         if !input.bytes().any(|b| matches!(b, b':' | b'*' | b'"' | b'!' | b'&' | b'|' | b'(' | b')')) {
-            return Self { input, expression: None };
+            return Self { input, expression: None, implicit_and_only: false };
         }
-        let expression = tokenize(input).and_then(|tokens| {
+        let (expression, implicit_and_only) = tokenize(input).and_then(|tokens| {
             let multiple = tokens.len() > 1;
+            let implicit_and_only = multiple && tokens.iter().all(|t| matches!(t, Token::Word(_) | Token::ImplicitAnd));
             let mut parser = Parser { tokens: tokens.into_iter().peekable() };
             let expr = parser.or(0)?;
             let structured = multiple || !matches!(expr, Expr::Term(Atom::Name(_)));
-            (structured && parser.tokens.next().is_none()).then_some(expr)
-        });
-        Self { input, expression }
+            (structured && parser.tokens.next().is_none()).then_some((expr, implicit_and_only))
+        }).unzip();
+        Self { input, expression, implicit_and_only: implicit_and_only.unwrap_or(false) }
     }
 
     /// フィルターや式は索引だけにかける. 単なる文字列はアプリなどの検索にも使う.
     pub fn is_structured(&self) -> bool {
         self.expression.is_some()
+    }
+
+    pub(crate) fn is_implicit_and_only(&self) -> bool {
+        self.implicit_and_only
     }
 
     pub fn prepare(self, dict: Option<&Dict>, now: u32) -> FileSearch {
@@ -114,6 +120,10 @@ fn quoted(s: &str) -> Option<&str> {
 }
 
 impl<'a> Atom<'a> {
+    fn is_filter(&self) -> bool {
+        !matches!(self, Self::Name(_) | Self::QuotedName(_))
+    }
+
     fn parse(text: &'a str) -> Self {
         if let Some(value) = quoted(text) {
             return Self::QuotedName(value);
@@ -189,18 +199,79 @@ fn parse_age(value: &str) -> Option<u64> {
     Some(n.saturating_mul(hours * 3600))
 }
 
-#[derive(Clone, Copy)]
 enum Token<'a> {
-    Word(&'a str),
+    Word(Atom<'a>),
     Not,
     And,
+    ImplicitAnd,
     Or,
     Open,
     Close,
 }
 
 fn tokenize(input: &str) -> Option<Vec<Token<'_>>> {
-    let mut tokens = Vec::new();
+    if input.contains([':', '*']) {
+        let tokens = tokenize_words(input, true)?;
+        if tokens.iter().any(|t| matches!(t, Token::Word(atom) if atom.is_filter())) {
+            return Some(tokens);
+        }
+    }
+    tokenize_words(input, false)
+}
+
+struct Tokenizer<'a> {
+    input: &'a str,
+    tokens: Vec<Token<'a>>,
+    split_words: bool,
+    last_start: usize,
+    last_end: usize,
+}
+
+impl<'a> Tokenizer<'a> {
+    fn can_open_group(&self, start: usize) -> bool {
+        if !self.split_words {
+            return true;
+        }
+        match self.tokens.last() {
+            None | Some(Token::And | Token::ImplicitAnd | Token::Or | Token::Not | Token::Open) => true,
+            Some(Token::Word(atom)) => self.last_end < start && atom.is_filter(),
+            Some(Token::Close) => self.last_end < start,
+        }
+    }
+
+    fn word(&mut self, start: usize, end: usize) {
+        let raw = &self.input[start..end];
+        let trimmed_start = raw.trim_start();
+        let text = trimmed_start.trim_end();
+        if !text.is_empty() {
+            let start = start + (raw.len() - trimmed_start.len());
+            self.push(Token::Word(Atom::parse(text)), start, start + text.len());
+        }
+    }
+
+    fn push(&mut self, token: Token<'a>, start: usize, end: usize) {
+        if self.split_words && self.last_end < start {
+            match (self.tokens.last_mut(), &token) {
+                (Some(Token::Word(Atom::Name(text))), Token::Word(Atom::Name(_))) => {
+                    // 元の空白ごとまとめ, 1つの名前として検索する.
+                    *text = &self.input[self.last_start..end];
+                    self.last_end = end;
+                    return;
+                }
+                (Some(Token::Word(_) | Token::Close), Token::Word(_) | Token::Not | Token::Open) => {
+                    self.tokens.push(Token::ImplicitAnd);
+                }
+                _ => {}
+            }
+        }
+        self.tokens.push(token);
+        self.last_start = start;
+        self.last_end = end;
+    }
+}
+
+fn tokenize_words(input: &str, split_words: bool) -> Option<Vec<Token<'_>>> {
+    let mut lexer = Tokenizer { input, tokens: Vec::new(), split_words, last_start: 0, last_end: 0 };
     let mut start = 0;
     let mut quoted = false;
     let mut name_parens = 0;
@@ -212,7 +283,7 @@ fn tokenize(input: &str) -> Option<Vec<Token<'_>>> {
             continue;
         }
         let token = match c {
-            '(' if input[start..i].trim().is_empty() => Token::Open,
+            '(' if input[start..i].trim().is_empty() && lexer.can_open_group(i) => Some(Token::Open),
             '(' => {
                 name_parens += 1;
                 continue;
@@ -221,28 +292,25 @@ fn tokenize(input: &str) -> Option<Vec<Token<'_>>> {
                 name_parens -= 1;
                 continue;
             }
-            ')' => Token::Close,
-            '!' if input[start..i].trim().is_empty() => Token::Not,
-            '&' if separated(input, i) => Token::And,
-            '|' if separated(input, i) => Token::Or,
+            ')' => Some(Token::Close),
+            '!' if input[start..i].trim().is_empty() => Some(Token::Not),
+            '&' if separated(input, i) => Some(Token::And),
+            '|' if separated(input, i) => Some(Token::Or),
+            c if split_words && name_parens == 0 && c.is_whitespace() => None,
             _ => continue,
         };
-        let word = input[start..i].trim();
-        if !word.is_empty() {
-            tokens.push(Token::Word(word));
+        lexer.word(start, i);
+        start = i + c.len_utf8();
+        if let Some(token) = token {
+            lexer.push(token, i, start);
         }
-        tokens.push(token);
-        start = i + 1;
         name_parens = 0;
     }
     if quoted {
         return None;
     }
-    let word = input[start..].trim();
-    if !word.is_empty() {
-        tokens.push(Token::Word(word));
-    }
-    Some(tokens)
+    lexer.word(start, input.len());
+    Some(lexer.tokens)
 }
 
 /// `R&D`のような名前をそのまま探せるよう, 演算子の前後を区切りで見分ける.
@@ -272,11 +340,11 @@ impl<'a> Parser<'a> {
 
     fn and(&mut self, depth: usize) -> Option<Expr<Atom<'a>>> {
         let first = self.unary(depth)?;
-        if !matches!(self.tokens.peek(), Some(Token::And)) {
+        if !matches!(self.tokens.peek(), Some(Token::And | Token::ImplicitAnd)) {
             return Some(first);
         }
         let mut exprs = vec![first];
-        while matches!(self.tokens.peek(), Some(Token::And)) {
+        while matches!(self.tokens.peek(), Some(Token::And | Token::ImplicitAnd)) {
             self.tokens.next();
             exprs.push(self.unary(depth)?);
         }
@@ -288,7 +356,7 @@ impl<'a> Parser<'a> {
             return None;
         }
         match self.tokens.next()? {
-            Token::Word(text) => Some(Expr::Term(Atom::parse(text))),
+            Token::Word(atom) => Some(Expr::Term(atom)),
             Token::Not => Some(Expr::Not(Box::new(self.unary(depth + 1)?))),
             Token::Open => {
                 let expr = self.or(depth + 1)?;

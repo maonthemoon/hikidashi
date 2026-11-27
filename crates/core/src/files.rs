@@ -478,13 +478,16 @@ mod tests {
 
     #[test]
     fn only_complete_search_expressions_are_structured() {
-        for q in ["*.pdf", "EXT:PDF,.docx", "modified:12H", "modified:2w", "(見積)", "in:\"Project Alpha\"", "!in:private"] {
+        for q in [
+            "*.pdf", "EXT:PDF,.docx", "modified:12H", "modified:2w", "(見積)", "in:\"Project Alpha\"", "!in:private",
+            "kind:pdf 見積", "見積 kind:pdf", "*.pdf in:案件", "kind:pdf !draft", "kind:pdf ",
+        ] {
             assert!(FileQuery::parse(q).is_structured(), "{q}");
         }
         for q in [
             "ext:", "in:", "modified:", "modified:abc", "modified:7", "ext:,", "report ext:",
-            "*.pdf in:案件", "見積 2026", "R&D", "report(2026)", "2 ** 3", "*", "a &", "a |",
-            "()", "(a | b", "a )", "in:\"Project Alpha",
+            "見積 2026", "R&D", "report(2026)", "2 ** 3", "*", "a &", "a |",
+            "()", "(a | b", "a )", "in:\"Project Alpha", "kind:foo 見積", "kind:pdf 見積 &", "kind:pdf (見積",
         ] {
             assert!(!FileQuery::parse(q).is_structured(), "{q}");
         }
@@ -571,9 +574,76 @@ mod tests {
         assert_eq!(names(&t, "ext:pdf & !modified:7d & in:案件"), vec!["notes.pdf"]);
         assert_eq!(names(&t, "pdf & report"), vec!["report.pdf"]);
         assert!(names(&t, "pdf report").is_empty());
-        assert!(names(&t, "*.pdf in:案件").is_empty());
+        assert_eq!(names(&t, "*.pdf in:案件"), vec!["見積.pdf", "notes.pdf"]);
         // 名前で合ったものを, 条件だけに合ったものより上に出す. 条件だけのものは新しい順
         assert_eq!(names(&t, "memo | ext:gz | ext:pdf & in:reports"), vec!["memo.docx", "backup.tar.gz", "見積.pdf"]);
+    }
+
+    #[test]
+    fn spaces_join_conditions_with_and() {
+        let mut t = filter_table();
+        t.push(Some(0), "見積.xlsx", false, NOW);
+        t.push(Some(0), "draft.pdf", false, NOW);
+        let mut pdf_estimates = names(&t, "kind:pdf 見積");
+        pdf_estimates.sort();
+        assert_eq!(pdf_estimates, vec!["見積.PDF", "見積.pdf"]);
+
+        for (implicit, explicit) in [
+            ("見積 kind:pdf", "kind:pdf & 見積"),
+            ("in:案件 mem", "in:案件 & mem"),
+            ("kind:pdf !draft", "kind:pdf & !draft"),
+            ("kind:pdf 見積 | kind:excel 見積", "(kind:pdf & 見積) | (kind:excel & 見積)"),
+            ("(kind:pdf 見積 | kind:excel 見積) !in:private", "(kind:pdf & 見積 | kind:excel & 見積) & !in:private"),
+            ("kind:pdf (見積 | memo)", "kind:pdf & (見積 | memo)"),
+            ("memo | ext:gz | ext:pdf in:reports", "memo | ext:gz | ext:pdf & in:reports"),
+            ("kind:pdf ", "kind:pdf"),
+        ] {
+            assert_eq!(names(&t, implicit), names(&t, explicit), "{implicit}");
+        }
+    }
+
+    #[test]
+    fn consecutive_names_use_one_fuzzy_query_with_a_condition() {
+        let mut t = filter_table();
+        t.push(Some(0), "見積2026.pdf", false, NOW);
+        t.push(Some(0), "2026見積.pdf", false, NOW);
+        t.push(Some(0), "見積2026.docx", false, NOW);
+        let fuzzy_pdfs: Vec<_> = names(&t, "見積 2026").into_iter().filter(|n| n.ends_with(".pdf")).collect();
+        assert_eq!(fuzzy_pdfs, vec!["見積2026.pdf"]);
+        assert_eq!(names(&t, "kind:pdf 見積 2026"), fuzzy_pdfs);
+    }
+
+    #[test]
+    fn parentheses_after_a_name_stay_in_the_fuzzy_query() {
+        let mut t = filter_table();
+        t.push(Some(0), "見積 (2026).pdf", false, NOW);
+        t.push(Some(0), "見積 (2026).pdf.docx", false, NOW);
+        t.push(Some(0), "見積 2026.pdf", false, NOW);
+
+        for q in ["kind:pdf & 見積 (2026).pdf", "kind:pdf 見積 (2026).pdf"] {
+            assert!(FileQuery::parse(q).is_structured(), "{q}");
+            assert_eq!(names(&t, q), vec!["見積 (2026).pdf"], "{q}");
+        }
+    }
+
+    #[test]
+    fn parentheses_after_a_condition_group_an_expression() {
+        let mut t = filter_table();
+        t.push(Some(0), "2026.pdf", false, NOW);
+        t.push(Some(0), "2026.docx", false, NOW);
+        let mut actual = names(&t, "kind:pdf (見積 | 2026)");
+        actual.sort();
+        assert_eq!(actual, vec!["2026.pdf", "見積.PDF", "見積.pdf"]);
+    }
+
+    #[test]
+    fn spaces_join_parenthesized_expressions_with_and() {
+        let mut t = filter_table();
+        t.push(Some(0), "invoice.pdf", false, NOW);
+        t.push(Some(0), "invoice.docx", false, NOW);
+        let mut actual = names(&t, "(kind:pdf) (report | invoice)");
+        actual.sort();
+        assert_eq!(actual, vec!["invoice.pdf", "report.pdf"]);
     }
 
     #[test]
@@ -583,6 +653,7 @@ mod tests {
         let id = t.push(Some(project), "会議 Plan & Review.pdf", false, NOW);
         t.push(Some(project), "Plans & Review.pdf", false, NOW);
         assert_eq!(names(&t, "in:\"project alpha\" & \"Plan & Review\""), vec!["会議 Plan & Review.pdf"]);
+        assert_eq!(names(&t, "in:\"project alpha\" \"Plan & Review\""), vec!["会議 Plan & Review.pdf"]);
         let query = FileQuery::parse("\"Plan & Review\" & ext:pdf").prepare(None, NOW);
         let hits = t.search_query(&query, 50, &AtomicBool::new(false), false);
         assert_eq!(hits[0].id, id);

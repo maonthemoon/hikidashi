@@ -363,6 +363,9 @@ mod tests {
         assert_eq!(syntax.len(), 22);
         for row in syntax {
             let Action::Fill(fill) = row.action else { panic!("{}: {:?}", row.name, row.action) };
+            if row.name.starts_with("kind:") {
+                assert!(FileQuery::parse(&format!("{fill}x")).is_structured(), "{fill}x");
+            }
             match row.name.as_str() {
                 "in:資料" => assert_eq!(fill, "in:"),
                 "%APPDATA%" => assert_eq!(fill, "%APPDATA%\\"),
