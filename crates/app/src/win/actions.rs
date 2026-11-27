@@ -4,19 +4,21 @@ use super::storage::{env, expand};
 use super::util::{wide, WStr};
 use hikidashi_core::builtin::SysAction;
 use hikidashi_core::config::{Config, OpenWith};
+use hikidashi_core::manual;
 use hikidashi_core::openwith::{self, Target, ToolKind};
 use hikidashi_core::router::url_encode;
-use std::os::windows::process::CommandExt;
+use std::ffi::OsString;
+use std::os::windows::{ffi::OsStringExt, process::CommandExt};
 use std::path::{Path, PathBuf};
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, GlobalFree, HANDLE, HWND, LPARAM, WPARAM};
+use windows::core::{w, PCWSTR, PWSTR};
+use windows::Win32::Foundation::{CloseHandle, GlobalFree, HANDLE, HWND, LPARAM, WPARAM, S_FALSE, S_OK};
 use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, SetClipboardData};
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::CF_UNICODETEXT;
 use windows::Win32::System::Power::SetSuspendState;
 use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-use windows::Win32::UI::Shell::{SHEmptyRecycleBinW, ShellExecuteW, SHERB_NOCONFIRMATION, SHERB_NOSOUND};
+use windows::Win32::UI::Shell::{AssocQueryStringW, SHEmptyRecycleBinW, ShellExecuteW, ASSOCF_IS_PROTOCOL, ASSOCF_NOTRUNCATE, ASSOCSTR_EXECUTABLE, SHERB_NOCONFIRMATION, SHERB_NOSOUND};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL, VK_MENU, VK_BACK, VK_END, VK_RETURN, VK_SHIFT, VK_V,
 };
@@ -47,6 +49,34 @@ pub fn shell(verb: &str, file: &str, params: &str, dir: &str, show_hidden: bool)
     } else {
         Err(format!("Could not open {file} (error {})", r.0 as isize))
     }
+}
+
+/// マニュアルの節を開く. `ShellExecuteW`はfile URLの`#`以降を落とすことがあるので, URLをブラウザーに直接渡す.
+pub fn open_manual(path: &Path, id: Option<&str>) -> Result<(), String> {
+    if let Some(url) = id.and_then(|id| manual::section_url(path, id)) {
+        if default_browser_exe().is_some_and(|exe| std::process::Command::new(exe).arg(url).spawn().is_ok()) {
+            return Ok(());
+        }
+    }
+    shell("open", &path.to_string_lossy(), "", "", false)
+}
+
+/// Windowsで`https`の`open`に関連付けられた実行ファイルを調べる.
+fn default_browser_exe() -> Option<OsString> {
+    let flags = ASSOCF_IS_PROTOCOL | ASSOCF_NOTRUNCATE;
+    let mut len = 0;
+    let result = unsafe { AssocQueryStringW(flags, ASSOCSTR_EXECUTABLE, w!("https"), w!("open"), None, &mut len) };
+    if result != S_FALSE || len <= 1 {
+        return None;
+    }
+    let mut buf = vec![0u16; len as usize];
+    let result = unsafe { AssocQueryStringW(flags, ASSOCSTR_EXECUTABLE, w!("https"), w!("open"), Some(PWSTR(buf.as_mut_ptr())), &mut len) };
+    if result != S_OK {
+        return None;
+    }
+    let end = buf.iter().position(|&c| c == 0)?;
+    let exe = OsString::from_wide(&buf[..end]);
+    Path::new(&exe).is_absolute().then_some(exe)
 }
 
 /// 既定のアプリで開く(フォルダーはExplorer. D7). `is_dir`は一覧から分かっていれば渡す

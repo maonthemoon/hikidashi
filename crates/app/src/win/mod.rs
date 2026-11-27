@@ -419,7 +419,16 @@ impl App {
         f(&ctx)
     }
 
-    fn build_rows(&self, input: &str, hits: &[(usize, hikidashi_core::files::FileHit)], tables: &[Arc<FileTable>]) -> (Mode, Vec<Row>) {
+    fn build_rows(&mut self, input: &str, hits: &[(usize, hikidashi_core::files::FileHit)], tables: &[Arc<FileTable>], help_words: Option<&str>) -> Vec<Row> {
+        if let Some(words) = help_words {
+            let mut plugins = self.ext.help_rows(&self.ext_taken());
+            for s in &self.scripts {
+                if let Some(k) = s.keyword.as_deref().filter(|k| !k.is_empty()) {
+                    plugins.push(help::help_row(k, &s.title, &s.stem, "script"));
+                }
+            }
+            return help::rows(&self.config, &self.system, plugins, words);
+        }
         let (_, text) = router::parse(input, &self.config.prefixes());
         let prep = Prepared::new(text.trim(), self.dict.get());
         let (mode, mut rows) = self.with_ctx(tables, |ctx| router::build(input, ctx, &prep, hits));
@@ -429,7 +438,7 @@ impl App {
                 rows.insert(0, r);
             }
         }
-        (mode, rows)
+        rows
     }
 
     /// 入力が変わったら一覧を作り直す. ファイルの検索は別スレッドに頼み, 速いものを先に出す(J1)
@@ -453,7 +462,8 @@ impl App {
             return;
         }
         // ヘルプ, 履歴, 最近のもの, スクリプトの一覧は, ファイルの検索を使わず, すぐ出す
-        if let Some(rows) = self.special_rows(&text) {
+        let help_rows = help::filter_words(self.mode, &text).map(|words| self.build_rows(&input, &[], &[], Some(words)));
+        if let Some(rows) = help_rows.or_else(|| self.special_rows(&text)) {
             self.searcher.cancel();
             self.pending = None;
             self.set_rows(rows, vec![]);
@@ -464,7 +474,7 @@ impl App {
             self.processes = Catalog::new(winlist::process_items(&wins));
             self.processes_fresh = true;
         }
-        let (_, quick) = self.build_rows(&input, &[], &[]);
+        let quick = self.build_rows(&input, &[], &[], None);
         let qlen = text.trim().chars().count();
         let filtered = hikidashi_core::files::FileQuery::parse(text.trim()).is_structured();
         let want_files = match self.mode {
@@ -500,15 +510,6 @@ impl App {
 
     /// ふつうの検索ではない一覧. なければNone
     fn special_rows(&mut self, text: &str) -> Option<Vec<Row>> {
-        if let Some(words) = help::filter_words(self.mode, text) {
-            let mut plugins = self.ext.help_rows(&self.ext_taken());
-            for s in &self.scripts {
-                if let Some(k) = s.keyword.as_deref().filter(|k| !k.is_empty()) {
-                    plugins.push(help::help_row(k, &s.title, &s.stem, "script"));
-                }
-            }
-            return Some(help::rows(&self.config, &self.system, plugins, words));
-        }
         if self.mode == Mode::Clipboard {
             return Some(clip_rows(&self.clips, text));
         }
@@ -592,7 +593,7 @@ impl App {
         self.stats.last_search_ms = done.elapsed_ms;
         self.pending = None;
         let input = self.input();
-        let (_, rows) = self.build_rows(&input, &done.hits, &done.tables);
+        let rows = self.build_rows(&input, &done.hits, &done.tables, None);
         // 先に出した一覧で選びを動かしていなければ1行目を選ぶ
         self.set_rows(rows, done.tables);
     }
@@ -1283,10 +1284,12 @@ impl App {
             // 入力欄の終わりで→: 操作のメニュー. ←で戻る(K52. Flow Launcherと同じ)
             v if v == VK_RIGHT.0 && !ctrl && !shift && !alt => {
                 if self.menu.is_none() {
-                    if !self.caret_at_end() {
-                        return false;
+                    let action = self.rows.get(self.sel).map(|r| &r.action);
+                    match router::right_arrow(self.caret_at_end(), action) {
+                        router::RightArrow::MoveCaret => return false,
+                        router::RightArrow::OpenMenu => self.open_menu(),
+                        router::RightArrow::Ignore => {}
                     }
-                    self.open_menu();
                 }
                 true
             }
@@ -2112,6 +2115,8 @@ impl App {
         let mut mode = self.mode;
         let t = if let Action::Fill(t) = &row.action {
             Some(t.clone())
+        } else if matches!(row.action, Action::Manual(_)) {
+            return;
         } else if self.ext.view {
             self.ext.completes.get(self.sel).cloned().flatten()
         } else if matches!(self.mode, Mode::Calc | Mode::Clipboard | Mode::Google | Mode::Snapshot) || self.script_view {
@@ -2261,9 +2266,12 @@ impl App {
                 self.start_script(*script, arg.clone());
                 return;
             }
+            Action::Manual(id) => {
+                self.open_manual(Some(id));
+                return;
+            }
             // `Running…`などの, 何もしない行
             Action::Copy(s) if s.is_empty() => return,
-            Action::Manual(_) => return,
             _ => {}
         }
         let r: Result<(), String> = match &row.action {
@@ -2727,13 +2735,15 @@ impl App {
     }
 
     /// `docs\manual.html`を既定のブラウザーで開く. Webのマニュアルは見にいかない(K46)
-    fn open_manual(&mut self) {
+    fn open_manual(&mut self, id: Option<&str>) {
         let Some(path) = storage::manual_path() else {
             system::notice("The manual was not found. The docs folder (docs\\manual.html) that comes with Hikidashi.exe is needed. If you moved only the exe, move the docs folder next to it.");
             return;
         };
-        if let Err(e) = actions::shell("open", &path.to_string_lossy(), "", "", false) {
+        if let Err(e) = actions::open_manual(&path, id) {
             system::notice(&format!("Cannot open the manual: {e}"));
+        } else if id.is_some() {
+            self.finish(None);
         }
     }
 
@@ -2768,7 +2778,7 @@ impl App {
                     self.shared.rebuild.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 5 => self.open_settings(),
-                7 => self.open_manual(),
+                7 => self.open_manual(None),
                 6 => {
                     self.shared.quit.store(true, std::sync::atomic::Ordering::Relaxed);
                     system::tray_remove(self.hwnd);
@@ -3011,14 +3021,12 @@ impl App {
             .iter()
             .enumerate()
             .filter_map(|(i, r)| {
-                let copy = if ext {
-                    self.ext.copies.get(i).cloned().unwrap_or_default()
-                } else {
-                    match &r.action {
-                        Action::Copy(s) if !s.is_empty() => s.clone(),
-                        Action::ScriptLine(s) => s.clone(),
-                        _ => return None,
-                    }
+                let copy = match &r.action {
+                    Action::Manual(_) => return None,
+                    _ if ext => self.ext.copies.get(i).cloned().unwrap_or_default(),
+                    Action::Copy(s) if !s.is_empty() => s.clone(),
+                    Action::ScriptLine(s) => s.clone(),
+                    _ => return None,
                 };
                 Some(SnapRow { name: r.name.clone(), sub: r.sub.clone(), copy })
             })

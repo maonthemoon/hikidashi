@@ -565,6 +565,22 @@ pub fn completion(input: &str, row: &Row, is_dir: bool) -> Option<String> {
     (text != raw).then_some(text)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum RightArrow {
+    MoveCaret,
+    OpenMenu,
+    Ignore,
+}
+
+/// `→`は入力欄の終わりにいるときだけ, 選んだ行の操作に使う.
+pub fn right_arrow(caret_at_end: bool, action: Option<&Action>) -> RightArrow {
+    match (caret_at_end, action) {
+        (false, _) => RightArrow::MoveCaret,
+        (true, Some(Action::Manual(_))) => RightArrow::Ignore,
+        (true, _) => RightArrow::OpenMenu,
+    }
+}
+
 /// 一覧の行を作る. `file_hits`はファイルの検索の結果(まだなら空. 遅い検索は見つかった分から足す. J1).
 pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileHit)]) -> (Mode, Vec<Row>) {
     let prefixes = ctx.config.prefixes();
@@ -675,6 +691,15 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn right_arrow_on_manual_row_moves_caret_until_end() {
+        let manual = Action::Manual("keys".into());
+        assert_eq!(right_arrow(false, Some(&manual)), RightArrow::MoveCaret);
+        assert_eq!(right_arrow(true, Some(&manual)), RightArrow::Ignore);
+        let copy = Action::Copy("result".into());
+        assert_eq!(right_arrow(true, Some(&copy)), RightArrow::OpenMenu);
+    }
 
     #[test]
     fn help_lists_keywords_and_commands() {
