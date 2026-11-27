@@ -1360,11 +1360,12 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
             </tbody>
           </table>
         </div>
-        <p><code>?</code>だけを打つと, 使えるキーワード(自作のコマンド, 拡張, スクリプトを含む)の一覧が出ます. 選んで<kbd>Enter</kbd>か<kbd>Tab</kbd>を押すと, そのキーワードに入ります.</p>
+        <p><code>?</code>だけを打つと, 使えるキーワード(自作のコマンド, 拡張, スクリプトを含む)の一覧が出ます. 選んで<kbd>Enter</kbd>か<kbd>Tab</kbd>を押すと, そのキーワードに入ります. キーワードのあとには, Windowsの操作, 計算の例, 検索の書き方, キー操作も並びます. 右端に種類(<code>keyword</code>, <code>system</code>, <code>calc</code>, <code>syntax</code>, <code>key</code>)が出ます.</p>
+        <p><code>? rf</code>, <code>? 計算</code>, <code>? kind</code>, <code>? ロック</code>のように, <code>?</code>と空白のあとに語を打つと絞れます. 計算の例と検索の書き方は<kbd>Enter</kbd>で入力欄に入り, そのまま数や名前を打ち直せます. キー操作の行は<kbd>Enter</kbd>でこのマニュアルのその説明を開きます. Windowsの操作は<kbd>Enter</kbd>でそのまま実行します.</p>
         <p>入力欄が空のときに<kbd>Backspace</kbd>を押すと, 印が消えて全部を探す状態に戻ります. プロセス, WSL, Boxは, 絞ったときだけ出ます. BoxとWSLはファイルが多く, ふだんの検索に混ぜると一覧が埋まるためです. 文字は<a href="#settings">設定</a>の<code>Keywords</code>で変えられます.</p>
 
         <h3 id="filter">ファイルを条件で絞る</h3>
-        <p>条件だけで探すと, 新しい順に並びます. <code>kaigi | *.pptx</code>のように名前と条件を<code>|</code>でまぜたときは, 名前で合ったものが先に並びます. 名前と条件を組み合わせるときは, <code>見積 &amp; *.pdf</code>のように<code>&amp;</code>でつなぎます.</p>
+        <p>条件だけで探すと, 新しい順に並びます. <code>kaigi | *.pptx</code>のように名前と条件を<code>|</code>でまぜたときは, 名前で合ったものが先に並びます. 名前と条件は, <code>kind:pdf 見積</code>のように空白でつなぐと, 両方に合うものだけが出ます(<code>&amp;</code>でつないだのと同じ). 条件のない<code>見積 2026</code>は, ふつうの検索と同じく全体で1つの語として探します.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>打つもの</th><th>絞り方</th></tr></thead>
@@ -1374,13 +1375,14 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
               <tr><td><code>kind:excel</code>, <code>kind:word,pdf</code></td><td>種類. <code>excel</code>(<code>.xlsx</code>, <code>.xls</code>, <code>.xlsm</code>, <code>.csv</code>など), <code>word</code>, <code>ppt</code>, <code>pdf</code>, <code>image</code>, <code>video</code>, <code>audio</code>, <code>zip</code>, <code>text</code>, <code>code</code>, <code>folder</code>(フォルダーだけ)</td></tr>
               <tr><td><code>in:案件</code></td><td>名前にその語を含むフォルダーの中</td></tr>
               <tr><td><code>modified:7d</code></td><td>7日以内に更新したもの(<code>h</code>は時間, <code>d</code>は日, <code>w</code>は週)</td></tr>
-              <tr><td><code>*.pdf &amp; in:案件</code></td><td>両方の条件に合うもの</td></tr>
+              <tr><td><code>*.pdf &amp; in:案件</code>, <code>*.pdf in:案件</code></td><td>両方の条件に合うもの</td></tr>
+              <tr><td><code>kind:pdf 見積</code></td><td>名前に見積を含むPDF</td></tr>
               <tr><td><code>*.pdf | *.pptx</code></td><td>どちらかの条件に合うもの</td></tr>
               <tr><td><code>*.pdf &amp; !in:アーカイブ</code></td><td>アーカイブフォルダー内を除いたPDF</td></tr>
             </tbody>
           </table>
         </div>
-        <p><code>(*.pdf | *.pptx) &amp; modified:7d</code>のように, <code>&amp;</code>と<code>|</code>の前後を空けて打ちます. 括弧で条件をまとめられます. 優先順位は<code>!</code>, <code>&amp;</code>, <code>|</code>の順です. 空白を含む名前や値は<code>"Project Alpha"</code>や<code>in:"Project Alpha"</code>のように引用符で囲みます.</p>
+        <p><code>(*.pdf | *.pptx) &amp; modified:7d</code>のように, <code>&amp;</code>と<code>|</code>の前後を空けて打ちます. 括弧で条件をまとめられます. 優先順位は<code>!</code>, <code>&amp;</code>, <code>|</code>の順です. 名前のすぐ後ろの括弧は名前の一部になります(<code>見積 (2026).pdf</code>). 名前のあとに括弧の条件を書くときは<code>report &amp; (kind:pdf | kind:word)</code>のように<code>&amp;</code>を入れます. 空白を含む名前や値は<code>"Project Alpha"</code>や<code>in:"Project Alpha"</code>のように引用符で囲みます.</p>
         <p><code>modified:</code>の対象は, 検索用の一覧に更新日時がある項目です.</p>
         <h3 id="recent">最近使ったもの</h3>
         <p><a href="#settings">設定</a>の<code>Search</code>で<code>Show recent items</code>をオンにすると, 入力欄が空のときに, 最近開いたものが10件まで出ます. 初めはオフです.</p>

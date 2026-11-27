@@ -98,9 +98,9 @@ git clone https://github.com/maonthemoon/hikidashi.git
 | `w ` | WSLのホーム | `= ` | 計算(結果は`Ctrl+S`で保存) |
 | `snap ` | `Ctrl+S`で保存した結果 | `cal ` | Outlookの予定 |
 
-`?`だけを打つと, 使えるキーワードの一覧が出ます.
+`?`だけを打つと, 使えるキーワード, Windowsの操作, 計算の例, 検索の書き方, キー操作の一覧が出ます. `? rf`のように語を足すと絞れます.
 
-ファイルは, `*.pdf`, `ext:docx,xlsx`, `kind:excel`, `in:案件`, `modified:7d`でも絞れます. 複数の条件をすべて満たすものは`&`でつなぎます. たとえば`*.pdf & in:案件`は案件フォルダー内のPDF, `*.pdf | *.pptx`はPDFまたはPowerPointを探します.
+ファイルは, `*.pdf`, `ext:docx,xlsx`, `kind:excel`, `in:案件`, `modified:7d`でも絞れます. 複数の条件をすべて満たすものは`&`か空白でつなぎます. たとえば`*.pdf & in:案件`(`*.pdf in:案件`)は案件フォルダー内のPDF, `kind:pdf 見積`は名前に見積を含むPDF, `*.pdf | *.pptx`はPDFまたはPowerPointを探します.
 
 キーと先頭の文字は, トレイの`Settings`で変えられます.
 
