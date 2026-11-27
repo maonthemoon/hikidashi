@@ -1,15 +1,14 @@
-//! ファイルの操作メニュー(→)の, Windowsのシェルに頼る3つ: プログラムから開く, 共有, Outlookの新しいメールに添付.
+//! ファイルの操作メニュー(→)の, Windowsのシェルに頼る2つ: プログラムから開く, Outlookの新しいメールに添付(共有はK68で消した).
 
 use super::util::{from_wide, wide, WStr};
-use windows::core::{PCSTR, PCWSTR, PSTR, PWSTR};
+use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CoTaskMemFree, IBindCtx, IDataObject};
 use windows::Win32::System::Registry::{RegGetValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6432KEY};
 use windows::Win32::UI::Shell::{
-    AssocQueryStringW, IAssocHandler, IContextMenu, IShellItem, SHAssocEnumHandlers, SHCreateItemFromParsingName, SHOpenWithDialog, ASSOCF_NONE, ASSOCSTR_FRIENDLYAPPNAME,
-    ASSOC_FILTER_RECOMMENDED, BHID_DataObject, BHID_SFUIObject, CMF_NORMAL, CMINVOKECOMMANDINFO, GCS_VERBW, OAIF_EXEC, OPENASINFO,
+    AssocQueryStringW, IAssocHandler, IShellItem, SHAssocEnumHandlers, SHCreateItemFromParsingName, SHOpenWithDialog, ASSOCF_NONE, ASSOCSTR_FRIENDLYAPPNAME,
+    ASSOC_FILTER_RECOMMENDED, BHID_DataObject, OAIF_EXEC, OPENASINFO,
 };
-use windows::Win32::UI::WindowsAndMessaging::{CreatePopupMenu, DestroyMenu, SW_SHOWNORMAL};
 
 /// 「プログラムから開く」の1件
 pub struct Handler {
@@ -88,50 +87,6 @@ pub fn choose_another_app(hwnd: HWND, path: &str) -> Result<(), String> {
     let p = wide(path);
     let info = OPENASINFO { pcszFile: PCWSTR(p.as_ptr()), pcszClass: PCWSTR::null(), oaifInFlags: OAIF_EXEC };
     unsafe { SHOpenWithDialog(Some(hwnd), &info) }.map_err(|e| format!("Could not show the app list: {e}"))
-}
-
-/// Windowsの共有のウィンドウでファイルを共有する.
-/// 方法: ファイルの右クリックのメニュー(`IContextMenu`)から`Windows.ModernShare`の動詞を探して呼ぶ.
-/// 理由: `IDataTransferManagerInterop::ShowShareUIForWindow`と`DataRequested`で`StorageFile`を渡す方法は
-/// WinRTの非同期とイベントの受け口が要り, 呼んだあとにHikidashiのウィンドウが隠れると
-/// 共有の画面を出せなくなるおそれがある. 右クリックのメニューの動詞なら, Explorerと同じ経路で
-/// 共有の画面がHikidashiとは別に出る(Windows 10, 11どちらでも同じ動詞).
-pub fn share(hwnd: HWND, path: &str) -> Result<(), String> {
-    unsafe {
-        let item: IShellItem = SHCreateItemFromParsingName(WStr::new(path).pcwstr(), None::<&IBindCtx>).map_err(|e| format!("Could not open {path}: {e}"))?;
-        let cm: IContextMenu = item.BindToHandler(None::<&IBindCtx>, &BHID_SFUIObject).map_err(|e| format!("Could not read the menu of {path}: {e}"))?;
-        let menu = CreatePopupMenu().map_err(|e| format!("Could not make a menu: {e}"))?;
-        let r = (|| {
-            let hr = cm.QueryContextMenu(menu, 0, 1, 0x7FFF, CMF_NORMAL);
-            if hr.is_err() {
-                return Err(format!("Could not read the menu of {path}: {hr:?}"));
-            }
-            // 戻り値の下位16ビットは, 使ったコマンド番号の最大+1
-            let count = (hr.0 as u32 & 0xFFFF) as usize;
-            for id in 0..count {
-                let mut buf = [0u16; 128];
-                // `GCS_VERBW`のときは, 渡した`PSTR`を実際には`PWSTR`として扱う
-                let p = PSTR(buf.as_mut_ptr() as *mut u8);
-                if cm.GetCommandString(id + 1, GCS_VERBW, None, p, buf.len() as u32).is_err() {
-                    continue;
-                }
-                if !from_wide(&buf).eq_ignore_ascii_case("Windows.ModernShare") {
-                    continue;
-                }
-                let info = CMINVOKECOMMANDINFO {
-                    cbSize: std::mem::size_of::<CMINVOKECOMMANDINFO>() as u32,
-                    hwnd,
-                    lpVerb: PCSTR((id + 1) as *const u8),
-                    nShow: SW_SHOWNORMAL.0,
-                    ..Default::default()
-                };
-                return cm.InvokeCommand(&info).map_err(|e| format!("Could not share {path}: {e}"));
-            }
-            Err("Sharing is not available for this file".to_string())
-        })();
-        let _ = DestroyMenu(menu);
-        r
-    }
 }
 
 /// `App Paths\OUTLOOK.EXE`の既定値(HKLMとHKCU, 32ビット側も)からOutlookのexeを探す

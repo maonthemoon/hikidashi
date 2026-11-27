@@ -114,8 +114,6 @@ pub enum MenuAct {
     AssocInvoke(usize),
     /// Windowsの「別のアプリを選ぶ」画面
     ChooseApp,
-    /// Windowsの共有のウィンドウ
-    Share,
     /// Outlookの新しいメールに添付
     Mail,
     CopyText(String),
@@ -2462,9 +2460,6 @@ impl App {
                 if on("admin") {
                     items.push(mi("Run as administrator", g::ADMIN, MenuAct::Admin));
                 }
-                if on("share") && path.is_some() {
-                    items.push(mi("Share…", g::LINK, MenuAct::Share));
-                }
                 // Outlookが見つからないときは出さない
                 if on("mail") && path.is_some() && shellmenu::outlook_exe().is_some() {
                     items.push(mi("Attach to new mail", g::FILE, MenuAct::Mail));
@@ -2606,10 +2601,6 @@ impl App {
             },
             MenuAct::ChooseApp => match &path {
                 Some(p) => shellmenu::choose_another_app(hwnd, p),
-                None => Ok(()),
-            },
-            MenuAct::Share => match &path {
-                Some(p) => shellmenu::share(hwnd, p),
                 None => Ok(()),
             },
             MenuAct::Mail => match &path {

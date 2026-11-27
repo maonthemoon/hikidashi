@@ -443,6 +443,8 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
             fail(format!("window in front: {front}"), saved);
             return;
         }
+        // 貼ったChatGPTのウィンドウ. 待つ間にほかへ移っても, Enterの前にここへ戻す
+        let gpt = unsafe { GetForegroundWindow() }.0 as isize;
         match fill {
             Fill::Paste => {
                 // `.`を消して, 文字の全体を貼る
@@ -481,8 +483,8 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
         // アップロードが終わるまで待つ
         sleep(attach::wait_ms(images.len(), per));
         if enter {
-            // 待つ間にほかのウィンドウに移っても, 15秒以内にChatGPTに戻ればEnterを押す(確認16のI4)
-            match wait_chatgpt(60) {
+            // 待つ間にほかのウィンドウに移っていたら, ChatGPTを前に戻してからEnterを押す(確認16のI4のB)
+            match bring_chatgpt_back(HWND(gpt as *mut _)) {
                 Ok(()) => {
                     press_enter();
                     super::storage::log("chatgpt: sent Enter");
@@ -496,6 +498,50 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
         done(ImagesDone { saved, ours, failed: false });
     });
     Ok(())
+}
+
+/// 画像を貼ったあと, 前のウィンドウがChatGPTでなければ, 貼ったChatGPTのウィンドウを前に戻す(確認16のI4のB).
+/// 打っている途中の文字がChatGPTに入らないよう, キーボードとマウスが1.5秒止まるのを待ってから戻す(最大30秒).
+/// 戻したあともタイトルにChatGPTがなければ(同じウィンドウでほかのタブに移ったなど), Errで何もしない
+fn bring_chatgpt_back(gpt: HWND) -> Result<(), String> {
+    use windows::Win32::System::SystemInformation::GetTickCount;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    use windows::Win32::UI::WindowsAndMessaging::{BringWindowToTop, GetWindowThreadProcessId, IsWindow};
+    if wait_chatgpt(1).is_ok() {
+        return Ok(());
+    }
+    if !unsafe { IsWindow(Some(gpt)) }.as_bool() {
+        return Err("the ChatGPT window was closed".into());
+    }
+    let idle_ms = || unsafe {
+        let mut li = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+        let _ = GetLastInputInfo(&mut li);
+        GetTickCount().wrapping_sub(li.dwTime)
+    };
+    for _ in 0..120 {
+        if idle_ms() >= 1500 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    unsafe {
+        // 前にいないプロセスはSetForegroundWindowが効かないので, 今前にいるウィンドウの入力に一時的につなぐ
+        let me = GetCurrentThreadId();
+        let other = GetWindowThreadProcessId(GetForegroundWindow(), None);
+        let attached = other != 0 && other != me && AttachThreadInput(me, other, true).as_bool();
+        if IsIconic(gpt).as_bool() {
+            let _ = ShowWindow(gpt, SW_RESTORE);
+        }
+        let _ = SetForegroundWindow(gpt);
+        let _ = BringWindowToTop(gpt);
+        if attached {
+            let _ = AttachThreadInput(me, other, false);
+        }
+    }
+    super::storage::log("chatgpt: brought ChatGPT back to the front");
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    wait_chatgpt(8)
 }
 
 /// 修飾キーと一緒にキーを押して離す(例: Ctrl+V)

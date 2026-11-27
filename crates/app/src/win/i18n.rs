@@ -179,11 +179,9 @@ const PAIRS: &[(&str, &str)] = &[
     ("Run as administrator", "管理者として実行"),
     ("Open in Explorer", "Explorerで開く"),
     ("Open with... (list of apps)", "プログラムから開く(アプリの一覧)"),
-    ("Share...", "共有..."),
     ("Attach to new mail (Outlook)", "新しいメールに添付(Outlook)"),
     ("Open with…", "プログラムから開く…"),
     ("Choose another app…", "別のアプリを選ぶ…"),
-    ("Share…", "共有…"),
     ("Attach to new mail", "新しいメールに添付"),
     ("No apps found for this file", "このファイルに関連付いたアプリがありません"),
     // Web
