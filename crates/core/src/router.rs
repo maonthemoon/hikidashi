@@ -5,6 +5,7 @@ use crate::calc;
 use crate::catalog::{Catalog, Hit, Item, Kind};
 use crate::config::Config;
 use crate::files::{FileHit, FileQuery, FileTable};
+use crate::help;
 use crate::learn::Learn;
 use crate::pathlike::{self, Pasted};
 use crate::search::Prepared;
@@ -105,6 +106,8 @@ pub enum Action {
     Copy(String),
     /// 入力欄に入れる(使い方の例. K49)
     Fill(String),
+    /// マニュアルを指定のidで開く
+    Manual(String),
     ChatGpt(String),
     Google(String),
     /// 自作コマンドのURL
@@ -262,27 +265,30 @@ fn exact_command_bonus(it: &Item, query: &str) -> i32 {
     }
 }
 
-fn item_row(src: Source, index: usize, it: &Item, hit: &Hit, ctx: &Ctx, query: &str) -> Row {
-    let key = it.learn_key();
-    let score = hit.score + kind_weight(it.kind) + exact_command_bonus(it, query) + ctx.learn.boost(query, &key, ctx.now);
-    let sub = match &hit.via {
-        // 別名で一致したときは2行目にその語を出す(なぜ出たかがわかるように)
-        Some(v) if !v.eq_ignore_ascii_case(&it.name) => {
-            if it.sub.is_empty() { v.clone() } else { format!("{} · {}", v, it.sub) }
-        }
-        _ => it.sub.clone(),
-    };
+pub(crate) fn catalog_row(src: Source, index: usize, it: &Item) -> Row {
     Row {
         name: it.name.clone(),
-        sub,
+        sub: it.sub.clone(),
         tag: it.kind.tag(),
-        positions: hit.positions.clone(),
+        positions: vec![],
         action: Action::Item { source: src, index },
-        learn_key: Some(key),
+        learn_key: Some(it.learn_key()),
         warn: it.kind == Kind::Process,
         icon: item_icon(it),
-        score,
+        score: 0,
     }
+}
+
+fn item_row(src: Source, index: usize, it: &Item, hit: &Hit, ctx: &Ctx, query: &str) -> Row {
+    let mut row = catalog_row(src, index, it);
+    let key = row.learn_key.as_deref().unwrap_or_default();
+    row.score = hit.score + kind_weight(it.kind) + exact_command_bonus(it, query) + ctx.learn.boost(query, key, ctx.now);
+    row.positions.clone_from(&hit.positions);
+    // 別名で一致したときは2行目にその語を出す(なぜ出たかがわかるように)
+    if let Some(v) = hit.via.as_ref().filter(|v| !v.eq_ignore_ascii_case(&it.name)) {
+        row.sub = if it.sub.is_empty() { v.clone() } else { format!("{} · {}", v, it.sub) };
+    }
+    row
 }
 
 /// 貼り付けたパスの行(H1, K9: 普通のファイルと同じ見た目)
@@ -476,52 +482,6 @@ pub fn chatgpt_row(text: &str, cfg: &Config) -> Row {
     }
 }
 
-/// `?`だけを打ったときの一覧(K62): 使えるキーワードと自作コマンド. `Enter`(と`Tab`)でそのキーワードに入る.
-/// 拡張とスクリプトのキーワードは画面の側が足す
-pub fn help_rows(cfg: &Config) -> Vec<Row> {
-    let p = &cfg.prefix;
-    let list: [(&str, &str, &str); 12] = [
-        (&p.app, "Apps", "Search only apps"),
-        (&p.file, "Files and folders", "Search only files and folders"),
-        (&p.bookmark, "Bookmarks", "Search Chrome and Edge bookmarks"),
-        (&p.kill, "End a process", "Choose a running app to end"),
-        (&p.wsl, "WSL", "Search files in your WSL home"),
-        (&p.boxdrive, "Box", "Search files in Box Drive"),
-        (&p.google, "Google", "Search on Google"),
-        (&p.chatgpt, "ChatGPT", "Write a long question to ChatGPT"),
-        (&p.clipboard, "Clipboard history", "Text and files you copied"),
-        (&p.calc, "Calculator", "Numbers, formulas, RF"),
-        (&p.snapshot, "Saved results", "Results saved with Ctrl+S"),
-        (&p.calendar, "Calendar", "Outlook appointments"),
-    ];
-    let mut out: Vec<Row> = list
-        .iter()
-        .filter(|(k, _, _)| !k.is_empty())
-        .map(|(k, name, desc)| help_row(k, name, desc, "keyword"))
-        .collect();
-    for c in &cfg.command {
-        let title = c.title.clone().unwrap_or_else(|| c.name.clone());
-        let what = c.url.as_deref().or(c.run.as_deref()).unwrap_or("");
-        out.push(help_row(&c.name, &title, what, "command"));
-    }
-    out
-}
-
-/// `?`の一覧の1行. 2行目は`キーワード  説明`
-pub fn help_row(keyword: &str, name: &str, desc: &str, tag: &'static str) -> Row {
-    Row {
-        name: name.to_string(),
-        sub: if desc.is_empty() { keyword.to_string() } else { format!("{keyword}  {desc}") },
-        tag,
-        positions: vec![],
-        action: Action::Fill(format!("{keyword} ")),
-        learn_key: None,
-        warn: false,
-        icon: Icon::Kind(Kind::Command),
-        score: 0,
-    }
-}
-
 /// `g `のときの行: `Enter`でGoogle検索
 pub fn google_row(text: &str) -> Row {
     Row {
@@ -617,8 +577,8 @@ pub fn build(input: &str, ctx: &Ctx, prep: &Prepared, file_hits: &[(usize, FileH
     if text_trim.is_empty() {
         return (mode, vec![]);
     }
-    if mode == Mode::All && text_trim == "?" {
-        return (mode, help_rows(ctx.config));
+    if let Some(words) = help::filter_words(mode, text_trim) {
+        return (mode, help::rows(ctx.config, ctx.sources.system, vec![], words));
     }
     if mode == Mode::Google {
         return (mode, vec![google_row(text_trim)]);
@@ -720,14 +680,14 @@ mod tests {
     fn help_lists_keywords_and_commands() {
         let mut cfg = Config::parse("[[command]]\nname = \"jira\"\nurl = \"https://jira.example.com/browse/{q}\"\n").unwrap();
         cfg.prefix.wsl = String::new();
-        let rows = help_rows(&cfg);
+        let rows = help::rows(&cfg, &Catalog::new(builtin::system_items()), vec![], "");
         assert_eq!(rows[0].name, "Apps");
         assert_eq!(rows[0].sub, "a  Search only apps");
         assert_eq!(rows[0].action, Action::Fill("a ".into()));
         // 空にしたキーワード(WSL)は出さない
         assert!(!rows.iter().any(|r| r.name == "WSL"));
         assert!(rows.iter().any(|r| r.name == "Saved results" && r.sub.starts_with("snap ")));
-        let last = rows.last().unwrap();
+        let last = rows.iter().take_while(|r| matches!(r.tag, "keyword" | "command")).last().unwrap();
         assert_eq!((last.name.as_str(), last.tag), ("jira", "command"));
         assert_eq!(last.action, Action::Fill("jira ".into()));
     }

@@ -38,6 +38,7 @@ use hikidashi_core::compose::{Browse, Drafts};
 use hikidashi_core::markdown::{self, NewLine};
 use hikidashi_core::config::{self, Config, KeyAction, KEY_ALT, KEY_CTRL, KEY_SHIFT};
 use hikidashi_core::files::FileTable;
+use hikidashi_core::help;
 use hikidashi_core::hotkey::{Hotkey, State, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN};
 use hikidashi_core::learn::{History, Learn};
 use hikidashi_core::migemo::Dict;
@@ -422,16 +423,6 @@ impl App {
         let (_, text) = router::parse(input, &self.config.prefixes());
         let prep = Prepared::new(text.trim(), self.dict.get());
         let (mode, mut rows) = self.with_ctx(tables, |ctx| router::build(input, ctx, &prep, hits));
-        // `?`の一覧には, 拡張とスクリプトのキーワードも足す(K62)
-        if mode == Mode::All && text.trim() == "?" {
-            rows.extend(self.ext.help_rows(&self.ext_taken()));
-            for s in &self.scripts {
-                if let Some(k) = s.keyword.as_deref().filter(|k| !k.is_empty()) {
-                    rows.push(router::help_row(k, &s.title, &s.stem, "script"));
-                }
-            }
-            return (mode, rows);
-        }
         // 引数を取るスクリプト(`ff 語`)の行は一番上に出す
         if mode == Mode::All {
             if let Some(r) = cscripts::arg_row(&self.scripts, text) {
@@ -461,7 +452,7 @@ impl App {
             self.layout();
             return;
         }
-        // 履歴, 最近のもの, スクリプトの一覧は, ファイルの検索を使わず, すぐ出す
+        // ヘルプ, 履歴, 最近のもの, スクリプトの一覧は, ファイルの検索を使わず, すぐ出す
         if let Some(rows) = self.special_rows(&text) {
             self.searcher.cancel();
             self.pending = None;
@@ -507,8 +498,17 @@ impl App {
         self.set_rows(quick, vec![]);
     }
 
-    /// ふつうの検索ではない一覧: クリップボードの履歴(`cb `), 空の入力の最近のもの, `list`のスクリプト(`wiki `). なければNone
+    /// ふつうの検索ではない一覧. なければNone
     fn special_rows(&mut self, text: &str) -> Option<Vec<Row>> {
+        if let Some(words) = help::filter_words(self.mode, text) {
+            let mut plugins = self.ext.help_rows(&self.ext_taken());
+            for s in &self.scripts {
+                if let Some(k) = s.keyword.as_deref().filter(|k| !k.is_empty()) {
+                    plugins.push(help::help_row(k, &s.title, &s.stem, "script"));
+                }
+            }
+            return Some(help::rows(&self.config, &self.system, plugins, words));
+        }
         if self.mode == Mode::Clipboard {
             return Some(clip_rows(&self.clips, text));
         }
@@ -2263,6 +2263,7 @@ impl App {
             }
             // `Running…`などの, 何もしない行
             Action::Copy(s) if s.is_empty() => return,
+            Action::Manual(_) => return,
             _ => {}
         }
         let r: Result<(), String> = match &row.action {
@@ -2363,7 +2364,7 @@ impl App {
             }
             Action::BoxUrl { url, .. } => actions::open_url(url, &cfg),
             Action::Copy(s) | Action::ScriptLine(s) => actions::copy_text(hwnd, s),
-            Action::Clip(_) | Action::SnapOpen(_) | Action::ScriptRun { .. } | Action::Fill(_) => Ok(()),
+            Action::Clip(_) | Action::SnapOpen(_) | Action::ScriptRun { .. } | Action::Fill(_) | Action::Manual(_) => Ok(()),
             Action::Appointment { entry_id, .. } => {
                 outlook::open(entry_id);
                 Ok(())
@@ -2542,7 +2543,7 @@ impl App {
                 items.push(mi("Open in Outlook", g::CALENDAR, MenuAct::Open));
                 items.push(mi("Copy", g::COPY, MenuAct::CopyText(copy.clone())));
             }
-            Action::ScriptRun { .. } | Action::Fill(_) => {}
+            Action::ScriptRun { .. } | Action::Fill(_) | Action::Manual(_) => {}
             Action::BoxUrl { url, .. } => {
                 items.push(mi("Open in browser", g::GLOBE, MenuAct::Open));
                 items.push(mi("Copy URL", g::COPY, MenuAct::CopyText(url.clone())));

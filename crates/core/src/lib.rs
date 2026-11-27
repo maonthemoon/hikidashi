@@ -17,6 +17,7 @@ pub mod builtin;
 pub mod config;
 pub mod iconpx;
 pub mod learn;
+pub mod help;
 pub mod router;
 pub mod hotkey;
 pub mod openwith;

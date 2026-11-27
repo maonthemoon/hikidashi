@@ -2,6 +2,7 @@
 //! 検索は専用のスレッドで動き, 結果は`WM_APP_EXT`で窓に知らせる(画面のスレッドでは待たない).
 
 use super::{clipboard, storage};
+use hikidashi_core::help;
 use hikidashi_core::router::{Action, Icon, Row};
 use hikidashi_core::scripts as cscripts;
 use hikidashi_ext::{ExtHost, ExtMeta, ExtRow, Options, Seg};
@@ -141,12 +142,14 @@ impl Ext {
     }
 
     /// `?`の一覧に足す, 拡張のキーワード(K62). 計算のモードの中だけで使うものも出す
-    pub fn help_rows(&self, taken: &[String]) -> Vec<Row> {
+    pub fn help_rows(&mut self, taken: &[String]) -> Vec<help::Entry> {
+        // 拡張を抜けたので, 次に入ったときはクリップボードを読み直す
+        self.active = None;
         let Some(h) = self.host() else { return vec![] };
         h.list()
             .into_iter()
             .filter(|m| !m.keyword.is_empty() && !taken.contains(&m.keyword.to_lowercase()))
-            .map(|m| hikidashi_core::router::help_row(&m.keyword, &m.title, &m.name, "extension"))
+            .map(|m| help::help_row(&m.keyword, &m.title, &m.name, "extension"))
             .collect()
     }
 
@@ -295,4 +298,20 @@ fn make_row(r: &ExtRow) -> Row {
         (None, None) => (if r.copy.is_empty() { "" } else { "copy" }, Action::Copy(r.copy.clone()), Icon::Calc),
     };
     Row { name: r.title.clone(), sub: r.subtitle.clone(), tag, positions: vec![], action, learn_key: None, warn: false, icon, score: 0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Ext;
+
+    #[test]
+    fn opening_help_discards_the_cached_clipboard() {
+        let mut ext = Ext::new();
+        ext.active = Some(("mipi".into(), Some("011001010001110000111000".into())));
+
+        ext.begin_refresh();
+        ext.help_rows(&[]);
+
+        assert!(ext.active.is_none());
+    }
 }
