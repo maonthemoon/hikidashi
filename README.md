@@ -102,7 +102,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 
 ファイルは, `*.pdf`, `ext:docx,xlsx`, `kind:excel`, `in:案件`, `modified:7d`でも絞れます. 複数の条件をすべて満たすものは`&`か空白でつなぎます. たとえば`*.pdf & in:案件`(`*.pdf in:案件`)は案件フォルダー内のPDF, `kind:pdf 見積`は名前に見積を含むPDF, `*.pdf | *.pptx`はPDFまたはPowerPointを探します.
 
-キーと先頭の文字は, トレイの`Settings`で変えられます.
+キーと先頭の文字は, トレイの`Settings`で変えられます. よく開くファイル, フォルダー, アプリ, Webページは, `Settings`の`Aliases`で短い語に割り当てられます(`mitsumori`で`見積.xlsx`を開くなど).
 
 ### 保存されるもの
 

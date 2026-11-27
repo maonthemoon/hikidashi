@@ -3,7 +3,7 @@
 
 use crate::calc;
 use crate::catalog::{Catalog, Hit, Item, Kind};
-use crate::config::Config;
+use crate::config::{CommandKind, Config};
 use crate::files::{FileHit, FileQuery, FileTable};
 use crate::help;
 use crate::learn::Learn;
@@ -254,7 +254,7 @@ pub(crate) fn item_icon(it: &Item) -> Icon {
 /// コマンド(設定のページ, Windowsの操作, 自作コマンド)の名前か別名に, 打った文字がぴったり一致したときの加点.
 /// `lock`でLockをファイルより上に出す(C2).
 fn exact_command_bonus(it: &Item, query: &str) -> i32 {
-    if !matches!(it.kind, Kind::Setting | Kind::System | Kind::Command) {
+    if !matches!(it.kind, Kind::Setting | Kind::System | Kind::Command) && it.args != ALIAS_ARG {
         return 0;
     }
     let q = query.trim();
@@ -266,12 +266,14 @@ fn exact_command_bonus(it: &Item, query: &str) -> i32 {
 }
 
 pub(crate) fn catalog_row(src: Source, index: usize, it: &Item) -> Row {
+    // ファイルとフォルダーのエイリアス(K71)は, 貼ったパスと同じ行にする(`→`のメニューも同じ)
+    let alias_path = matches!(it.kind, Kind::File | Kind::Folder) && it.args == ALIAS_ARG;
     Row {
         name: it.name.clone(),
         sub: it.sub.clone(),
         tag: it.kind.tag(),
         positions: vec![],
-        action: Action::Item { source: src, index },
+        action: if alias_path { Action::Path(it.target.clone()) } else { Action::Item { source: src, index } },
         learn_key: Some(it.learn_key()),
         warn: it.kind == Kind::Process,
         icon: item_icon(it),
@@ -380,23 +382,36 @@ fn path_like_row(full: String, kind: PathKind) -> Row {
 }
 
 /// 自作コマンドの一覧(H2). 名前で探せるようにする.
+/// ファイルとフォルダーのエイリアス(K71)は, ファイルとフォルダーの行にする(名前は付けた名前か, なければファイル名).
 pub fn command_items(cfg: &Config) -> Vec<Item> {
     cfg.command
         .iter()
         .map(|c| {
-            let title = c.title.clone().unwrap_or_else(|| c.name.clone());
-            let (target, sub) = match (&c.url, &c.run) {
-                (Some(u), _) => (u.clone(), u.clone()),
-                (None, Some(r)) => (r.clone(), r.clone()),
-                _ => (String::new(), String::new()),
+            let (kind, target) = c.target().unwrap_or((CommandKind::Run, ""));
+            let target = target.trim().to_string();
+            let mut it = match kind {
+                CommandKind::File | CommandKind::Folder => {
+                    let base = target.trim_end_matches('\\').rsplit('\\').next().unwrap_or(&target).to_string();
+                    let title = c.title.clone().filter(|t| !t.is_empty()).unwrap_or(base);
+                    let mut it = Item::new(if kind == CommandKind::File { Kind::File } else { Kind::Folder }, title, target.clone(), target);
+                    it.args = ALIAS_ARG.into();
+                    it
+                }
+                _ => {
+                    let title = c.title.clone().unwrap_or_else(|| c.name.clone());
+                    let mut it = Item::new(Kind::Command, title, target.clone(), target);
+                    it.args = if kind == CommandKind::Url { "url".into() } else { "run".into() };
+                    it
+                }
             };
-            let mut it = Item::new(Kind::Command, title, sub, target);
             it.keys = vec![c.name.clone()];
-            it.args = if c.url.is_some() { "url".into() } else { "run".into() };
             it
         })
         .collect()
 }
+
+/// ファイルとフォルダーのエイリアス(K71)の行の印(`Item::args`)
+pub const ALIAS_ARG: &str = "alias";
 
 /// アプリの別名(J6)を足す. `ppt = "PowerPoint"`ならPowerPointに`ppt`で一致させる.
 pub fn apply_aliases(apps: &mut [Item], alias: &BTreeMap<String, String>) {
@@ -417,6 +432,9 @@ fn command_with_arg(text: &str, cfg: &Config) -> Option<Row> {
         return None;
     }
     let c = cfg.command.iter().find(|c| c.name.eq_ignore_ascii_case(head))?;
+    if matches!(c.target(), Some((CommandKind::File | CommandKind::Folder, _))) {
+        return None;
+    }
     let title = c.title.clone().unwrap_or_else(|| c.name.clone());
     let (action, tag, icon) = if let Some(u) = &c.url {
         (Action::OpenUrl(u.replace("{q}", &url_encode(rest))), "url", Icon::Web)
@@ -986,6 +1004,24 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].tag, "ChatGPT");
         assert_eq!(rows[0].action, Action::ChatGpt("how to rename a branch".into()));
+    }
+
+    #[test]
+    fn file_and_folder_aliases() {
+        let mut w = world();
+        let cfg = Config::parse("[[command]]\nname = 'mitsumori'\nfile = 'C:\\work\\見積.xlsx'\n[[command]]\nname = 'anken'\ntitle = '案件'\nfolder = 'D:\\案件\\'\n").unwrap();
+        w.cfg.command.extend(cfg.command);
+        w.cmds = Catalog::new(command_items(&w.cfg));
+        let (_, rows) = run(&w, "mitsumori");
+        assert_eq!((rows[0].name.as_str(), rows[0].tag), ("見積.xlsx", "file"));
+        assert_eq!(rows[0].action, Action::Path(r"C:\work\見積.xlsx".into()));
+        assert_eq!(rows[0].icon, Icon::Path(r"C:\work\見積.xlsx".into()));
+        let (_, rows) = run(&w, "anken");
+        assert_eq!((rows[0].name.as_str(), rows[0].tag), ("案件", "folder"));
+        assert_eq!(rows[0].action, Action::Path(r"D:\案件\".into()));
+        // 名前の後ろに文字があっても, コマンドの行にはしない
+        let (_, rows) = run(&w, "mitsumori 2026");
+        assert!(rows.iter().all(|r| !matches!(r.action, Action::Run(_))));
     }
 
     #[test]

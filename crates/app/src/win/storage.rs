@@ -115,15 +115,30 @@ fn load_config_inner() -> (Config, Option<ConfigError>) {
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => {
-            write("config.toml", &config::template());
-            config::template()
+            let mut c = Config::default();
+            real_paths(&mut c);
+            let t = config::to_toml(&c);
+            write("config.toml", &t);
+            t
         }
     };
     // メモ帳で保存すると先頭にBOMが付くことがある
     let text = text.trim_start_matches('\u{feff}');
-    match Config::parse(text) {
+    let (mut c, err) = match Config::parse(text) {
         Ok(c) => (c, None),
         Err(e) => (Config::default(), Some(e)),
+    };
+    real_paths(&mut c);
+    (c, err)
+}
+
+/// 設定画面に出すフォルダーの`%USERPROFILE%`などを, 実際のパス(`C:\Users\…`)にする(K72).
+/// 設定画面で変えて書き直すと, 設定ファイルも実際のパスになる
+fn real_paths(c: &mut Config) {
+    for list in [&mut c.files.roots, &mut c.files.skip_dirs, &mut c.apps.extra_dirs] {
+        for p in list.iter_mut() {
+            *p = expand(p);
+        }
     }
 }
 

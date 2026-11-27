@@ -1483,7 +1483,7 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
             </tbody>
           </table>
         </div>
-        <p>どの閉じ方でも書きかけは残り, 次にウィンドウを出すと検索から始まります. <kbd>Shift</kbd>+<kbd>Enter</kbd>で続きを書けます. 表は記号のまま並び, 画像, 数式, 図は出ません. ChatGPTには書いた文字(記号つき)をそのまま送ります. 画像を添付したときは, 文字を入れたChatGPTの入力欄に画像を1枚ずつ貼り, 1枚あたり3秒待ってから<kbd>Enter</kbd>を押します(待つ時間は<a href="#settings">設定</a>の<code>Web</code>の<code>Wait per image</code>). 待つ間はほかのアプリを使っていて構いません. 待ち終わったとき, キーボードとマウスが1.5秒止まるのを待ってからChatGPTのウィンドウを前に戻し, <kbd>Enter</kbd>を押します. ChatGPTが前に出ていなかったときは貼らず, 最後の画像をクリップボードに残します. 貼り付けで入れたときは, 送ったあとクリップボードを元の中身に戻します. 記号を隠さず薄く見せたいときは, <a href="#settings">設定</a>の<code>Web</code>で<code>Hide Markdown marks</code>をオフにします.</p>
+        <p>どの閉じ方でも書きかけは残り, 次にウィンドウを出すと検索から始まります. <kbd>Shift</kbd>+<kbd>Enter</kbd>で続きを書けます. 表は記号のまま並び, 画像, 数式, 図は出ません. ChatGPTには書いた文字(記号つき)をそのまま送ります. 画像を添付したときは, ChatGPTを開いてから入力欄に文字と画像を1枚ずつ貼り, 1枚あたり3秒待ってから<kbd>Enter</kbd>を押します(待つ時間は<a href="#settings">設定</a>の<code>Web</code>の<code>Wait per image</code>). 待つ間はほかのアプリを使っていて構いません. 待ち終わったとき, キーボードとマウスが1.5秒止まるのを待ってからChatGPTのウィンドウを前に戻し, <kbd>Enter</kbd>を押します. ChatGPTが前に出ていなかったときは貼らず, 最後の画像をクリップボードに残します. 貼り付けで入れたときは, 送ったあとクリップボードを元の中身に戻します. 記号を隠さず薄く見せたいときは, <a href="#settings">設定</a>の<code>Web</code>で<code>Hide Markdown marks</code>をオフにします.</p>
 
         <h2 id="wsl">WSLのファイルを探す</h2>
         <p><code>w </code>に続けて名前の一部を打つと, WSLのホームのファイルとフォルダーが出ます. 開き方はふだんのファイルと同じです. WSLの一覧は, 初めて<code>w </code>を打ったときと, 前に読んでから5分たっていたときに読み直します. 読んでいる間は一番下に<code>Reading WSL…</code>と出て, 前の一覧で探せます. WSLを使わない日はWSLを起こしません.</p>
@@ -1596,7 +1596,7 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
         <p>選んだ文字は, そのアプリに<kbd>Ctrl</kbd>+<kbd>C</kbd>を送って読みます. ターミナルでは<kbd>Ctrl</kbd>+<kbd>C</kbd>が中断になるので, 送らずに空のウィンドウを出します.</p>
 
         <h2 id="command">エイリアス</h2>
-        <p><a href="#settings">設定</a>の<code>Aliases</code>で, 短い語を打つとアプリ, Webページ, コマンドが開くようにできます.</p>
+        <p><a href="#settings">設定</a>の<code>Aliases</code>で, 短い語を打つとアプリ, Webページ, コマンド, ファイル, フォルダーが開くようにできます.</p>
         <div class="codeblock">
           <button class="copy-btn" type="button">コピー</button>
           <pre><code>[alias]
@@ -1613,15 +1613,20 @@ title = "Open dotfile in VS Code"
 run = 'code "C:\Users\me\project\work\dotfile"'
 
 [[command]]
+name = "mitsumori"
+file = 'C:\Users\me\Documents\見積.xlsx'
+
+[[command]]
 name = "kaigi"
 title = "会議のフォルダー"
-run = 'C:\Users\me\Documents\会議'</code></pre>
+folder = 'C:\Users\me\Documents\会議'</code></pre>
         </div>
         <ul>
           <li><strong>アプリ</strong>: <code>ppt</code>と打つとPowerPointが出ます. 2行目に何で一致したかが出ます. アプリはexeの名前(<code>winword</code>など)でも探せます.</li>
           <li><strong><code>url</code>のコマンド</strong>: <code>jira ABC-123</code>と打つと, <code>{q}</code>に<code>ABC-123</code>を入れたページを開く行が1位に出ます. 右端は<code>url</code>です.</li>
           <li><strong><code>run</code>のコマンド</strong>: 名前を打つと出て, <kbd>Enter</kbd>でコマンドを実行します(<code>cmd.exe /c</code>で, ウィンドウは出しません). 右端は<code>run</code>です.</li>
-          <li><strong>ファイルやフォルダー</strong>: <code>run</code>にパスだけを書くと, 検索の結果と同じように直接開きます(<code>cmd.exe</code>を通さないので速い). <code>%USERPROFILE%</code>なども使えます. <code>explorer "…"</code>や<code>start "" "…"</code>と書いたものも, 同じように直接開きます.</li>
+          <li><strong>ファイルやフォルダー</strong>: 足すウィンドウの<code>Kind</code>で<code>File</code>か<code>Folder</code>を選び, <code>Browse…</code>で選びます(パスを貼ってもよい). <code>mitsumori</code>と打つと<code>見積.xlsx</code>の行が出て, <kbd>Enter</kbd>で開きます. <kbd>→</kbd>で, 検索で出たファイルと同じメニュー(<code>Open folder</code>, <code>Copy path</code>など)が出ます. 名前は<code>Shown as</code>(<code>title</code>)に書いたもの, なければファイル名です.</li>
+          <li><strong><code>run</code>にパスだけ</strong>: <code>run</code>にパスだけを書いたものも, 直接開きます(<code>cmd.exe</code>を通さないので速い). <code>explorer "…"</code>や<code>start "" "…"</code>と書いたものも同じです.</li>
         </ul>
 
         <h2 id="scripts">スクリプトと拡張</h2>
@@ -1690,7 +1695,7 @@ export function search(query) {
               <tr><td><code>Apps</code></td><td>中のexeをアプリとして出すフォルダー, <kbd>→</kbd>の「別のアプリで開く」の一覧(名前, exe, 渡し方. exeが空ならVS Code, WezTerm, Windows Terminalを名前から探す), <kbd>Alt</kbd>+<kbd>Enter</kbd>で使うターミナル</td></tr>
               <tr><td><code>Actions</code></td><td><kbd>→</kbd>の操作の一覧に出すもの. 行が項目, 列がアプリ・ファイル・フォルダーのチェック</td></tr>
               <tr><td><code>Web</code></td><td>開くブラウザー(既定のブラウザー, Chrome, Edge), 新しいウィンドウか新しいタブか, ChromeとEdgeのプロフィール, ChatGPTへの渡し方, 画像1枚ごとの待ち(<code>Wait per image</code>)</td></tr>
-              <tr><td><code>Aliases</code></td><td>短い語で開くもの. アプリ(<code>ppt</code>でPowerPointなど), Webページ(<code>jira ABC-123</code>など), コマンド. <code>Add</code>, <code>Edit</code>(行のダブルクリックでも), <code>Remove</code></td></tr>
+              <tr><td><code>Aliases</code></td><td>短い語で開くもの. アプリ(<code>ppt</code>でPowerPointなど), Webページ(<code>jira ABC-123</code>など), コマンド, ファイル, フォルダー. <code>Add</code>, <code>Edit</code>(行のダブルクリックでも), <code>Remove</code></td></tr>
             </tbody>
           </table>
         </div>
@@ -1708,9 +1713,9 @@ export function search(query) {
             <tbody>
               <tr><td><code>[prefix]</code></td><td>種類を絞るキーワード. 空にすると使わない(<code>app</code>, <code>file</code>, <code>bookmark</code>, <code>kill</code>, <code>wsl</code>, <code>box</code>, <code>google</code>, <code>chatgpt</code>, <code>clipboard</code>, <code>calc</code>. 前の版の<code>window</code>は<code>wsl</code>として読む)</td><td><code>a</code> <code>f</code> <code>b</code> <code>k</code> <code>w</code> <code>bx</code> <code>g</code> <code>c</code> <code>cb</code> <code>=</code></td></tr>
               <tr><td><code>[alias]</code></td><td>アプリのエイリアス(<code>ppt = "PowerPoint"</code>)</td><td>なし</td></tr>
-              <tr><td><code>[[command]]</code></td><td>Webページかコマンドを開くエイリアス. <code>name</code>, <code>title</code>, <code>url</code>か<code>run</code></td><td>なし</td></tr>
+              <tr><td><code>[[command]]</code></td><td>Webページ, コマンド, ファイル, フォルダーを開くエイリアス. <code>name</code>, <code>title</code>と, <code>url</code>, <code>run</code>, <code>file</code>, <code>folder</code>のどれか1つ</td><td>なし</td></tr>
               <tr><td><code>[apps] extra_dirs</code></td><td>中のexeをアプリとして出すフォルダー(持ち運び用のツールなど)</td><td><code>[]</code></td></tr>
-              <tr><td><code>[files] roots</code></td><td>索引を作るフォルダー</td><td><code>['%USERPROFILE%']</code></td></tr>
+              <tr><td><code>[files] roots</code></td><td>索引を作るフォルダー. 設定画面で選ぶと<code>C:\Users\…</code>のような実際のパスで書きます(<code>%USERPROFILE%</code>なども読めます)</td><td>ユーザーフォルダー(<code>C:\Users\あなたの名前</code>)</td></tr>
               <tr><td><code>[files] skip_dirs</code></td><td>索引に入れないフォルダー(場所で指定. 中も全部入れない)</td><td><code>[]</code></td></tr>
               <tr><td><code>[files] box_dir</code></td><td>Boxのフォルダー. 空ならBox Driveのデータから自動で決める</td><td><code>''</code></td></tr>
               <tr><td><code>[files] box_db</code></td><td>Box Driveのデータ(<code>sync.db</code>)の場所. 空なら<code>%LOCALAPPDATA%\Box\Box\data</code>の下を探す</td><td><code>''</code></td></tr>

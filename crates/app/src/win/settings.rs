@@ -10,8 +10,7 @@ use super::util::{from_wide, hiword, loword, rgb, WStr};
 use super::{actions, dark, paint, parts};
 use parts::{brush, drop_sel, s, set_drop, surface, tint, Btn, Deco, Kind};
 use hikidashi_core::builtin;
-use hikidashi_core::config::{self, parse_enter_key, Command, Config, Files, OpenWith, ENTER_KEY_CHOICES};
-use hikidashi_core::pathlike;
+use hikidashi_core::config::{self, parse_enter_key, Command, CommandKind, Config, Files, OpenWith, ENTER_KEY_CHOICES};
 use std::cell::RefCell;
 use std::sync::OnceLock;
 use windows::core::{w, PCWSTR};
@@ -150,7 +149,7 @@ const BROWSERS: [(&str, &str); 3] = [("default", "Windows default"), ("chrome", 
 const OPEN_IN: [(&str, &str); 2] = [("window", "New window"), ("tab", "New tab")];
 const GPT_MODES: [(&str, &str); 2] = [("url", "Open with the question"), ("clipboard", "Copy, then open")];
 /// 短い語で開くもの(エイリアス. K44)と, 「別のアプリで開く」の渡し方
-const ALIAS_KINDS: [&str; 3] = ["App", "Web page", "Command"];
+const ALIAS_KINDS: [&str; 5] = ["App", "Web page", "Command", "File", "Folder"];
 const PASS_KINDS: [&str; 3] = ["The selected item", "Its folder", "Custom"];
 const PASS_FOLDER: &str = "{dir}";
 
@@ -558,14 +557,23 @@ fn item(parent: HWND, id: i32) -> HWND {
     unsafe { GetDlgItem(Some(parent), id).or_else(|_| GetDlgItem(Some(panel_of(parent)), id)).unwrap_or_default() }
 }
 
-/// フォルダーやexeを選ぶ(Windowsの「フォルダーの選択」). 選ばなければNone
-fn pick(owner: HWND, folder: bool, title: &str) -> Option<String> {
+/// `pick`で選ぶもの
+#[derive(Clone, Copy, PartialEq)]
+enum Pick {
+    Folder,
+    Exe,
+    /// どのファイルでも(エイリアスのファイル. K71)
+    File,
+}
+
+/// フォルダー, exe, ファイルを選ぶ(Windowsの「フォルダーの選択」と「開く」). 選ばなければNone
+fn pick(owner: HWND, what: Pick, title: &str) -> Option<String> {
     unsafe {
         let dlg: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
         let mut opts = dlg.GetOptions().ok()? | FOS_FORCEFILESYSTEM;
-        if folder {
+        if what == Pick::Folder {
             opts |= FOS_PICKFOLDERS;
-        } else {
+        } else if what == Pick::Exe {
             let name = WStr::new(&tr("Programs"));
             let spec = [COMDLG_FILTERSPEC { pszName: name.pcwstr(), pszSpec: w!("*.exe") }];
             let _ = dlg.SetFileTypes(&spec);
@@ -580,10 +588,6 @@ fn pick(owner: HWND, folder: bool, title: &str) -> Option<String> {
         CoTaskMemFree(Some(p.0 as *const _));
         s
     }
-}
-
-fn short_path(p: &str) -> String {
-    pathlike::contract_home(p, &storage::env("USERPROFILE"))
 }
 
 fn fonts_for(dpi: u32) -> [HFONT; 4] {
@@ -1061,11 +1065,7 @@ fn profile_label(dir: &str, name: &str) -> String {
 fn alias_rows(c: &Config) -> Vec<String> {
     let apps = c.alias.iter().map(|(k, v)| format!("{k}\t{}\t{v}", tr(ALIAS_KINDS[0])));
     let cmds = c.command.iter().map(|m| {
-        let (kind, target) = match (&m.url, &m.run) {
-            (Some(u), _) => (1, u.as_str()),
-            (_, Some(r)) => (2, r.as_str()),
-            _ => (1, ""),
-        };
+        let (kind, target) = m.target().map_or((1, ""), |(k, v)| (k as usize, v));
         let shown = m.title.as_deref().filter(|t| !t.is_empty()).map_or_else(|| target.to_string(), |t| format!("{t} · {target}"));
         format!("{}\t{}\t{shown}", m.name, tr(ALIAS_KINDS[kind]))
     });
@@ -1668,8 +1668,8 @@ impl Settings {
     }
 
     /// 選んだフォルダー・exeを入れる
-    fn picked(&mut self, id: i32, path: String) {
-        let p = short_path(&path);
+    /// 実際のパス(`C:\Users\…`)のまま書く(K72. 前は`%USERPROFILE%\…`に縮めていた)
+    fn picked(&mut self, id: i32, p: String) {
         match id {
             ID_ROOTS_ADD => self.list_add(ID_ROOTS, p),
             ID_SKIP_ADD => self.list_add(ID_SKIP, p),
@@ -1718,8 +1718,9 @@ impl Settings {
                     ShortRef::Command(n) => {
                         let c = self.work.command.get(*n)?;
                         sh.word = c.name.clone();
-                        sh.kind = if c.run.is_some() { 2 } else { 1 };
-                        sh.value = c.url.clone().or(c.run.clone()).unwrap_or_default();
+                        let (k, v) = c.target().unwrap_or((CommandKind::Url, ""));
+                        sh.kind = k as usize;
+                        sh.value = v.to_string();
                         sh.title = c.title.clone().unwrap_or_default();
                     }
                 }
@@ -1742,7 +1743,7 @@ impl Settings {
                     return Err("Type a word without spaces.".into());
                 }
                 if short.value.is_empty() {
-                    return Err(["Choose or type the app name.", "Type the web address.", "Type the command."][short.kind].into());
+                    return Err(["Choose or type the app name.", "Type the web address.", "Type the command.", "Choose or type the file.", "Choose or type the folder."][short.kind.min(4)].into());
                 }
                 let same_app = self.work.alias.keys().any(|k| k.eq_ignore_ascii_case(word) && orig.as_ref() != Some(&ShortRef::App(k.clone())));
                 let same_cmd = self.work.command.iter().enumerate().any(|(i, c)| c.name.eq_ignore_ascii_case(word) && orig.as_ref() != Some(&ShortRef::Command(i)));
@@ -1766,8 +1767,13 @@ impl Settings {
                     self.alias_keys().iter().position(|k| k == word).unwrap_or(0)
                 } else {
                     let v = Some(short.value.clone());
-                    let (url, run) = if short.kind == 1 { (v, None) } else { (None, v) };
-                    let cmd = Command { name: word.clone(), title: (!short.title.is_empty()).then(|| short.title.clone()), url, run };
+                    let mut cmd = Command { name: word.clone(), title: (!short.title.is_empty()).then(|| short.title.clone()), ..Default::default() };
+                    match short.kind {
+                        1 => cmd.url = v,
+                        3 => cmd.file = v,
+                        4 => cmd.folder = v,
+                        _ => cmd.run = v,
+                    }
                     let i = at.unwrap_or(self.work.command.len());
                     self.work.command.insert(i, cmd);
                     self.work.alias.len() + i
@@ -2002,7 +2008,7 @@ fn run_tasks(tasks: Vec<Task>) {
                 });
             }
             Task::Pick { id, title } => {
-                if let Some(p) = pick(hwnd, true, title) {
+                if let Some(p) = pick(hwnd, Pick::Folder, title) {
                     let more = with_settings(|s| {
                         s.picked(id, p);
                         s.apply()
@@ -2167,7 +2173,7 @@ fn editor_show_mode(hwnd: HWND) {
             decos.extend(deco);
         }
     }
-    set_text(item(hwnd, E_VALUE_LABEL), if mode == 2 { "Command" } else { "Web address" });
+    set_text(item(hwnd, E_VALUE_LABEL), ["Web address", "Web address", "Command", "File", "Folder"][mode.min(4)]);
     parts::set_decos(hwnd, decos);
 }
 
@@ -2230,6 +2236,7 @@ fn open_editor(owner: HWND, kind: EditKind) {
             p.y += lh + 12;
             bottom = p.y;
             groups.push(Group { modes: &[0], section: p.finish() });
+            // Webページ, コマンド, ファイル, フォルダー: 値の欄の下に, {q}の説明か参照のボタン(K71)
             let mut p = Page::new(&mut m, X, y, FW);
             let (x, vy) = (X + FORM_L, p.y);
             let l = p.m.label("Web address");
@@ -2237,11 +2244,24 @@ fn open_editor(owner: HWND, kind: EditKind) {
             p.at(l, X, vy + 5, FORM_L - 8, 22);
             p.field(E_VALUE, other, 0, x, vy, full, CTL_H);
             p.y += CTL_H + 8;
+            let y2 = p.y;
+            groups.push(Group { modes: &[1, 2, 3, 4], section: p.finish() });
+            let mut p = Page::new(&mut m, X, y2, FW);
             p.form_hint("{q} is replaced with what you type after the word.");
+            let mut y3 = p.y;
+            groups.push(Group { modes: &[1, 2], section: p.finish() });
+            let mut p = Page::new(&mut m, X, y2, FW);
+            let bw = button_w("Browse…", 72);
+            let b = p.m.button(E_BROWSE, "Browse…");
+            p.at(b, X + FORM_L, p.y, bw, CTL_H);
+            p.y += CTL_H + 8;
+            y3 = y3.max(p.y);
+            groups.push(Group { modes: &[3, 4], section: p.finish() });
+            let mut p = Page::new(&mut m, X, y3, FW);
             p.form_edit("Shown as", E_TITLE, &short.title, full);
             p.form_hint("Optional, for example Open Jira issue");
             bottom = bottom.max(p.y);
-            groups.push(Group { modes: &[1, 2], section: p.finish() });
+            groups.push(Group { modes: &[1, 2, 3, 4], section: p.finish() });
         }
         EditKind::OpenWith { ow, .. } => {
             p.form_edit("Name", E_NAME, &ow.name, full);
@@ -2367,8 +2387,15 @@ fn editor_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT
                 ID_CANCEL => close_editor(),
                 E_KIND if code == CBN_SELCHANGE => editor_show_mode(hwnd),
                 E_BROWSE => {
-                    if let Some(p) = pick(hwnd, false, "Choose an app") {
-                        set_raw_text(item(hwnd, E_VALUE), &short_path(&p));
+                    // エイリアスの窓ではファイルかフォルダー(K71), アプリの窓ではexe
+                    let alias = EDITOR.with(|e| e.borrow().as_ref().is_some_and(|e| matches!(e.kind, EditKind::Alias { .. })));
+                    let (what, title) = match (alias, drop_sel(item(hwnd, E_KIND))) {
+                        (true, 4) => (Pick::Folder, "Choose a folder"),
+                        (true, _) => (Pick::File, "Choose a file"),
+                        _ => (Pick::Exe, "Choose an app"),
+                    };
+                    if let Some(p) = pick(hwnd, what, title) {
+                        set_raw_text(item(hwnd, E_VALUE), &p);
                     }
                 }
                 // 一覧で選んだ文字を入れたときは, 一覧を作り直さない

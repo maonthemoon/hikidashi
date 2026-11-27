@@ -20,7 +20,7 @@ use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 use windows::Win32::UI::Shell::{AssocQueryStringW, SHEmptyRecycleBinW, ShellExecuteW, ASSOCF_IS_PROTOCOL, ASSOCF_NOTRUNCATE, ASSOCSTR_EXECUTABLE, SHERB_NOCONFIRMATION, SHERB_NOSOUND};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL, VK_MENU, VK_BACK, VK_END, VK_RETURN, VK_SHIFT, VK_V,
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL, VK_MENU, VK_BACK, VK_END, VK_ESCAPE, VK_RETURN, VK_SHIFT, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowTextW, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL,
@@ -422,14 +422,15 @@ fn wait_chatgpt(tries: u32) -> Result<(), String> {
     Err(last)
 }
 
-/// 画像を添付した長い質問(K22)を送る. 文字は今まで通り`?q=`で入れ(長ければ貼る), `send_delay_ms`待って前の窓がChatGPTなら,
-/// 1枚ずつクリップボードに画像を入れて`Ctrl+V`を送る. 最後の1枚のあと`image_wait_ms`×枚数だけ待ってEnterを押す(`send_enter`がオフなら押さない).
-/// 終わったらクリップボードを元に戻す. ChatGPTの窓にならなければ貼らず, 最後の画像をクリップボードに残す.
-/// - 文字がないときも`?q=.`で開いて`.`を消す(`?q=`なしで開くと入力欄にカーソルがなく, 貼り付けが空振りした. 2026-11-24の会社PC).
+/// 画像を添付した長い質問(K22)を送る. 文字は`?q=`に入れずにChatGPTを開き(K73), `send_delay_ms`待って前の窓がChatGPTなら,
+/// 入力欄に移って(`Shift+Esc`)文字を貼り, 1枚ずつクリップボードに画像を入れて`Ctrl+V`を送る. 最後の1枚のあと`image_wait_ms`×枚数だけ待って
+/// Enterを押す(`send_enter`がオフなら押さない). 終わったらクリップボードを元に戻す. ChatGPTの窓にならなければ貼らず, 最後の画像をクリップボードに残す.
+/// - `?q=`で開くと, ChatGPTによっては開いたとたんに文字だけを送ってしまう(確認17のI2. 個人のアカウント). `?q=.`も`.`が送られるので使わない.
+/// - `?q=`なしで開くと入力欄にカーソルがないことがある(2026-11-24の会社PC)ので, ChatGPTの「入力欄に移る」キー(`Shift+Esc`)を押してから貼る.
 /// - 貼るたびに少し待つ. ブラウザーがクリップボードを読む前に次の画像に入れ替えると, 同じ画像が2回入ったり抜けたりするため.
 /// - `mode = "clipboard"`なら, 文字(なければ最後の画像)をコピーして開くだけ.
 pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::attach::Image], cfg: &Config) -> Result<(), String> {
-    use hikidashi_core::attach::{self, Fill};
+    use hikidashi_core::attach;
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     let Some(last_img) = images.last() else { return ask_chatgpt_long(hwnd, &text, cfg) };
     if cfg.chatgpt.mode == "clipboard" {
@@ -440,17 +441,9 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
         }
         return open_url(&cfg.chatgpt.home, cfg);
     }
-    let fill = attach::fill(&text, url_encode(&text), URL_Q_MAX);
     // 送る前のクリップボード(画像のことも多い)を写しておく
     let saved = super::clipboard::save(hwnd);
-    match &fill {
-        Fill::Url(enc) => open_url(&cfg.chatgpt.url.replace("{q}", enc), cfg)?,
-        Fill::Paste => {
-            copy_text(hwnd, &text.replace('\n', "\r\n"))?;
-            open_url(&cfg.chatgpt.url.replace("{q}", "."), cfg)?;
-        }
-        Fill::Dot => open_url(&cfg.chatgpt.url.replace("{q}", "."), cfg)?,
-    }
+    open_url(&attach::url_without_q(&cfg.chatgpt.url), cfg)?;
     super::storage::log(&format!("chatgpt: question with {} image(s) ({} chars)", images.len(), text.chars().count()));
     let images = images.to_vec();
     let (h, delay, enter, per) = (hwnd.0 as isize, cfg.chatgpt.send_delay_ms, cfg.chatgpt.send_enter, cfg.chatgpt.image_wait_ms);
@@ -475,24 +468,19 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
         }
         // 貼ったChatGPTのウィンドウ. 待つ間にほかへ移っても, Enterの前にここへ戻す
         let gpt = unsafe { GetForegroundWindow() }.0 as isize;
-        match fill {
-            Fill::Paste => {
-                // `.`を消して, 文字の全体を貼る
-                press(&[VK_CONTROL, VK_END]);
-                sleep(150);
-                press(&[VK_BACK]);
-                sleep(150);
-                press(&[VK_CONTROL, VK_V]);
-                super::storage::log(&format!("chatgpt: pasted a long question ({} chars)", text.chars().count()));
-                sleep(800);
+        // タイトルが出てから入力欄ができるまでの間を少し待ち, 入力欄に移る
+        sleep(1000);
+        press(&[VK_SHIFT, VK_ESCAPE]);
+        sleep(300);
+        if !text.trim().is_empty() {
+            if let Err(e) = copy_text(hwnd, &text.replace('\n', "\r\n")) {
+                fail(e, saved);
+                return;
             }
-            Fill::Dot => {
-                press(&[VK_CONTROL, VK_END]);
-                sleep(150);
-                press(&[VK_BACK]);
-                sleep(300);
-            }
-            Fill::Url(_) => {}
+            sleep(150);
+            press(&[VK_CONTROL, VK_V]);
+            super::storage::log(&format!("chatgpt: pasted a long question ({} chars)", text.chars().count()));
+            sleep(800);
         }
         let mut ours = 0;
         for (i, img) in images.iter().enumerate() {

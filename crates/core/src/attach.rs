@@ -76,29 +76,19 @@ pub fn wait_ms(images: usize, per_ms: u32) -> u64 {
     images as u64 * per_ms as u64
 }
 
-/// 画像つきで送るときの, 文字の入れ方
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Fill {
-    /// `?q=`に入れて開く(符号にした文字)
-    Url(String),
-    /// 長いので`?q=.`で開き, `.`を消して貼る
-    Paste,
-    /// 文字がない. `?q=.`で開き, `.`を消すだけ(`?q=`なしで開くと入力欄にカーソルがなく, 貼り付けが空振りする. K22)
-    Dot,
-}
-
-/// 文字の入れ方を決める. `encoded`は`?q=`に入れる形にした文字, `max`はその長さの上限
-pub fn fill(text: &str, encoded: String, max: usize) -> Fill {
-    if text.trim().is_empty() {
-        Fill::Dot
-    } else if encoded.len() <= max {
-        Fill::Url(encoded)
+/// 画像つきで送るときに開くURL. 文字は`?q=`に入れず, 開いてから画像と一緒に貼る(K73).
+/// `?q=`で開くと, ChatGPTによっては開いたとたんに文字だけを送ってしまう(確認17のI2. 個人のアカウント).
+/// `q={q}`の項目を消し, 残りの項目はそのまま(例: `https://chatgpt.com/?model=x&q={q}` → `https://chatgpt.com/?model=x`)
+pub fn url_without_q(url: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else { return url.replace("{q}", "") };
+    let rest: Vec<&str> = query.split('&').filter(|p| !p.contains("{q}")).collect();
+    if rest.is_empty() {
+        base.to_string()
     } else {
-        Fill::Paste
+        format!("{base}?{}", rest.join("&"))
     }
 }
 
-/// PNGの大きさ(IHDRから)
 pub fn png_size(b: &[u8]) -> Option<(u32, u32)> {
     if b.len() < 24 || &b[..8] != b"\x89PNG\r\n\x1a\n" || &b[12..16] != b"IHDR" {
         return None;
@@ -193,10 +183,11 @@ mod tests {
     }
 
     #[test]
-    fn how_to_fill() {
-        assert_eq!(fill("  \n", String::new(), 10), Fill::Dot);
-        assert_eq!(fill("abc", "abc".into(), 10), Fill::Url("abc".into()));
-        assert_eq!(fill("abc", "%E3%81%82".into(), 5), Fill::Paste);
+    fn url_for_images() {
+        assert_eq!(url_without_q("https://chatgpt.com/?q={q}"), "https://chatgpt.com/");
+        assert_eq!(url_without_q("https://chatgpt.com/?model=x&q={q}"), "https://chatgpt.com/?model=x");
+        assert_eq!(url_without_q("https://chatgpt.com/g/g-abc?q={q}&hints=search"), "https://chatgpt.com/g/g-abc?hints=search");
+        assert_eq!(url_without_q("https://chatgpt.com/"), "https://chatgpt.com/");
     }
 
     #[test]

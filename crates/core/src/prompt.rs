@@ -18,10 +18,10 @@ pub fn config_prompt(toml: &str, ja: bool) -> String {
 # 決まり
 - 頼まれていない値は変えない. 行を消さない.
 - 書き方はTOML. 下の設定にない名前の項目や区分を作らない(読み込みのエラーになる). 使い方は, 下の設定の # の行にある.
-- Windowsのパスは '...' で囲む(例: 'D:\\tools'). \\ を重ねない. ユーザーフォルダーは %USERPROFILE% と書ける.
+- Windowsのパスは '...' で囲む(例: 'D:\\tools'). \\ を重ねない. パスは C:\\Users\\… のように実際のパスで書く(%USERPROFILE% も読める).
 - [prefix]: キーワード. 空白を入れない. 同じものを2つに使わない. 空にするとその種類を使わない.
 - [alias]: 語 = \"アプリの名前\". 語に空白を入れない. 例: ppt = \"PowerPoint\"
-- [[command]]: 語でWebページかコマンドを開く. name(空白なし. 重ならない), title(なくてもよい), url か run のどちらか1つ. {{q}} は語の後に打った文字.
+- [[command]]: 語でWebページ, コマンド, ファイル, フォルダーを開く. name(空白なし. 重ならない), title(なくてもよい), url, run, file, folder のどれか1つ. {{q}} は語の後に打った文字(url と run だけ).
 - [files], [apps]: 一覧は ['...', '...'] の形. exclude の * は何文字にでも合う.
 - [keys]: {keys} のどれか, または空. 同じものを2つに使わない.
 - [menu]: {menu} から選ぶ.
@@ -47,10 +47,10 @@ pub fn config_prompt(toml: &str, ja: bool) -> String {
 # Rules
 - Do not change or remove anything I did not ask for.
 - The format is TOML. Do not add names or sections that are not in the file below (they cause an error). The # lines explain each one.
-- Put Windows paths in '...' (for example 'D:\\tools') and do not double the \\. The user folder can be written as %USERPROFILE%.
+- Put Windows paths in '...' (for example 'D:\\tools') and do not double the \\. Write real paths such as C:\\Users\\… (%USERPROFILE% is also read).
 - [prefix]: keywords. No spaces, no duplicates. Empty turns that kind off.
 - [alias]: word = \"app name\". No spaces in the word. Example: ppt = \"PowerPoint\"
-- [[command]]: a word that opens a web page or runs a command. name (no spaces, no duplicates), title (optional), and either url or run. {{q}} is what is typed after the word.
+- [[command]]: a word that opens a web page, a command, a file or a folder. name (no spaces, no duplicates), title (optional), and one of url, run, file or folder. {{q}} is what is typed after the word (url and run only).
 - [files], [apps]: lists look like ['...', '...']. In exclude, * matches anything.
 - [keys]: one of {keys}, or empty. No duplicates.
 - [menu]: choose from {menu}.

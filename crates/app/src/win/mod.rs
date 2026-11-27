@@ -1626,7 +1626,8 @@ impl App {
     }
 
     /// 書く窓のキー. 処理したらtrue(RichEditには渡さない)
-    fn compose_key(&mut self, vk: u16, sys: bool) -> bool {
+    /// `repeat`: キーを押したままの繰り返し(lParamの30ビット目)
+    fn compose_key(&mut self, vk: u16, sys: bool, repeat: bool) -> bool {
         let down = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetKeyState(k.0 as i32) < 0 };
         let ctrl = down(VK_CONTROL);
         let shift = down(VK_SHIFT);
@@ -1683,8 +1684,11 @@ impl App {
                 self.compose_wrap("*");
                 true
             }
+            // 押したままの繰り返しでは貼らない(確認17: Ctrl+Vの1回で同じ画像が4枚付いた. K73)
             v if (ctrl && !shift && v == b'V' as u16) || (shift && !ctrl && v == VK_INSERT.0) => {
-                self.compose_paste();
+                if !repeat {
+                    self.compose_paste();
+                }
                 true
             }
             // RichEditの飾りのキー(Ctrl+U, Ctrl+E, Ctrl+Shift+Lなど)は使わない. 全選択, コピー, 切り取り, 元に戻すだけ通す
@@ -3070,7 +3074,7 @@ impl App {
 
     /// 自作コマンドの一覧(設定の`[[command]]`と, `run`のスクリプト)を作り直す
     fn rebuild_commands(&mut self) {
-        let mut items = router::command_items(&self.config);
+        let mut items = command_items(&self.config);
         items.extend(cscripts::run_items(&self.scripts));
         self.commands = Catalog::new(items);
     }
@@ -3671,7 +3675,7 @@ fn compose_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id:
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             EAT_CHAR.set(false);
-            if let Some(true) = with_app(|app| app.compose_key(wparam.0 as u16, msg == WM_SYSKEYDOWN)) {
+            if let Some(true) = with_app(|app| app.compose_key(wparam.0 as u16, msg == WM_SYSKEYDOWN, (lparam.0 >> 30) & 1 == 1)) {
                 EAT_CHAR.set(true);
                 return LRESULT(0);
             }
@@ -3760,6 +3764,16 @@ fn take_over() -> bool {
         }
     }
     false
+}
+
+/// 自作コマンドの一覧. ファイルとフォルダーのエイリアス(K71)のパスは, 手で書いた`%USERPROFILE%`などを展開する
+fn command_items(cfg: &Config) -> Vec<hikidashi_core::catalog::Item> {
+    let mut items = router::command_items(cfg);
+    for it in items.iter_mut().filter(|it| it.args == router::ALIAS_ARG) {
+        it.target = storage::expand(&it.target);
+        it.sub.clone_from(&it.target);
+    }
+    items
 }
 
 /// 動いているHikidashiの窓に`--query`の文字を`WM_COPYDATA`で送る. 送れたらtrue
@@ -3927,7 +3941,7 @@ pub fn run() {
         shared: shared.clone(),
         searcher,
         dict,
-        commands: Catalog::new(router::command_items(&config)),
+        commands: Catalog::new(command_items(&config)),
         sel_hotkey: None,
         sel_registered: false,
         capture_sel: false,
@@ -4056,6 +4070,20 @@ pub fn run() {
         system::tray_remove(app.hwnd);
     });
     // スレッドが動いているうちに片付ける(プロセスの終わりでは, 待つ相手がもういない. K51)
+    // 片付けが長引いても終わる(確認17のV2: 前のものが10秒たっても終わらず, 起動し直しが止まった. K73).
+    // 保存は上で済んでいるので, 3秒たったらプロセスごと終える
+    let started = std::time::Instant::now();
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        storage::log("quit: cleanup did not finish in 3000 ms, so Hikidashi ends now");
+        unsafe {
+            let _ = windows::Win32::System::Threading::TerminateProcess(windows::Win32::System::Threading::GetCurrentProcess(), 0);
+        }
+    });
     let app = APP.with(|a| a.borrow_mut().take());
     drop(app);
+    let ms = started.elapsed().as_millis();
+    if ms >= 500 {
+        storage::log(&format!("quit: cleanup took {ms} ms"));
+    }
 }

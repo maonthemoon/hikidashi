@@ -276,7 +276,7 @@ pub enum KeyAction {
     Terminal,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Command {
     /// 打つ名前(例: `jira`)
@@ -290,6 +290,30 @@ pub struct Command {
     /// 実行するコマンド(例: `code "C:\Users\me\dotfile"`). `{q}`も使える
     #[serde(default)]
     pub run: Option<String>,
+    /// 開くファイル(K71. 例: `C:\Users\me\Documents\見積.xlsx`)
+    #[serde(default)]
+    pub file: Option<String>,
+    /// 開くフォルダー(K71)
+    #[serde(default)]
+    pub folder: Option<String>,
+}
+
+/// エイリアスの種類(K44, K71). 番号は設定画面の`Kind`の並び(0はアプリの呼び名)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandKind {
+    Url = 1,
+    Run = 2,
+    File = 3,
+    Folder = 4,
+}
+
+impl Command {
+    /// 中身のある欄の種類と値. どれもなければ`None`
+    pub fn target(&self) -> Option<(CommandKind, &str)> {
+        [(CommandKind::Url, &self.url), (CommandKind::Run, &self.run), (CommandKind::File, &self.file), (CommandKind::Folder, &self.folder)]
+            .into_iter()
+            .find_map(|(k, v)| v.as_deref().filter(|s| !s.trim().is_empty()).map(|v| (k, v)))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -650,7 +674,7 @@ pub fn to_toml(c: &Config) -> String {
     }
     line("");
     line("# Your own commands. \"url\" opens a web page ({q} is what you type after the name).");
-    line("# \"run\" runs a command.");
+    line("# \"run\" runs a command. \"file\" and \"folder\" open that file or folder.");
     if c.command.is_empty() {
         line("# [[command]]");
         line("# name = \"jira\"");
@@ -673,6 +697,12 @@ pub fn to_toml(c: &Config) -> String {
         }
         if let Some(r) = &cmd.run {
             line(&format!("run = {}", q(r)));
+        }
+        if let Some(f) = &cmd.file {
+            line(&format!("file = {}", q(f)));
+        }
+        if let Some(f) = &cmd.folder {
+            line(&format!("folder = {}", q(f)));
         }
         line("");
     }
@@ -823,10 +853,9 @@ impl Config {
             if self.command[..i].iter().any(|d| d.name.eq_ignore_ascii_case(&c.name)) {
                 return Err(format!("Command \"{}\" is listed twice.", c.name));
             }
-            let url = c.url.as_deref().is_some_and(|s| !s.trim().is_empty());
-            let run = c.run.as_deref().is_some_and(|s| !s.trim().is_empty());
-            if url == run {
-                return Err(format!("Command \"{}\" needs either a URL or a command to run.", c.name));
+            let filled = [&c.url, &c.run, &c.file, &c.folder].iter().filter(|v| v.as_deref().is_some_and(|s| !s.trim().is_empty())).count();
+            if filled != 1 {
+                return Err(format!("Command \"{}\" needs one of url, run, file or folder.", c.name));
             }
         }
         for (kind, list) in [("app", &self.menu.app), ("file", &self.menu.file), ("folder", &self.menu.folder)] {
@@ -921,8 +950,10 @@ mod tests {
         let mut c = Config::default();
         c.alias.insert("ppt".into(), "PowerPoint".into());
         c.alias.insert("ワード".into(), "Word".into());
-        c.command.push(Command { name: "jira".into(), title: Some("Open \"Jira\"".into()), url: Some("https://x/{q}".into()), run: None });
-        c.command.push(Command { name: "dot".into(), title: None, url: None, run: Some(r#"code "C:\Users\me\dot""#.into()) });
+        c.command.push(Command { name: "jira".into(), title: Some("Open \"Jira\"".into()), url: Some("https://x/{q}".into()), ..Default::default() });
+        c.command.push(Command { name: "dot".into(), title: None, url: None, run: Some(r#"code "C:\Users\me\dot""#.into()), ..Default::default() });
+        c.command.push(Command { name: "mitsumori".into(), file: Some(r"C:\Users\me\見積.xlsx".into()), ..Default::default() });
+        c.command.push(Command { name: "anken".into(), folder: Some(r"D:\案件".into()), ..Default::default() });
         c.files.roots.push(r"D:\work".into());
         c.files.skip_dirs.push(r"%USERPROFILE%\Documents\old".into());
         c.files.exclude = vec!["it's".into()];
@@ -1017,7 +1048,7 @@ mod tests {
         c.prefix.kill = "f".into();
         assert!(c.validate().unwrap_err().contains("twice"));
         let mut c = Config::default();
-        c.command.push(Command { name: "x".into(), title: None, url: None, run: None });
+        c.command.push(Command { name: "x".into(), ..Default::default() });
         assert!(c.validate().is_err());
         let mut c = Config::default();
         c.alias.insert("a b".into(), "X".into());
