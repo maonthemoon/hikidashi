@@ -3830,9 +3830,18 @@ pub fn run() {
     // 前のものは片付け(索引や拡張のスレッドを止める)に数秒かかることがあるので, 置き換えと起動し直しは10秒まで待つ
     for _ in 0..100 {
         let m = unsafe { CreateMutexW(None, true, w!("Local\\HikidashiSingleInstance")) };
-        if m.is_ok() && unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
-            first = true;
-            break;
+        let exists = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+        if let Ok(h) = m {
+            if !exists {
+                // 持ったまま動く(プロセスが終わると放される)
+                first = true;
+                break;
+            }
+            // 自分で開いた分は閉じる. 閉じないと, 前のものが終わっても自分の分で印が残り続け,
+            // 10秒待って起動し直せなかった(確認17のV2. e2eで再現. K75)
+            unsafe {
+                let _ = windows::Win32::Foundation::CloseHandle(h);
+            }
         }
         if !updated && !restarting {
             break;
