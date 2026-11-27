@@ -1283,7 +1283,7 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
     {
         let mut p = Page::new(&mut m, PAD, TOP, BODY_W);
         p.title("Aliases");
-        p.group("", "Short words that open an app, a web page or a command.");
+        p.group("", "Short words that open an app, a web page, a command, a file or a folder.");
         let bar = vec![Bar::Button(ID_ALIAS_ADD, "Add"), Bar::Button(ID_ALIAS_EDIT, "Edit"), Bar::Button(ID_ALIAS_DEL, "Remove")];
         p.list(ID_ALIASES, &alias_rows(c), &[110, 110], &["Word", "Kind", "Opens"], 12, bar);
         sections.push(p.finish());

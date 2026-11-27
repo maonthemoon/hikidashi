@@ -206,7 +206,7 @@ const PAIRS: &[(&str, &str)] = &[
     ("Hide Markdown marks", "Markdownの記号を隠す"),
     ("In long questions, except on the line you edit", "長い質問で, 書いている行のほか"),
     // エイリアスと, 小さな窓
-    ("Short words that open an app, a web page or a command.", "短い語で, アプリ, Webページ, コマンドを開きます."),
+    ("Short words that open an app, a web page, a command, a file or a folder.", "短い語で, アプリ, Webページ, コマンド, ファイル, フォルダーを開きます."),
     ("Word", "語"),
     ("Kind", "種類"),
     ("Opens", "開くもの"),
