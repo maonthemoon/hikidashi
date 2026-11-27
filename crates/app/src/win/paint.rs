@@ -7,7 +7,8 @@ use super::util::{mix, rgb, wide};
 use super::App;
 use hikidashi_core::builtin::SysAction;
 use hikidashi_core::catalog::Kind;
-use hikidashi_core::router::{Action, Icon, Row};
+use hikidashi_core::help;
+use hikidashi_core::router::{Action, Icon, Row, Sym};
 use std::sync::OnceLock;
 use windows::Win32::Foundation::{RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
@@ -211,6 +212,36 @@ fn kind_glyph(k: Kind) -> char {
     }
 }
 
+/// 機能ごとの線のアイコン(K74. Segoe Fluent Icons / Segoe MDL2 Assets の文字)
+fn sym_glyph(s: Sym) -> char {
+    match s {
+        Sym::Apps => '\u{E71D}',
+        Sym::Files => glyph::FOLDER,
+        Sym::Bookmark => glyph::BOOKMARK,
+        Sym::Kill => glyph::KILL,
+        Sym::Wsl => glyph::COMMAND,
+        Sym::Box => '\u{E753}',
+        Sym::Globe => glyph::GLOBE,
+        Sym::Chat => glyph::CHAT,
+        Sym::Clipboard => '\u{E77F}',
+        Sym::Save => '\u{E74E}',
+        Sym::Calendar => glyph::CALENDAR,
+        Sym::Lock => '\u{E72E}',
+        Sym::Sleep => '\u{E708}',
+        Sym::Trash => '\u{E74D}',
+        Sym::Restart => '\u{E777}',
+        Sym::Power => glyph::POWER,
+        Sym::SignOut => '\u{E748}',
+        Sym::Settings => glyph::SETTING,
+        Sym::Display => '\u{E7F4}',
+        Sym::Reload => '\u{E72C}',
+        Sym::Search => '\u{E721}',
+        Sym::Keyboard => '\u{E765}',
+        Sym::Command => glyph::COMMAND,
+        Sym::Extension => glyph::CODE,
+    }
+}
+
 fn draw_glyph(hdc: HDC, app: &App, g: char, x: i32, y: i32, size: i32, color: u32, small: bool) {
     let mut rc = RECT { left: x, top: y, right: x + size, bottom: y + size };
     draw_text(hdc, if small { app.fonts.icon_small } else { app.fonts.icon }, &g.to_string(), color, &mut rc, DT_CENTER | DT_VCENTER);
@@ -264,7 +295,31 @@ fn icon_of(row: &Row) -> (Option<String>, char) {
         Icon::Favicon(_) => (None, glyph::BOOKMARK),
         Icon::Clip => (None, glyph::COPY),
         Icon::Calendar => (None, glyph::CALENDAR),
+        Icon::Symbol(s) => (None, sym_glyph(*s)),
     }
+}
+
+/// キーワードのタグ(K74): 角の丸い地に`cal`と, 空白を打つ印(`␣`の形を線で描く). 右端を`right`にそろえ, 左端を返す
+fn draw_keyword_chip(hdc: HDC, app: &App, kw: &str, right: i32, y: i32, rh: i32, selected: bool) -> i32 {
+    let d = app.dpi;
+    let tw = text_width(hdc, app.fonts.tag, kw);
+    let (gap, mark, padx) = (s(5, d), s(9, d), s(7, d));
+    let cw = padx + tw + gap + mark + padx;
+    let ch = s(22, d);
+    let top = y + (rh - ch) / 2;
+    let crc = RECT { left: right - cw, top, right, bottom: top + ch };
+    let bg = if selected { pal().bg } else { mix(pal().bg, pal().accent, 0.10) };
+    round_fill(hdc, &crc, s(6, d), bg);
+    let mut trc = RECT { left: crc.left + padx, top: crc.top, right: crc.left + padx + tw, bottom: crc.bottom };
+    draw_text(hdc, app.fonts.tag, kw, pal().accent_text, &mut trc, DT_VCENTER | DT_LEFT);
+    // 空白の印: 下の横線と, 両端の短い縦線
+    let (mx, my, t) = (crc.left + padx + tw + gap, crc.top + ch / 2 + s(3, d), s(1, d).max(1));
+    let h = s(3, d);
+    let c = mix(pal().accent_text, bg, 0.35);
+    fill(hdc, &RECT { left: mx, top: my, right: mx + mark, bottom: my + t }, c);
+    fill(hdc, &RECT { left: mx, top: my - h, right: mx + t, bottom: my + t }, c);
+    fill(hdc, &RECT { left: mx + mark - t, top: my - h, right: mx + mark, bottom: my + t }, c);
+    crc.left
 }
 
 pub fn paint(app: &mut App) {
@@ -519,11 +574,17 @@ fn draw_row(hdc: HDC, app: &mut App, row: &Row, index: usize, selected: bool, pa
         Action::Item { .. } => app.confirm.is_some() && selected && row.tag == "system",
         _ => false,
     };
-    let tag = row.tag;
-    let tw = text_width(hdc, app.fonts.tag, tag);
-    let tx = w - pad - s(12, d) - tw;
-    let mut trc = RECT { left: tx, top: y, right: w - pad - s(12, d), bottom: y + rh };
-    draw_text(hdc, app.fonts.tag, tag, if row.warn || confirm { pal().accent_text } else { pal().text_tertiary }, &mut trc, DT_VCENTER | DT_RIGHT);
+    // `?`の一覧のキーワードの行は, 種類の代わりにキーワードのタグ(K74)
+    let tx = if let Some(kw) = help::keyword_chip(row) {
+        draw_keyword_chip(hdc, app, kw, w - pad - s(12, d), y, rh, selected)
+    } else {
+        let tag = row.tag;
+        let tw = text_width(hdc, app.fonts.tag, tag);
+        let tx = w - pad - s(12, d) - tw;
+        let mut trc = RECT { left: tx, top: y, right: w - pad - s(12, d), bottom: y + rh };
+        draw_text(hdc, app.fonts.tag, tag, if row.warn || confirm { pal().accent_text } else { pal().text_tertiary }, &mut trc, DT_VCENTER | DT_RIGHT);
+        tx
+    };
 
     let nx = ix + isz + s(12, d);
     let max_w = tx - s(12, d) - nx;

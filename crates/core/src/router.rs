@@ -143,6 +143,37 @@ pub enum Icon {
     Clip,
     /// 予定(Outlook)
     Calendar,
+    /// 機能ごとの線のアイコン(`?`の一覧とWindowsの操作. K74)
+    Symbol(Sym),
+}
+
+/// 機能ごとの線のアイコン(K74). 絵は画面の側(Segoe Fluent Icons)で決める
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sym {
+    Apps,
+    Files,
+    Bookmark,
+    Kill,
+    Wsl,
+    Box,
+    Globe,
+    Chat,
+    Clipboard,
+    Save,
+    Calendar,
+    Lock,
+    Sleep,
+    Trash,
+    Restart,
+    Power,
+    SignOut,
+    Settings,
+    Display,
+    Reload,
+    Search,
+    Keyboard,
+    Command,
+    Extension,
 }
 
 /// 一覧の1行
@@ -247,6 +278,7 @@ pub(crate) fn item_icon(it: &Item) -> Icon {
         Kind::App | Kind::File | Kind::Folder => Icon::Path(it.target.clone()),
         Kind::Window | Kind::Process if !it.args.is_empty() => Icon::Path(it.args.clone()),
         Kind::Bookmark => Icon::Favicon(it.target.clone()),
+        Kind::System => crate::builtin::SysAction::from_id(&it.target).map_or(Icon::Kind(Kind::System), |a| Icon::Symbol(a.sym())),
         k => Icon::Kind(k),
     }
 }
@@ -730,14 +762,25 @@ mod tests {
         cfg.prefix.wsl = String::new();
         let rows = help::rows(&cfg, &Catalog::new(builtin::system_items()), vec![], "");
         assert_eq!(rows[0].name, "Apps");
-        assert_eq!(rows[0].sub, "a  Search only apps");
+        assert_eq!(rows[0].sub, "Search only apps");
         assert_eq!(rows[0].action, Action::Fill("a ".into()));
+        // キーワードは右端のタグ(K74)
+        assert_eq!(help::keyword_chip(&rows[0]), Some("a"));
+        assert_eq!(rows[0].icon, Icon::Symbol(Sym::Apps));
         // 空にしたキーワード(WSL)は出さない
         assert!(!rows.iter().any(|r| r.name == "WSL"));
-        assert!(rows.iter().any(|r| r.name == "Saved results" && r.sub.starts_with("snap ")));
+        assert!(rows.iter().any(|r| r.name == "Saved results" && help::keyword_chip(r) == Some("snap")));
+        let lock = rows.iter().find(|r| r.name == "Lock").unwrap();
+        assert_eq!((lock.tag, lock.icon.clone(), help::keyword_chip(lock)), ("system", Icon::Symbol(Sym::Lock), None));
+        let key = rows.iter().find(|r| r.tag == "key").unwrap();
+        assert_eq!((key.icon.clone(), help::keyword_chip(key)), (Icon::Symbol(Sym::Keyboard), None));
         let last = rows.iter().take_while(|r| matches!(r.tag, "keyword" | "command")).last().unwrap();
         assert_eq!((last.name.as_str(), last.tag), ("jira", "command"));
         assert_eq!(last.action, Action::Fill("jira ".into()));
+        assert_eq!((help::keyword_chip(last), last.icon.clone()), (Some("jira"), Icon::Symbol(Sym::Globe)));
+        // キーワードで絞れる
+        let snap = help::rows(&cfg, &Catalog::new(vec![]), vec![], "snap");
+        assert_eq!(snap[0].name, "Saved results");
     }
     use crate::builtin;
     use std::sync::atomic::AtomicBool;

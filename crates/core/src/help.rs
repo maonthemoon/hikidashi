@@ -2,9 +2,23 @@
 
 use crate::catalog::{Catalog, Kind};
 use crate::config::Config;
-use crate::router::{self, Action, Icon, Mode, Row, Source};
+use crate::router::{self, Action, Icon, Mode, Row, Source, Sym};
 
 const COMMAND_ICON: Icon = Icon::Kind(Kind::Command);
+
+/// 右端をキーワードのタグにする行の種類(K74)
+const KEYWORD_TAGS: [&str; 4] = ["keyword", "command", "extension", "script"];
+
+/// キーワードの行なら, 右端のタグに出すキーワード(`cal`など. 後ろの空白は画面の側で印にする. K74)
+pub fn keyword_chip(row: &Row) -> Option<&str> {
+    if !KEYWORD_TAGS.contains(&row.tag) {
+        return None;
+    }
+    match &row.action {
+        Action::Fill(k) => Some(k.trim_end()).filter(|k| !k.is_empty()),
+        _ => None,
+    }
+}
 
 pub struct Entry {
     pub row: Row,
@@ -54,33 +68,37 @@ pub fn filter_words(mode: Mode, text: &str) -> Option<&str> {
     }
 }
 
-/// キーワードを入れる行. 2行目は「キーワード  説明」.
+/// キーワードを入れる行. 2行目は説明, キーワードは右端のタグに出す(K74). キーワードでも絞れるよう別名に入れる
 pub fn help_row(keyword: &str, name: &str, desc: &str, tag: &'static str) -> Entry {
-    let sub = if desc.is_empty() { keyword.to_string() } else { format!("{keyword}  {desc}") };
-    Entry::new(name, &sub, tag, COMMAND_ICON, Action::Fill(format!("{keyword} ")), "")
+    let icon = match tag {
+        "extension" => Icon::Symbol(Sym::Extension),
+        _ => COMMAND_ICON,
+    };
+    Entry::new(name, desc, tag, icon, Action::Fill(format!("{keyword} ")), keyword)
 }
 
 fn keyword_entries(cfg: &Config) -> Vec<Entry> {
     let p = &cfg.prefix;
-    let list: [(&str, &str, &str, &str); 12] = [
-        (&p.app, "Apps", "Search only apps", "アプリ"),
-        (&p.file, "Files and folders", "Search only files and folders", "ファイル フォルダー"),
-        (&p.bookmark, "Bookmarks", "Search Chrome and Edge bookmarks", "ブックマーク"),
-        (&p.kill, "End a process", "Choose a running app to end", "プロセス 終了 kill"),
-        (&p.wsl, "WSL", "Search files in your WSL home", "wsl"),
-        (&p.boxdrive, "Box", "Search files in Box Drive", "box"),
-        (&p.google, "Google", "Search on Google", "検索"),
-        (&p.chatgpt, "ChatGPT", "Write a long question to ChatGPT", "質問 chatgpt"),
-        (&p.clipboard, "Clipboard history", "Text and files you copied", "クリップボード 履歴"),
-        (&p.calc, "Calculator", "Numbers, formulas, RF", "計算 電卓 rf"),
-        (&p.snapshot, "Saved results", "Results saved with Ctrl+S", "保存"),
-        (&p.calendar, "Calendar", "Outlook appointments", "予定 カレンダー outlook"),
+    let list: [(&str, &str, &str, &str, Icon); 12] = [
+        (&p.app, "Apps", "Search only apps", "アプリ", Icon::Symbol(Sym::Apps)),
+        (&p.file, "Files and folders", "Search only files and folders", "ファイル フォルダー", Icon::Symbol(Sym::Files)),
+        (&p.bookmark, "Bookmarks", "Search Chrome and Edge bookmarks", "ブックマーク", Icon::Symbol(Sym::Bookmark)),
+        (&p.kill, "End a process", "Choose a running app to end", "プロセス 終了 kill", Icon::Symbol(Sym::Kill)),
+        (&p.wsl, "WSL", "Search files in your WSL home", "wsl", Icon::Symbol(Sym::Wsl)),
+        (&p.boxdrive, "Box", "Search files in Box Drive", "box", Icon::Symbol(Sym::Box)),
+        (&p.google, "Google", "Search on Google", "検索", Icon::Symbol(Sym::Globe)),
+        (&p.chatgpt, "ChatGPT", "Write a long question to ChatGPT", "質問 chatgpt", Icon::Symbol(Sym::Chat)),
+        (&p.clipboard, "Clipboard history", "Text and files you copied", "クリップボード 履歴", Icon::Symbol(Sym::Clipboard)),
+        (&p.calc, "Calculator", "Numbers, formulas, RF", "計算 電卓 rf", Icon::Calc),
+        (&p.snapshot, "Saved results", "Results saved with Ctrl+S", "保存", Icon::Symbol(Sym::Save)),
+        (&p.calendar, "Calendar", "Outlook appointments", "予定 カレンダー outlook", Icon::Calendar),
     ];
     list.into_iter()
-        .filter(|(keyword, _, _, _)| !keyword.is_empty())
-        .map(|(keyword, name, desc, alias)| {
+        .filter(|(keyword, ..)| !keyword.is_empty())
+        .map(|(keyword, name, desc, alias, icon)| {
             let mut entry = help_row(keyword, name, desc, "keyword");
-            entry.alias = alias.to_string();
+            entry.alias = format!("{keyword} {alias}");
+            entry.row.icon = icon;
             entry
         })
         .collect()
@@ -136,10 +154,10 @@ fn syntax_entries() -> impl Iterator<Item = Entry> {
     ];
     let kind_entries = kinds.into_iter().map(|(kind, sub)| {
         let name = format!("kind:{kind}");
-        Entry::new(&name, sub, "syntax", COMMAND_ICON, Action::Fill(format!("{name} ")), "検索 書き方 種類")
+        Entry::new(&name, sub, "syntax", Icon::Symbol(Sym::Search), Action::Fill(format!("{name} ")), "検索 書き方 種類")
     });
     kind_entries.chain(examples.into_iter().map(|(name, sub, fill, alias)| {
-        Entry::new(name, sub, "syntax", COMMAND_ICON, Action::Fill(fill.to_string()), &format!("検索 書き方 {alias}"))
+        Entry::new(name, sub, "syntax", Icon::Symbol(Sym::Search), Action::Fill(fill.to_string()), &format!("検索 書き方 {alias}"))
     }))
 }
 
@@ -158,7 +176,7 @@ fn key_entries(cfg: &Config) -> impl Iterator<Item = Entry> + '_ {
     ];
     keys.into_iter().filter_map(|(name, sub, id, alias)| {
         let name = name.trim();
-        (!name.is_empty()).then(|| Entry::new(name, sub, "key", COMMAND_ICON, Action::Manual(id.to_string()), alias))
+        (!name.is_empty()).then(|| Entry::new(name, sub, "key", Icon::Symbol(Sym::Keyboard), Action::Manual(id.to_string()), alias))
     })
 }
 
@@ -167,8 +185,15 @@ pub fn rows(cfg: &Config, system: &Catalog, plugins: Vec<Entry>, words: &str) ->
     let mut entries = keyword_entries(cfg);
     for c in &cfg.command {
         let title = c.title.as_deref().unwrap_or(&c.name);
-        let what = c.url.as_deref().or(c.run.as_deref()).unwrap_or("");
-        entries.push(help_row(&c.name, title, what, "command"));
+        let (kind, what) = c.target().unwrap_or((crate::config::CommandKind::Run, ""));
+        let mut entry = help_row(&c.name, title, what, "command");
+        entry.row.icon = match kind {
+            crate::config::CommandKind::Url => Icon::Symbol(Sym::Globe),
+            crate::config::CommandKind::Run => COMMAND_ICON,
+            crate::config::CommandKind::File => Icon::Kind(Kind::File),
+            crate::config::CommandKind::Folder => Icon::Kind(Kind::Folder),
+        };
+        entries.push(entry);
     }
     entries.extend(plugins);
     entries.extend(system.items.iter().enumerate().map(|(index, item)| Entry {
@@ -188,7 +213,7 @@ pub fn rows(cfg: &Config, system: &Catalog, plugins: Vec<Entry>, words: &str) ->
             "No matching help",
             "Clear the words after ? to see everything",
             "",
-            COMMAND_ICON,
+            Icon::Symbol(Sym::Search),
             Action::Copy(String::new()),
             "",
         ).row]

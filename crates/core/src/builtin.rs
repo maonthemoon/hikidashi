@@ -142,6 +142,22 @@ pub enum SysAction {
 }
 
 impl SysAction {
+    /// 行のアイコン(K74)
+    pub fn sym(self) -> crate::router::Sym {
+        use crate::router::Sym;
+        match self {
+            SysAction::Lock => Sym::Lock,
+            SysAction::Sleep => Sym::Sleep,
+            SysAction::EmptyRecycleBin => Sym::Trash,
+            SysAction::Restart => Sym::Restart,
+            SysAction::ShutDown => Sym::Power,
+            SysAction::SignOut => Sym::SignOut,
+            SysAction::HikidashiSettings => Sym::Settings,
+            SysAction::DisplayOff => Sym::Display,
+            SysAction::RestartHikidashi => Sym::Reload,
+        }
+    }
+
     /// `Enter`を2回押したときだけ実行するか(K7)
     pub fn needs_confirm(self) -> bool {
         matches!(self, SysAction::Restart | SysAction::ShutDown | SysAction::SignOut)

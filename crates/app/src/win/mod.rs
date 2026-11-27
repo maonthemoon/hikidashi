@@ -780,11 +780,8 @@ impl App {
             self.load_favicons();
         }
         self.history.reset();
-        // 印(モード)は引き継がない. 出したときは, いつも全部を探す(文字は残す. K51)
-        if select_all && self.mode != Mode::All {
-            self.mode = Mode::All;
-            self.position_edit();
-        }
+        // 印(モード)は付けたまま出す(K74. K51では外していた). 文字は全選択で残るので, 打てばその印のまま続き,
+        // `Backspace`1回で文字と印が両方消える
         self.refresh();
         if self.composing() {
             // 書きかけのまま閉じたので, 書く窓で開く(Q5のA). 日本語で書くことが多いのでIMEは変えない
@@ -1357,6 +1354,14 @@ impl App {
                 // 保存した結果を見返しているときは, 空のBackspaceで一覧に戻る
                 if self.snap_view.is_some() && self.edit_text().is_empty() {
                     self.snap_view = None;
+                    self.refresh();
+                    return true;
+                }
+                // 印があって文字が全部選ばれているとき(出し直した直後など)は, 文字と印を両方消して, ふつうの入力欄に戻す(K74)
+                if self.mode != Mode::All && !self.edit_text().is_empty() && self.all_selected() {
+                    self.mode = Mode::All;
+                    self.set_edit_text("");
+                    self.position_edit();
                     self.refresh();
                     return true;
                 }
@@ -2097,6 +2102,16 @@ impl App {
             Action::Item { source, index } => self.item(*source, *index).is_some_and(|it| it.kind == Kind::Folder),
             _ => false,
         }
+    }
+
+    /// 入力欄の文字が全部選ばれているか(出し直した直後の形. K74)
+    fn all_selected(&self) -> bool {
+        let (mut s, mut e) = (0u32, 0u32);
+        unsafe {
+            SendMessageW(self.edit, EM_GETSEL, Some(WPARAM(&mut s as *mut _ as usize)), Some(LPARAM(&mut e as *mut _ as isize)));
+        }
+        let n = self.edit_text().encode_utf16().count() as u32;
+        n > 0 && s == 0 && e == n
     }
 
     /// 入力欄のカーソルが終わりにあり, 何も選んでいないか
