@@ -703,7 +703,6 @@ pub fn system(a: SysAction, hwnd: HWND) -> Result<(), String> {
             SysAction::SignOut => shell("open", "shutdown.exe", "/l", "", true),
             // 画面の側(App::open_settings, App::restart)で行う
             SysAction::HikidashiSettings | SysAction::RestartHikidashi => Ok(()),
-            SysAction::ToggleDarkMode => toggle_dark_mode(),
             SysAction::DisplayOff => {
                 // すぐ送ると, Enterを離したキーで画面がまた点く. 少し待ってから自分の窓に送る(DefWindowProcが消す)
                 let h = hwnd.0 as isize;
@@ -716,28 +715,6 @@ pub fn system(a: SysAction, hwnd: HWND) -> Result<(), String> {
             }
         }
     }
-}
-
-/// Windowsの「既定のアプリモード」(`AppsUseLightTheme`)を反対にし, ほかのアプリに知らせる(K62).
-/// Windowsのモード(タスクバーなど. `SystemUsesLightTheme`)は変えない
-fn toggle_dark_mode() -> Result<(), String> {
-    use windows::core::w;
-    use windows::Win32::System::Registry::{RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_DWORD};
-    use windows::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE};
-    let key = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
-    unsafe {
-        let mut light: u32 = 1;
-        let mut size = 4u32;
-        let _ = RegGetValueW(HKEY_CURRENT_USER, key, w!("AppsUseLightTheme"), RRF_RT_REG_DWORD, None, Some(&mut light as *mut u32 as *mut _), Some(&mut size));
-        let new: u32 = if light == 0 { 1 } else { 0 };
-        let r = RegSetKeyValueW(HKEY_CURRENT_USER, key, w!("AppsUseLightTheme"), REG_DWORD.0, Some(&new as *const u32 as *const _), 4);
-        if r.is_err() {
-            return Err(format!("Could not change the app mode ({})", r.0));
-        }
-        let topic = WStr::new("ImmersiveColorSet");
-        let _ = SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, WPARAM(0), LPARAM(topic.pcwstr().0 as isize), SMTO_ABORTIFHUNG, 1000, None);
-    }
-    Ok(())
 }
 
 /// 設定のページを開く(H5-2). `ms-settings:`はURI, ほかはコマンド

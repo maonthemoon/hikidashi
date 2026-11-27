@@ -2321,11 +2321,6 @@ impl App {
                         if let Err(e) = actions::system(a, hwnd) {
                             storage::log(&e);
                         }
-                        // 自分あての知らせ(WM_SETTINGCHANGE)は処理中で受け取れないので, ここで追いかける(K62)
-                        if a == SysAction::ToggleDarkMode {
-                            theme::set_theme(&self.config.ui.theme);
-                            self.sync_theme();
-                        }
                         return;
                     }
                     Kind::Command => {

@@ -135,8 +135,6 @@ pub enum SysAction {
     SignOut,
     /// Hikidashiの設定画面を開く(K16, G1)
     HikidashiSettings,
-    /// Windowsのアプリのモードのライトとダークを切り替える(K62)
-    ToggleDarkMode,
     /// 画面だけ消す(K62)
     DisplayOff,
     /// Hikidashiを終えて起動し直す(K62)
@@ -158,7 +156,6 @@ impl SysAction {
             SysAction::ShutDown => "sys:shutdown",
             SysAction::SignOut => "sys:signout",
             SysAction::HikidashiSettings => "sys:hikidashi-settings",
-            SysAction::ToggleDarkMode => "sys:darkmode",
             SysAction::DisplayOff => "sys:displayoff",
             SysAction::RestartHikidashi => "sys:hikidashi-restart",
         }
@@ -173,7 +170,6 @@ impl SysAction {
             "sys:shutdown" => SysAction::ShutDown,
             "sys:signout" => SysAction::SignOut,
             "sys:hikidashi-settings" => SysAction::HikidashiSettings,
-            "sys:darkmode" => SysAction::ToggleDarkMode,
             "sys:displayoff" => SysAction::DisplayOff,
             "sys:hikidashi-restart" => SysAction::RestartHikidashi,
             _ => return None,
@@ -200,7 +196,6 @@ pub fn system_items() -> Vec<Item> {
         (SysAction::ShutDown, "Shut down", "Press Enter twice", "シャットダウン shutdown 電源を切る"),
         (SysAction::SignOut, "Sign out", "Press Enter twice", "サインアウト ログオフ logoff logout"),
         (SysAction::HikidashiSettings, "Hikidashi settings", "Open the settings window", "settings hikidashi config 設定"),
-        (SysAction::ToggleDarkMode, "Toggle dark mode", "Switch Windows apps between light and dark", "dark light theme ダーク ライト ダークモード テーマ"),
         (SysAction::DisplayOff, "Turn off display", "Turn off the screen now", "displayoff monitoroff screenoff 画面を消す 画面オフ モニターオフ 消灯"),
         (SysAction::RestartHikidashi, "Restart Hikidashi", "Quit and start Hikidashi again", "reload 再起動 リスタート"),
     ];
@@ -247,8 +242,11 @@ mod tests {
     fn builtins() {
         assert!(settings_items().iter().any(|s| s.name == "Display" && s.keys.contains(&"ディスプレイ".to_string())));
         let sys = system_items();
-        assert_eq!(sys.len(), 10);
-        assert_eq!(SysAction::from_id(&sys[9].target), Some(SysAction::RestartHikidashi));
+        assert_eq!(sys.len(), 9);
+        assert_eq!(SysAction::from_id(&sys[8].target), Some(SysAction::RestartHikidashi));
+        // Toggle dark modeは消した(K66). 前の版の履歴のidは読まない
+        assert!(!sys.iter().any(|s| s.keys.iter().any(|k| k == "dark")));
+        assert_eq!(SysAction::from_id("sys:darkmode"), None);
         assert_eq!(SysAction::from_id(&sys[6].target), Some(SysAction::HikidashiSettings));
         assert!(SysAction::from_id(&sys[4].target).unwrap().needs_confirm());
         assert!(!SysAction::Lock.needs_confirm());
