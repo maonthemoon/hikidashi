@@ -2687,7 +2687,10 @@ impl App {
     /// Hikidashiを起動し直す(K62): 自分のexeを`--restart`で起動し, 自分は終わる. 新しい方は前のものが終わるのを待つ
     fn restart(&mut self) {
         match std::process::Command::new(&self.exe_path).arg("--restart").spawn() {
-            Ok(_) => unsafe {
+            Ok(child) => unsafe {
+                // 新しい方がウィンドウを前に出せるようにする(確認16のQ6: 出直さなかった. 前に出せる権利は今前にいる自分にしかない)
+                let _ = AllowSetForegroundWindow(child.id());
+                storage::log(&format!("restart: started pid {}", child.id()));
                 let _ = PostMessageW(Some(self.hwnd), WM_APP_QUIT, WPARAM(0), LPARAM(0));
             },
             Err(e) => self.fail(format!("Could not restart: {e}")),
@@ -3794,7 +3797,9 @@ pub fn run() {
     }
     // 2つ目は起動せず, 動いているものの窓を出す
     let mut first = false;
-    for _ in 0..30 {
+    let started = std::time::Instant::now();
+    // 前のものは片付け(索引や拡張のスレッドを止める)に数秒かかることがあるので, 置き換えと起動し直しは10秒まで待つ
+    for _ in 0..100 {
         let m = unsafe { CreateMutexW(None, true, w!("Local\\HikidashiSingleInstance")) };
         if m.is_ok() && unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
             first = true;
@@ -3805,6 +3810,9 @@ pub fn run() {
         }
         // 前のものが終わるのを待つ
         std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if restarting {
+        storage::log(&format!("restart: {} after {} ms", if first { "previous Hikidashi quit" } else { "previous Hikidashi did not quit" }, started.elapsed().as_millis()));
     }
     if !first {
         if let Some(q) = &query {

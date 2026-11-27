@@ -481,7 +481,8 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
         // アップロードが終わるまで待つ
         sleep(attach::wait_ms(images.len(), per));
         if enter {
-            match wait_chatgpt(1) {
+            // 待つ間にほかのウィンドウに移っても, 15秒以内にChatGPTに戻ればEnterを押す(確認16のI4)
+            match wait_chatgpt(60) {
                 Ok(()) => {
                     press_enter();
                     super::storage::log("chatgpt: sent Enter");
