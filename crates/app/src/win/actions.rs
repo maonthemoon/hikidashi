@@ -378,6 +378,7 @@ pub fn ask_chatgpt_long(hwnd: HWND, text: &str, cfg: &Config) -> Result<(), Stri
             Ok(gpt) => gpt,
             Err(front) => return not_pasted(front),
         };
+        settle_page(Instant::now());
         focus_chatgpt_input(gpt);
         // `.`を消して, 全体を貼る
         for (keys, pause_ms) in [(&[VK_CONTROL, VK_END][..], 0), (&[VK_BACK][..], 150), (&[VK_CONTROL, VK_V][..], 150)] {
@@ -540,6 +541,7 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[attach::Image], cfg:
             Ok(gpt) => gpt,
             Err(front) => return fail(format!("window in front: {front}"), saved),
         };
+        settle_page(Instant::now());
         focus_chatgpt_input(gpt);
         if !text.trim().is_empty() {
             if let Err(e) = copy_text(hwnd, &text.replace('\n', "\r\n")) {
@@ -650,6 +652,17 @@ fn with_chatgpt_automation<T>(run: impl FnOnce(windows::core::Result<IUIAutomati
         let result = run(CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER));
         CoUninitialize();
         result
+    }
+}
+
+/// ChatGPTが前に出てから貼るまでの最低の待ち. 前に出て4.6秒(開いてから)で貼ると, ページの準備の途中で
+/// 文と画像が消えて入力欄が空のまま送られなかった(確認20のP2. 前の版は開いてから6秒ほど待って貼っていた)
+const PAGE_SETTLE_MS: u64 = 2500;
+
+fn settle_page(front_at: Instant) {
+    let waited = elapsed_ms(front_at);
+    if waited < PAGE_SETTLE_MS {
+        sleep_ms(PAGE_SETTLE_MS - waited);
     }
 }
 
