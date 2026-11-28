@@ -566,44 +566,49 @@ fn bring_chatgpt_back(gpt: HWND) -> Result<(), String> {
     wait_chatgpt(8)
 }
 
-/// ChatGPTの入力欄(`id="prompt-textarea"`. UI AutomationではAutomationId)を探して選ぶ(K76). 選べたら, 何を選んだかを返す.
-/// 見つからなければ, 今の焦点とページの中の入力欄の一覧を返す(ログで探し方を直すため). ほかの入力欄は選ばない(貼る先を間違えないように).
+/// ChatGPTの入力欄を探して選ぶ(K76). ページ(Document)の中の入力欄(Edit)のうち, 知っているID(HTMLの`id`. UI AutomationではAutomationId)のもの,
+/// なければページの入力欄が1つだけならそれを選ぶ. 2つ以上で知らないIDなら選ばない(貼る先を間違えないように).
+/// 2026-11-28のEdge(ログインなし)は`mobile-composer-prompt`(名前`Chat with ChatGPT`)だった. 前は`prompt-textarea`.
+/// 選べたら何を選んだかを, 選べなければ今の焦点とページの入力欄の一覧を返す(ログで探し方を直すため).
 /// ブラウザーが読み上げ用の木を作るまで時間がかかることがあるので, 3秒まで探し直す. 裏のスレッドで呼ぶ
 fn focus_chatgpt_input(gpt: HWND) -> Result<String, String> {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
     use windows::Win32::System::Variant::VARIANT;
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants, UIA_AutomationIdPropertyId, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId,
-        UIA_EditControlTypeId,
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
     };
+    const IDS: [&str; 2] = ["prompt-textarea", "mobile-composer-prompt"];
     let err = |e: windows::core::Error| e.to_string();
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).map_err(err)?;
+        let id_of = |e: &IUIAutomationElement| e.CurrentAutomationId().map(|s| s.to_string()).unwrap_or_default();
         let desc = |e: &IUIAutomationElement| {
             let name: String = e.CurrentName().map(|s| s.to_string()).unwrap_or_default().chars().take(40).collect();
-            format!("type {} name '{}' id '{}'", e.CurrentControlType().map(|c| c.0).unwrap_or(0), name, e.CurrentAutomationId().map(|s| s.to_string()).unwrap_or_default())
+            format!("type {} name '{}' id '{}'", e.CurrentControlType().map(|c| c.0).unwrap_or(0), name, id_of(e))
         };
-        let by_id = uia.CreatePropertyCondition(UIA_AutomationIdPropertyId, &VARIANT::from("prompt-textarea")).map_err(err)?;
+        let doc = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_DocumentControlTypeId.0)).map_err(err)?;
+        let edit = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_EditControlTypeId.0)).map_err(err)?;
+        let mut edits: Vec<IUIAutomationElement> = vec![];
         for _ in 0..6 {
-            if let Ok(el) = uia.ElementFromHandle(gpt).and_then(|root| root.FindFirst(TreeScope_Descendants, &by_id)) {
+            edits.clear();
+            if let Ok(all) = uia.ElementFromHandle(gpt).and_then(|root| root.FindFirst(TreeScope_Descendants, &doc)).and_then(|d| d.FindAll(TreeScope_Descendants, &edit)) {
+                for i in 0..all.Length().unwrap_or(0) {
+                    if let Ok(e) = all.GetElement(i) {
+                        edits.push(e);
+                    }
+                }
+            }
+            let pick = edits.iter().find(|e| IDS.contains(&id_of(e).as_str())).or(if edits.len() == 1 { edits.first() } else { None });
+            if let Some(el) = pick {
                 el.SetFocus().map_err(err)?;
-                return Ok(desc(&el));
+                return Ok(desc(el));
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
         let focused = uia.GetFocusedElement().map(|e| desc(&e)).unwrap_or_default();
-        let mut edits = vec![];
-        let doc = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_DocumentControlTypeId.0)).map_err(err)?;
-        let edit = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_EditControlTypeId.0)).map_err(err)?;
-        if let Ok(all) = uia.ElementFromHandle(gpt).and_then(|root| root.FindFirst(TreeScope_Descendants, &doc)).and_then(|d| d.FindAll(TreeScope_Descendants, &edit)) {
-            for i in 0..all.Length().unwrap_or(0).min(5) {
-                if let Ok(e) = all.GetElement(i) {
-                    edits.push(desc(&e));
-                }
-            }
-        }
-        Err(format!("not found. focused: {focused}. edits in the page: [{}]", edits.join("; ")))
+        let list: Vec<String> = edits.iter().take(5).map(|e| desc(e)).collect();
+        Err(format!("not found. focused: {focused}. edits in the page: [{}]", list.join("; ")))
     }
 }
 
