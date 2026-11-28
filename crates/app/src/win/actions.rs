@@ -740,7 +740,7 @@ fn find_send_button(uia: &IUIAutomation, gpt: HWND) -> windows::core::Result<Opt
     use windows::Win32::System::Variant::VARIANT;
     use windows::Win32::UI::Accessibility::{UIA_AutomationIdPropertyId, UIA_NamePropertyId};
     const ID: &str = "composer-submit-button";
-    // 会社PCのEdge(2026-11-28)は名前`メッセージを送信します`でIDなしだった(確認20のP2)
+    // 個人のPCのEdge(ログインしていないChatGPT. 2026-11-28)は名前`メッセージを送信します`でIDなしだった(確認20のP2)
     const NAMES: [&str; 6] = ["Send prompt", "Send message", "プロンプトを送信する", "メッセージを送信します", "メッセージを送信する", "送信"];
     // ボタンを全部取って1つずつ調べると, 長い会話のページでは1回に数秒かかった(確認20). 条件をまとめて1回で探す
     let Some(page) = chatgpt_page(uia, gpt)? else { return Ok(None) };
