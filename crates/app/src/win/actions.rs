@@ -584,6 +584,9 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[attach::Image], cfg:
                 Ok(()) => send_chatgpt_enter(gpt, started),
                 Err(front) => log(&format!("chatgpt: Enter not sent (window in front: {front})")),
             }
+        } else {
+            sleep_ms(2000);
+            log_send_button_check(gpt);
         }
         // 貼り付けが終わってから戻す
         sleep_ms(1500);
@@ -650,17 +653,24 @@ fn with_chatgpt_automation<T>(run: impl FnOnce(windows::core::Result<IUIAutomati
     }
 }
 
-fn chatgpt_page_controls(uia: &IUIAutomation, gpt: HWND, kind: UIA_CONTROLTYPE_ID) -> windows::core::Result<Option<IUIAutomationElementArray>> {
+fn chatgpt_page(uia: &IUIAutomation, gpt: HWND) -> windows::core::Result<Option<IUIAutomationElement>> {
     use windows::Win32::System::Variant::VARIANT;
     unsafe {
         let root = uia.ElementFromHandle(gpt)?;
         let doc = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_DocumentControlTypeId.0))?;
-        let page = match root.FindFirst(TreeScope_Descendants, &doc) {
-            Ok(page) => page,
+        match root.FindFirst(TreeScope_Descendants, &doc) {
+            Ok(page) => Ok(Some(page)),
             // FindFirstが見つからなかったときのNULLは, windowsクレートでは空のエラーになる
-            Err(e) if e.code() == windows::core::Error::empty().code() => return Ok(None),
-            Err(e) => return Err(e),
-        };
+            Err(e) if e.code() == windows::core::Error::empty().code() => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+fn chatgpt_page_controls(uia: &IUIAutomation, gpt: HWND, kind: UIA_CONTROLTYPE_ID) -> windows::core::Result<Option<IUIAutomationElementArray>> {
+    use windows::Win32::System::Variant::VARIANT;
+    unsafe {
+        let Some(page) = chatgpt_page(uia, gpt)? else { return Ok(None) };
         let control = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(kind.0))?;
         page.FindAll(TreeScope_Descendants, &control).map(Some)
     }
@@ -714,36 +724,79 @@ fn focus_chatgpt_input(gpt: HWND) {
 
 /// ページ内の送信ボタンをIDで探し, なければ名前で探す
 fn find_send_button(uia: &IUIAutomation, gpt: HWND) -> windows::core::Result<Option<bool>> {
+    use windows::Win32::System::Variant::VARIANT;
+    use windows::Win32::UI::Accessibility::{UIA_AutomationIdPropertyId, UIA_NamePropertyId};
     const ID: &str = "composer-submit-button";
     const NAMES: [&str; 4] = ["Send prompt", "Send message", "プロンプトを送信する", "送信"];
-    let Some(buttons) = chatgpt_page_controls(uia, gpt, UIA_ButtonControlTypeId)? else { return Ok(None) };
+    // ボタンを全部取って1つずつ調べると, 長い会話のページでは1回に数秒かかった(確認20). 条件をまとめて1回で探す
+    let Some(page) = chatgpt_page(uia, gpt)? else { return Ok(None) };
     unsafe {
-        let mut by_name = None;
-        for i in 0..buttons.Length()? {
-            let button = buttons.GetElement(i)?;
-            if button.CurrentAutomationId().is_ok_and(|id| id.to_string() == ID) {
-                return Ok(Some(button.CurrentIsEnabled()?.as_bool()));
-            }
-            if by_name.is_none() && button.CurrentName().is_ok_and(|name| {
-                let name = name.to_string();
-                NAMES.iter().any(|prefix| name.starts_with(prefix))
-            }) {
-                by_name = Some(button);
-            }
+        let button = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_ButtonControlTypeId.0))?;
+        let mut keys = vec![Some(uia.CreatePropertyCondition(UIA_AutomationIdPropertyId, &VARIANT::from(ID))?)];
+        for name in NAMES {
+            keys.push(Some(uia.CreatePropertyCondition(UIA_NamePropertyId, &VARIANT::from(name))?));
         }
-        by_name.map(|button| button.CurrentIsEnabled().map(|enabled| enabled.as_bool())).transpose()
+        let cond = uia.CreateAndCondition(&button, &uia.CreateOrConditionFromNativeArray(&keys)?)?;
+        match page.FindFirst(TreeScope_Descendants, &cond) {
+            Ok(found) => Ok(Some(found.CurrentIsEnabled()?.as_bool())),
+            Err(e) if e.code() == windows::core::Error::empty().code() => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 
+/// 送信ボタンが見つからなかったとき, ページのボタンの終わりの方(入力欄の近く)をログに書く(確認20のP2)
+fn log_page_buttons(uia: &IUIAutomation, gpt: HWND) {
+    let list = unsafe {
+        let Ok(Some(all)) = chatgpt_page_controls(uia, gpt, UIA_ButtonControlTypeId) else {
+            log("chatgpt: page buttons: no page");
+            return;
+        };
+        let n = all.Length().unwrap_or(0);
+        (n.saturating_sub(20)..n)
+            .filter_map(|i| all.GetElement(i).ok())
+            .map(|b| {
+                let name: String = b.CurrentName().map(|s| s.to_string()).unwrap_or_default().chars().take(30).collect();
+                let id = b.CurrentAutomationId().map(|s| s.to_string()).unwrap_or_default();
+                let on = b.CurrentIsEnabled().map(|e| e.as_bool()).unwrap_or(false);
+                format!("'{name}' id '{id}'{}", if on { "" } else { " (disabled)" })
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    log(&format!("chatgpt: page buttons (last 20): {list}"));
+}
+
+/// `send_enter = false`のとき(e2e), 送信ボタンが見つかるかだけをログに書く
+fn log_send_button_check(gpt: HWND) {
+    with_chatgpt_automation(|uia| {
+        let Ok(uia) = uia else { return };
+        let t = Instant::now();
+        let r = find_send_button(&uia, gpt);
+        log(&format!("chatgpt: send button check: {} ({} ms)", match &r {
+            Ok(Some(true)) => "ready".to_string(),
+            Ok(Some(false)) => "disabled".to_string(),
+            Ok(None) => "not found".to_string(),
+            Err(e) => format!("error {e}"),
+        }, elapsed_ms(t)));
+        if !matches!(r, Ok(Some(_))) {
+            log_page_buttons(&uia, gpt);
+        }
+    });
+}
+
 fn wait_send_button(gpt: HWND, started: Instant, mut wait: SendWait, limit_ms: u64, missing_ms: u64, fallback_ms: u64) -> SendWaitStep {
+    let mut slowest = 0u64;
     with_chatgpt_automation(|uia| loop {
+        let t = Instant::now();
         let enabled = uia.as_ref().ok().and_then(|uia| find_send_button(uia, gpt).ok().flatten());
+        slowest = slowest.max(elapsed_ms(t));
         let elapsed = elapsed_ms(started);
         let step = wait.step(elapsed, enabled, limit_ms, missing_ms);
         match step {
             SendWaitStep::Wait { until_ms } => sleep_ms(CHATGPT_POLL_MS.min(until_ms - elapsed)),
             SendWaitStep::Ready => {
-                log(&format!("chatgpt: send button ready after {elapsed} ms"));
+                log(&format!("chatgpt: send button ready after {elapsed} ms (slowest search {slowest} ms)"));
                 return step;
             }
             SendWaitStep::Fallback => {
@@ -751,11 +804,17 @@ fn wait_send_button(gpt: HWND, started: Instant, mut wait: SendWait, limit_ms: u
                 if remaining > 0 {
                     sleep_ms(remaining);
                 }
-                log(&format!("chatgpt: send button not found, waited {} ms", elapsed_ms(started)));
+                log(&format!("chatgpt: send button not found, waited {} ms (slowest search {slowest} ms)", elapsed_ms(started)));
+                if let Ok(uia) = uia.as_ref() {
+                    log_page_buttons(uia, gpt);
+                }
                 return step;
             }
             SendWaitStep::TimedOut => {
-                log(&format!("chatgpt: send button wait timed out after {elapsed} ms"));
+                log(&format!("chatgpt: send button wait timed out after {elapsed} ms (slowest search {slowest} ms)"));
+                if let Ok(uia) = uia.as_ref() {
+                    log_page_buttons(uia, gpt);
+                }
                 return step;
             }
         }
