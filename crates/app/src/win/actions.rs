@@ -472,7 +472,7 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
         // タイトルが出てから入力欄ができるまでの間を少し待ち, 入力欄を選ぶ. 見つからなければ, ページが入力欄を選んでいることに任せて貼る
         sleep(1000);
         match focus_chatgpt_input(HWND(gpt as *mut _)) {
-            Ok(()) => super::storage::log("chatgpt: focused the input box"),
+            Ok(what) => super::storage::log(&format!("chatgpt: focused the input box ({what})")),
             Err(e) => super::storage::log(&format!("chatgpt: input box not focused ({e})")),
         }
         sleep(300);
@@ -566,28 +566,44 @@ fn bring_chatgpt_back(gpt: HWND) -> Result<(), String> {
     wait_chatgpt(8)
 }
 
-/// ChatGPTの入力欄(`id="prompt-textarea"`. UI AutomationではAutomationId)を探して選ぶ(K76).
-/// ブラウザーが読み上げ用の木を作るまで時間がかかることがあるので, 10秒まで探し直す. 裏のスレッドで呼ぶ
-fn focus_chatgpt_input(gpt: HWND) -> Result<(), String> {
+/// ChatGPTの入力欄(`id="prompt-textarea"`. UI AutomationではAutomationId)を探して選ぶ(K76). 選べたら, 何を選んだかを返す.
+/// 見つからなければ, 今の焦点とページの中の入力欄の一覧を返す(ログで探し方を直すため). ほかの入力欄は選ばない(貼る先を間違えないように).
+/// ブラウザーが読み上げ用の木を作るまで時間がかかることがあるので, 3秒まで探し直す. 裏のスレッドで呼ぶ
+fn focus_chatgpt_input(gpt: HWND) -> Result<String, String> {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
     use windows::Win32::System::Variant::VARIANT;
-    use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation, TreeScope_Descendants, UIA_AutomationIdPropertyId};
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants, UIA_AutomationIdPropertyId, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId,
+        UIA_EditControlTypeId,
+    };
+    let err = |e: windows::core::Error| e.to_string();
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
-        let cond = uia.CreatePropertyCondition(UIA_AutomationIdPropertyId, &VARIANT::from("prompt-textarea")).map_err(|e| e.to_string())?;
-        let mut last = String::from("not found");
-        for _ in 0..20 {
-            match uia.ElementFromHandle(gpt).and_then(|root| root.FindFirst(TreeScope_Descendants, &cond)) {
-                Ok(el) => match el.SetFocus() {
-                    Ok(()) => return Ok(()),
-                    Err(e) => last = e.to_string(),
-                },
-                Err(e) => last = e.to_string(),
+        let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).map_err(err)?;
+        let desc = |e: &IUIAutomationElement| {
+            let name: String = e.CurrentName().map(|s| s.to_string()).unwrap_or_default().chars().take(40).collect();
+            format!("type {} name '{}' id '{}'", e.CurrentControlType().map(|c| c.0).unwrap_or(0), name, e.CurrentAutomationId().map(|s| s.to_string()).unwrap_or_default())
+        };
+        let by_id = uia.CreatePropertyCondition(UIA_AutomationIdPropertyId, &VARIANT::from("prompt-textarea")).map_err(err)?;
+        for _ in 0..6 {
+            if let Ok(el) = uia.ElementFromHandle(gpt).and_then(|root| root.FindFirst(TreeScope_Descendants, &by_id)) {
+                el.SetFocus().map_err(err)?;
+                return Ok(desc(&el));
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
-        Err(last)
+        let focused = uia.GetFocusedElement().map(|e| desc(&e)).unwrap_or_default();
+        let mut edits = vec![];
+        let doc = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_DocumentControlTypeId.0)).map_err(err)?;
+        let edit = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_EditControlTypeId.0)).map_err(err)?;
+        if let Ok(all) = uia.ElementFromHandle(gpt).and_then(|root| root.FindFirst(TreeScope_Descendants, &doc)).and_then(|d| d.FindAll(TreeScope_Descendants, &edit)) {
+            for i in 0..all.Length().unwrap_or(0).min(5) {
+                if let Ok(e) = all.GetElement(i) {
+                    edits.push(desc(&e));
+                }
+            }
+        }
+        Err(format!("not found. focused: {focused}. edits in the page: [{}]", edits.join("; ")))
     }
 }
 
