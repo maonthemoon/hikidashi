@@ -740,7 +740,8 @@ fn find_send_button(uia: &IUIAutomation, gpt: HWND) -> windows::core::Result<Opt
     use windows::Win32::System::Variant::VARIANT;
     use windows::Win32::UI::Accessibility::{UIA_AutomationIdPropertyId, UIA_NamePropertyId};
     const ID: &str = "composer-submit-button";
-    const NAMES: [&str; 4] = ["Send prompt", "Send message", "プロンプトを送信する", "送信"];
+    // 会社PCのEdge(2026-11-28)は名前`メッセージを送信します`でIDなしだった(確認20のP2)
+    const NAMES: [&str; 6] = ["Send prompt", "Send message", "プロンプトを送信する", "メッセージを送信します", "メッセージを送信する", "送信"];
     // ボタンを全部取って1つずつ調べると, 長い会話のページでは1回に数秒かかった(確認20). 条件をまとめて1回で探す
     let Some(page) = chatgpt_page(uia, gpt)? else { return Ok(None) };
     unsafe {
@@ -751,11 +752,28 @@ fn find_send_button(uia: &IUIAutomation, gpt: HWND) -> windows::core::Result<Opt
         }
         let cond = uia.CreateAndCondition(&button, &uia.CreateOrConditionFromNativeArray(&keys)?)?;
         match page.FindFirst(TreeScope_Descendants, &cond) {
-            Ok(found) => Ok(Some(found.CurrentIsEnabled()?.as_bool())),
-            Err(e) if e.code() == windows::core::Error::empty().code() => Ok(None),
-            Err(e) => Err(e),
+            Ok(found) => return Ok(Some(found.CurrentIsEnabled()?.as_bool())),
+            Err(e) if e.code() == windows::core::Error::empty().code() => {}
+            Err(e) => return Err(e),
         }
+        // 名前の言い回しが変わっても見つかるよう, 終わりの方(入力欄の近く)のボタンを名前の一部で探す
+        let all = page.FindAll(TreeScope_Descendants, &button)?;
+        let n = all.Length()?;
+        for i in (n.saturating_sub(8)..n).rev() {
+            let b = all.GetElement(i)?;
+            let name = b.CurrentName().map(|s| s.to_string()).unwrap_or_default();
+            if is_send_name(&name) {
+                return Ok(Some(b.CurrentIsEnabled()?.as_bool()));
+            }
+        }
+        Ok(None)
     }
+}
+
+/// 送信ボタンらしい名前か(`メッセージを送信します`, `Send prompt`など). 「送信を停止」などは除く
+fn is_send_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    (name.contains("送信") && !name.contains("停止") && !name.contains("止め")) || (lower.starts_with("send") && !lower.contains("stop"))
 }
 
 /// 送信ボタンが見つからなかったとき, ページのボタンの終わりの方(入力欄の近く)をログに書く(確認20のP2)
