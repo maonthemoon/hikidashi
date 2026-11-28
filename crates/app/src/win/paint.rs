@@ -12,6 +12,7 @@ use hikidashi_core::router::{Action, Icon, Row, Sym};
 use std::sync::OnceLock;
 use windows::Win32::Foundation::{RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
 fn s(v: i32, dpi: u32) -> i32 {
     (v as i64 * dpi as i64 / 96) as i32
@@ -465,18 +466,36 @@ fn paint_compose(hdc: HDC, app: &App, w: i32, h: i32) {
     draw_text(hdc, app.fonts.sub, &count, pal().text_tertiary, &mut crc, DT_VCENTER | DT_RIGHT);
     // 添付した画像(左に小さな箱). 知らせがなければ, 続けて外す方法を出す
     let sizes: Vec<(u32, u32)> = app.images.iter().map(|i| (i.width, i.height)).collect();
+    let all_selected = app.draft_selection.is_all();
     let mut left = s(PAD_X, d);
     if let Some(label) = hikidashi_core::attach::label(&sizes) {
         let lw = text_width(hdc, app.fonts.sub, &label) + s(14, d);
         let lh = s(20, d);
         let lt = top + (h - top - lh) / 2;
         let lrc = RECT { left, top: lt, right: (left + lw).min(crc.left - s(12, d)), bottom: lt + lh };
-        round_fill(hdc, &lrc, s(6, d), pal().bg_muted);
+        let (bg, text) = if all_selected {
+            let (bg, text) = if unsafe { GetForegroundWindow() } == app.hwnd {
+                (COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT)
+            } else {
+                (COLOR_BTNFACE, COLOR_BTNTEXT)
+            };
+            // COLORREFのRとBを入れ替え, 描画用の0xRRGGBBに戻す
+            unsafe { (rgb(GetSysColor(bg)).0, rgb(GetSysColor(text)).0) }
+        } else {
+            (pal().bg_muted, pal().text)
+        };
+        round_fill(hdc, &lrc, s(6, d), bg);
         let mut trc = lrc;
-        draw_text(hdc, app.fonts.sub, &label, pal().text, &mut trc, DT_CENTER | DT_VCENTER | DT_END_ELLIPSIS);
+        draw_text(hdc, app.fonts.sub, &label, text, &mut trc, DT_CENTER | DT_VCENTER | DT_END_ELLIPSIS);
         left = lrc.right + s(10, d);
     }
-    let hint = if sizes.is_empty() { "Ctrl+↑  Earlier questions" } else { hikidashi_core::attach::REMOVE_HINT };
+    let hint = if all_selected {
+        "Type to start over   →  Continue"
+    } else if sizes.is_empty() {
+        "Ctrl+↑  Earlier questions"
+    } else {
+        hikidashi_core::attach::REMOVE_HINT
+    };
     let (t, err) = app.status_text().unwrap_or_else(|| (hint.into(), false));
     let mut src = RECT { left, top, right: crc.left - s(12, d), bottom: h };
     draw_text(hdc, app.fonts.sub, &t, if err { pal().danger } else { pal().text_tertiary }, &mut src, DT_VCENTER | DT_END_ELLIPSIS);
@@ -492,7 +511,7 @@ fn paint_compose(hdc: HDC, app: &App, w: i32, h: i32) {
     round_fill(hdc, &crc, s(6, d), pal().bg_muted);
     let mut trc = crc;
     draw_text(hdc, app.fonts.tag, label, pal().text, &mut trc, DT_CENTER | DT_VCENTER);
-    let keys = "Enter  Send     Shift+Enter  New line     Esc  Back";
+    let keys = "Enter  Send     Shift+Enter  New line     Esc  Close";
     let mut krc = RECT { left: crc.right + s(12, d), top: 0, right: w - s(PAD_X, d), bottom: bh };
     draw_text(hdc, app.fonts.sub, keys, pal().text_tertiary, &mut krc, DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS);
 }

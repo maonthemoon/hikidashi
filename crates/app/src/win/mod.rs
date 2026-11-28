@@ -34,7 +34,7 @@ use hikidashi_core::scripts::{self as cscripts, RunOutcome, Script};
 use hikidashi_core::selection::{self as csel, Picked};
 use hikidashi_core::catalog::{Catalog, Item, Kind};
 use hikidashi_core::attach::{self as cattach, Image, Paste};
-use hikidashi_core::compose::{Browse, Drafts};
+use hikidashi_core::compose::{AfterReplace, Browse, DraftSelection, Drafts, ReplaceAll};
 use hikidashi_core::markdown::{self, NewLine};
 use hikidashi_core::config::{self, Config, KeyAction, KEY_ALT, KEY_CTRL, KEY_SHIFT};
 use hikidashi_core::files::FileTable;
@@ -63,7 +63,7 @@ use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Controls::RichEdit::{EN_REQUESTRESIZE, EN_SELCHANGE, REQRESIZE};
 use windows::Win32::UI::Controls::{EM_GETRECT, EM_GETSEL, EM_SETLIMITTEXT, EM_SETSEL, NMHDR};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, SetFocus, VK_BACK, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_INSERT, VK_LEFT, VK_RIGHT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RWIN, VK_SHIFT, VK_TAB, VK_UP};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, SetFocus, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_RIGHT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RWIN, VK_SHIFT, VK_TAB, VK_UP};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -75,8 +75,6 @@ const WM_APP_QUIT: u32 = 0x8000 + 3;
 const TIMER_GLOW: usize = 2;
 const TIMER_QUICK: usize = 3;
 const TIMER_SELECTION: usize = 77;
-/// 書く窓のまま, エクスプローラーに移ったあとを見張る(画像を落とせるように. K63)
-const TIMER_DROP_WAIT: usize = 78;
 /// 書く窓を整える頼み(K22. RichEditの通知の中では整えず, あとで行う)
 const WM_APP_COMPOSE: u32 = 0x8000 + 5;
 /// ブックマークのアイコンを読み終えた
@@ -210,6 +208,7 @@ pub struct App {
     pub compose: Option<compose::Compose>,
     /// 書きかけと送った文
     drafts: Drafts,
+    draft_selection: DraftSelection,
     browse: Browse,
     /// 呼び出して書く窓に入れた文(これと同じ間は, 呼び出しを続ける)
     recalled: String,
@@ -782,20 +781,24 @@ impl App {
             self.load_favicons();
         }
         self.history.reset();
+        if self.draft_selection.take_reopen() && select_all {
+            let draft = self.drafts.draft.clone();
+            self.enter_compose(draft.clone(), None);
+            if let Some(c) = &self.compose {
+                let text_len = c.text().encode_utf16().count();
+                c.set_sel(0, text_len);
+                self.draft_selection.select_all(draft, text_len);
+            }
+        }
         // 印(モード)は付けたまま出す(K74. K51では外していた). 文字は全選択で残るので, 打てばその印のまま続き,
         // `Backspace`1回で文字と印が両方消える
         self.refresh();
         if self.composing() {
-            // 書きかけのまま閉じたので, 書く窓で開く(Q5のA). 日本語で書くことが多いのでIMEは変えない
+            // 書く窓では日本語で書くことが多いのでIMEは変えない
             unsafe {
                 let _ = ShowWindow(self.hwnd, SW_SHOW);
-                let _ = SetForegroundWindow(self.hwnd);
             }
-            if let Some(c) = &self.compose {
-                unsafe {
-                    let _ = SetFocus(Some(c.hwnd));
-                }
-            }
+            self.focus_compose();
             self.compose_sync();
             self.stats.last_show_ms = t0.elapsed().as_secs_f64() * 1000.0;
             return;
@@ -826,8 +829,10 @@ impl App {
         self.menu = None;
         self.confirm = None;
         self.message = None;
-        // 書く窓で閉じても, 次は検索から始める(書きかけは残る. `Shift+Enter`で続き. K51)
-        self.save_draft();
+        if self.composing() {
+            self.save_draft();
+            self.draft_selection.on_hide(&self.drafts.draft, self.images.len());
+        }
         if let Some(c) = &mut self.compose {
             if c.active {
                 c.active = false;
@@ -848,10 +853,22 @@ impl App {
     }
 
     fn toggle(&mut self) {
-        if self.visible() {
-            self.hide();
-        } else {
+        if !self.visible() {
             self.show();
+        } else if self.composing() && unsafe { GetForegroundWindow() } != self.hwnd {
+            self.focus_compose();
+        } else {
+            self.hide();
+        }
+    }
+
+    fn focus_compose(&self) {
+        if let Some(c) = &self.compose {
+            unsafe {
+                let _ = SetForegroundWindow(self.hwnd);
+                let _ = SetFocus(Some(c.hwnd));
+                let _ = InvalidateRect(Some(self.hwnd), None, false);
+            }
         }
     }
 
@@ -1202,6 +1219,14 @@ impl App {
     /// 1回のクリックで開く(押した行と離した行が同じとき)
     fn on_click(&mut self, x: i32, y: i32, down: bool) {
         if self.composing() {
+            if down {
+                // 帯をクリックしたときも, 続けて書けるようRichEditに戻す
+                if let Some(c) = &self.compose {
+                    unsafe { let _ = SetFocus(Some(c.hwnd)); }
+                }
+            } else {
+                self.compose_selection_moved(true);
+            }
             return;
         }
         let hit = self.row_at(x, y);
@@ -1440,6 +1465,7 @@ impl App {
         let dpi = self.dpi;
         let hide_marks = self.config.chatgpt.hide_marks;
         let Some(c) = &mut self.compose else { return };
+        self.draft_selection.clear();
         c.hide_marks = hide_marks;
         c.set_font_dpi(dpi);
         c.set_text(&text);
@@ -1474,8 +1500,9 @@ impl App {
         }
     }
 
-    /// 書く窓から検索に戻る(Esc). 書きかけは残す
+    /// 書く窓から検索に戻る. 書きかけは残す
     fn leave_compose(&mut self) {
+        self.draft_selection.clear();
         self.save_draft();
         let Some(c) = &mut self.compose else { return };
         c.active = false;
@@ -1501,9 +1528,8 @@ impl App {
 
     /// 新しく書き始めるとき, 前の書きかけは`Ctrl+↑`で呼び出せるように履歴に移す
     fn keep_old_draft(&mut self) {
-        let d = std::mem::take(&mut self.drafts.draft);
-        if !d.trim().is_empty() {
-            self.drafts.push_sent(&d);
+        let current = self.compose.as_ref().filter(|c| c.active).map(|c| c.text().replace('\r', "\n"));
+        if self.drafts.archive_draft(current.as_deref()) {
             storage::save_drafts(&self.drafts);
         }
     }
@@ -1589,7 +1615,13 @@ impl App {
         }
     }
 
-    /// 書く窓の文字が変わった(自分で打った. Hikidashiが入れたときも呼ぶ)
+    /// RichEditで入力されたか, 貼り付けや改行で選んだ文字を置き換えた
+    fn compose_text_replaced(&mut self) {
+        self.replace_selected_draft(ReplaceAll::TextChanged);
+        self.compose_changed();
+    }
+
+    /// 書く窓の文字が変わったので整え直す
     fn compose_changed(&mut self) {
         let _d = diag::doing("long question: restyle");
         // 呼び出した文を入れたときの通知は, RichEditから遅れて届くことがある. 中身が呼び出した文のままなら続ける
@@ -1603,6 +1635,46 @@ impl App {
             }
         }
         self.schedule_restyle(true);
+    }
+
+    fn replace_selected_draft(&mut self, action: ReplaceAll) -> bool {
+        let Some(after) = self.draft_selection.on_replace(action, &mut self.drafts) else { return false };
+        self.images.clear();
+        if after != AfterReplace::KeepEditing {
+            if let Some(c) = &mut self.compose {
+                c.set_text("");
+            }
+            self.browse.reset();
+        }
+        if after == AfterReplace::Search {
+            self.leave_compose();
+        } else {
+            storage::save_drafts(&self.drafts);
+            if after == AfterReplace::ClearText {
+                self.schedule_restyle(true);
+            }
+            unsafe {
+                let _ = InvalidateRect(Some(self.hwnd), None, false);
+            }
+        }
+        true
+    }
+
+    fn compose_selection_moved(&mut self, leave_empty: bool) {
+        let Some(c) = self.compose.as_ref().filter(|c| c.active && self.draft_selection.is_all()) else { return };
+        if self.draft_selection.on_selection_changed(c.sel(), leave_empty) {
+            unsafe {
+                let _ = InvalidateRect(Some(self.hwnd), None, false);
+            }
+        }
+    }
+
+    fn compose_keep_editing(&mut self) {
+        if self.draft_selection.keep_editing() {
+            unsafe {
+                let _ = InvalidateRect(Some(self.hwnd), None, false);
+            }
+        }
     }
 
     /// 書く窓の窓の高さ. ランチャーと同じ幅で, 中身に合わせて下に伸び, 画面の高さの6割で止まる(Q6のA)
@@ -1655,7 +1727,7 @@ impl App {
                 true
             }
             v if v == VK_ESCAPE.0 => {
-                self.leave_compose();
+                self.hide();
                 true
             }
             v if ctrl && (v == VK_UP.0 || v == VK_DOWN.0) => {
@@ -1663,25 +1735,30 @@ impl App {
                 true
             }
             // 空なら↑だけでも前に送った文を呼び出す. 呼び出した文のままなら, 続けて↑でさらに前, ↓で戻る(検索の入力欄のJ5と同じ)
-            v if v == VK_UP.0 && !shift && (empty || self.recalled_unchanged()) => {
-                self.compose_history(true);
-                true
-            }
-            v if v == VK_DOWN.0 && !shift && self.recalled_unchanged() => {
-                self.compose_history(false);
+            v if (v == VK_UP.0 || v == VK_DOWN.0) && !shift
+                && self.draft_selection.uses_plain_history(v == VK_UP.0, empty, self.recalled_unchanged()) =>
+            {
+                self.compose_history(v == VK_UP.0);
                 true
             }
             v if v == VK_TAB.0 && !ctrl => self.compose_indent(shift),
             // 最後に添付した画像を外す
-            v if v == VK_BACK.0 && ctrl && shift && !self.images.is_empty() => {
+            v if v == VK_BACK.0 && ctrl && shift && (!self.images.is_empty() || self.draft_selection.is_all()) => {
                 self.images.pop();
                 self.message = None;
                 self.layout();
                 true
             }
+            // 全部選んだ形でBackspaceなら, 文と画像を消して検索に戻る
+            v if v == VK_BACK.0 && !ctrl && self.replace_selected_draft(ReplaceAll::Backspace) => true,
             // 空でBackspaceなら検索に戻る
             v if v == VK_BACK.0 && !ctrl && empty => {
                 self.leave_compose();
+                true
+            }
+            // 画像だけを選んでいるときは, DeleteでRichEditの文字が変わらない
+            v if v == VK_DELETE.0 && empty && self.draft_selection.is_all() => {
+                self.compose_text_replaced();
                 true
             }
             v if ctrl && v == b'B' as u16 => {
@@ -1701,8 +1778,15 @@ impl App {
             }
             // RichEditの飾りのキー(Ctrl+U, Ctrl+E, Ctrl+Shift+Lなど)は使わない. 全選択, コピー, 切り取り, 元に戻すだけ通す
             v if ctrl && ((0x30..=0x5A).contains(&v) || (0xBA..=0xC0).contains(&v) || (0xDB..=0xDE).contains(&v)) => {
-                let pass = matches!(v as u8, b'C' | b'X' | b'Z' | b'Y') || (v == b'A' as u16 && !shift);
-                !pass
+                match v as u8 {
+                    b'A' if shift => true,
+                    b'A' | b'X' => {
+                        self.compose_keep_editing();
+                        false
+                    }
+                    b'C' | b'Z' | b'Y' => false,
+                    _ => true,
+                }
             }
             _ => false,
         }
@@ -1739,7 +1823,7 @@ impl App {
             }
             NewLine::Plain => c.replace_sel("\r"),
         }
-        self.compose_changed();
+        self.compose_text_replaced();
     }
 
     /// Tab, Shift+Tab: 箇条書きの行を字下げする. 箇条書きでなければTabはそのまま入れる
@@ -1751,6 +1835,7 @@ impl App {
         if !markdown::is_list_line(&whole) {
             return outdent;
         }
+        self.compose_keep_editing();
         let Some(c) = &self.compose else { return false };
         if outdent {
             let k = whole.chars().take(2).take_while(|ch| *ch == ' ').count();
@@ -1771,6 +1856,7 @@ impl App {
 
     /// Ctrl+B, Ctrl+I: 選んだ文字を`**`や`*`で囲む
     fn compose_wrap(&mut self, m: &str) {
+        self.compose_keep_editing();
         let Some(c) = &self.compose else { return };
         let (a, b) = c.sel();
         let units: Vec<u16> = c.text().encode_utf16().collect();
@@ -1784,14 +1870,14 @@ impl App {
     /// 貼り付けは字だけにする(書式は入れない). 文字のない画像と, 画像のファイルは添付にする
     fn compose_paste(&mut self) {
         match clipboard::paste_kind(self.hwnd) {
-            Paste::Files(f) => return self.attach_files(&f),
+            Paste::Files(f) => return self.attach_files(&f, true),
             Paste::Image => return self.attach_clipboard_image(),
             Paste::Text => {}
         }
         let Some(t) = actions::clipboard_text(self.hwnd) else { return };
         let Some(c) = &self.compose else { return };
         c.replace_sel(&t);
-        self.compose_changed();
+        self.compose_text_replaced();
     }
 
     /// 添付を足したあと, 知らせと下の帯を直す
@@ -1802,12 +1888,13 @@ impl App {
 
     /// クリップボードの画像を添付する
     fn attach_clipboard_image(&mut self) {
-        if cattach::room(self.images.len()) == 0 {
+        if !self.draft_selection.is_all() && cattach::room(self.images.len()) == 0 {
             return self.attached(Some(format!("Up to {} images", cattach::MAX_IMAGES)));
         }
         match clipboard::read_image(self.hwnd) {
             Some(img) => {
                 storage::log(&format!("compose: attached an image from the clipboard ({}x{})", img.width, img.height));
+                self.replace_selected_draft(ReplaceAll::ImagePasted);
                 self.images.push(img);
                 self.attached(None);
             }
@@ -1816,20 +1903,23 @@ impl App {
     }
 
     /// 画像のファイルを添付する(貼り付けと, 落としたファイル). 画像でないものは除く
-    fn attach_files(&mut self, paths: &[String]) {
+    fn attach_files(&mut self, paths: &[String], pasted: bool) {
         let imgs: Vec<&String> = paths.iter().filter(|p| cattach::is_image_path(p)).collect();
         if imgs.is_empty() {
             return self.attached(Some("Only images (png, jpg, gif, webp) can be attached".into()));
         }
         let mut msg = None;
         for p in imgs {
-            if cattach::room(self.images.len()) == 0 {
+            if !(pasted && self.draft_selection.is_all()) && cattach::room(self.images.len()) == 0 {
                 msg = Some(format!("Up to {} images", cattach::MAX_IMAGES));
                 break;
             }
             match attach::load_file(p) {
                 Ok(img) => {
                     storage::log(&format!("compose: attached {p} ({}x{})", img.width, img.height));
+                    if pasted {
+                        self.replace_selected_draft(ReplaceAll::ImagePasted);
+                    }
                     self.images.push(img);
                 }
                 Err(e) => {
@@ -1846,16 +1936,9 @@ impl App {
         if !self.composing() || paths.is_empty() {
             return;
         }
-        self.attach_files(&paths);
+        self.attach_files(&paths, false);
         // 落としたあとは続けて書けるよう, 書く窓を前に出す(K63)
-        unsafe {
-            let _ = SetForegroundWindow(self.hwnd);
-        }
-        if let Some(c) = &self.compose {
-            unsafe {
-                let _ = SetFocus(Some(c.hwnd));
-            }
-        }
+        self.focus_compose();
     }
 
     /// Ctrl+↑/Ctrl+↓: 送った文を呼び出す
@@ -1870,6 +1953,7 @@ impl App {
         let r = if older { self.browse.older(&self.drafts.sent, &cur) } else { self.browse.newer(&self.drafts.sent) };
         storage::log(&format!("compose: Ctrl+{} ({} sent kept, found: {})", if older { "Up" } else { "Down" }, self.drafts.sent.len(), r.is_some()));
         let Some(t) = r else { return };
+        self.draft_selection.clear();
         c.set_text(&t);
         self.recalled = compose::normalize(&t);
         let n = self.recalled.encode_utf16().count();
@@ -1893,6 +1977,7 @@ impl App {
         };
         match sent {
             Ok(()) => {
+                self.draft_selection.clear();
                 self.drafts.push_sent(&q);
                 self.images.clear();
                 self.drafts.draft.clear();
@@ -3309,24 +3394,25 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                 Some(LRESULT(0))
             }
             WM_ACTIVATE => {
-                // ほかの窓をクリックしたら隠す(A3). 書く窓でエクスプローラーに移ったときは, 画像を落とせるよう出したままにする(K63)
-                if loword(wparam.0) as u32 == WA_INACTIVE && app.visible() {
-                    if app.composing() && is_explorer_window(unsafe { GetForegroundWindow() }) {
+                if app.composing() {
+                    // 書く窓は出したまま, 添付の選択色を前面かどうかに合わせる
+                    if app.draft_selection.is_all() {
                         unsafe {
-                            SetTimer(Some(hwnd), TIMER_DROP_WAIT, 300, None);
+                            let _ = InvalidateRect(Some(hwnd), None, false);
                         }
-                    } else {
-                        // 出して10秒以内に, ほかの窓が前に出て隠れたときは, その窓を書く(確認18のA6: 貼ったら消えた. 再現しない)
-                        if app.stats.shown_at.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(10)) {
-                            let to = HWND(lparam.0 as *mut _);
-                            let to = if to.is_invalid() { unsafe { GetForegroundWindow() } } else { to };
-                            let mut buf = [0u16; 256];
-                            let n = unsafe { GetWindowTextW(to, &mut buf) }.max(0) as usize;
-                            let title: String = String::from_utf16_lossy(&buf[..n]).chars().take(60).collect();
-                            storage::log(&format!("hide: another window came to the front {} ms after showing ('{title}', class {})", app.stats.shown_at.map_or(0, |t| t.elapsed().as_millis()), dark::class_name(to)));
-                        }
-                        app.hide();
                     }
+                } else if loword(wparam.0) as u32 == WA_INACTIVE && app.visible() {
+                    // 検索の窓は, ほかの窓をクリックしたら隠す(A3)
+                    // 出して10秒以内なら, その窓を書く(確認18のA6: 貼ったら消えた. 再現しない)
+                    if app.stats.shown_at.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(10)) {
+                        let to = HWND(lparam.0 as *mut _);
+                        let to = if to.is_invalid() { unsafe { GetForegroundWindow() } } else { to };
+                        let mut buf = [0u16; 256];
+                        let n = unsafe { GetWindowTextW(to, &mut buf) }.max(0) as usize;
+                        let title: String = String::from_utf16_lossy(&buf[..n]).chars().take(60).collect();
+                        storage::log(&format!("hide: another window came to the front {} ms after showing ('{title}', class {})", app.stats.shown_at.map_or(0, |t| t.elapsed().as_millis()), dark::class_name(to)));
+                    }
+                    app.hide();
                 }
                 None
             }
@@ -3374,7 +3460,7 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
             WM_COMMAND => {
                 if app.compose.as_ref().is_some_and(|c| HWND(lparam.0 as *mut _) == c.hwnd) && hiword(wparam.0) as u32 == EN_CHANGE {
                     if app.composing() {
-                        app.compose_changed();
+                        app.compose_text_replaced();
                     }
                     return Some(LRESULT(0));
                 }
@@ -3414,19 +3500,6 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                     }
                     TIMER_QUICK => app.on_quick_timer(),
                     TIMER_SELECTION => app.on_selection_timer(),
-                    TIMER_DROP_WAIT => {
-                        // 自分に戻った, 隠れた, ならやめる. エクスプローラー以外に移ったら隠す
-                        let fg = unsafe { GetForegroundWindow() };
-                        let done = !app.visible() || fg == hwnd || !is_explorer_window(fg);
-                        if done {
-                            unsafe {
-                                let _ = KillTimer(Some(hwnd), TIMER_DROP_WAIT);
-                            }
-                            if app.visible() && fg != hwnd {
-                                app.hide();
-                            }
-                        }
-                    }
                     _ => {}
                 }
                 Some(LRESULT(0))
@@ -3737,19 +3810,24 @@ fn compose_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id:
         WM_DROPFILES => return on_drop(wparam),
         _ => {}
     }
-    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
-}
-
-/// エクスプローラー(デスクトップとタスクバーを含む)の窓か. 画像を落とすもとになる(K63)
-fn is_explorer_window(h: HWND) -> bool {
-    if h.0.is_null() {
-        return false;
+    let undo_or_redo = match msg {
+        WM_KEYDOWN => matches!(wparam.0 as u8, b'Z' | b'Y') && unsafe { GetKeyState(VK_CONTROL.0 as i32) < 0 },
+        WM_CHAR => matches!(wparam.0, 0x1A | 0x19), // Ctrl+Z, Ctrl+Yの制御文字
+        _ => false,
+    };
+    let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+    // 打ち替えに伴う選択の通知はEN_CHANGEより先に来ることがある. RichEditの処理が済んでから選択を調べる
+    if matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK) {
+        with_app(|app| app.compose_selection_moved(true));
+    } else if undo_or_redo {
+        with_app(|app| app.compose_selection_moved(false));
+    } else if msg == WM_KEYDOWN {
+        let vk = wparam.0 as u16;
+        if [VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_HOME, VK_END, VK_PRIOR, VK_NEXT].iter().any(|k| k.0 == vk) {
+            with_app(|app| app.compose_selection_moved(vk == VK_LEFT.0 || vk == VK_RIGHT.0));
+        }
     }
-    let mut pid = 0u32;
-    unsafe {
-        GetWindowThreadProcessId(h, Some(&mut pid));
-    }
-    winlist::process_path(pid).to_ascii_lowercase().ends_with("\\explorer.exe")
+    result
 }
 
 /// 窓(書く窓の中を含む)にファイルを落とした. 書く窓なら画像を添付にする
@@ -4048,6 +4126,7 @@ pub fn run() {
         exe_path,
         compose,
         drafts: storage::load_drafts(),
+        draft_selection: DraftSelection::default(),
         browse: Browse::default(),
         recalled: String::new(),
         compose_h: 0,
