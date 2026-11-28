@@ -142,6 +142,8 @@ pub struct Stats {
     pub last_search_ms: f64,
     pub last_show_ms: f64,
     hotkey_at: Option<Instant>,
+    /// 最後に窓を出した時刻(出してすぐ隠れたときにログを書く. 確認18のA6)
+    shown_at: Option<Instant>,
 }
 
 pub struct App {
@@ -809,6 +811,7 @@ impl App {
         }
         system::ime_off(self.edit);
         self.stats.last_show_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        self.stats.shown_at = Some(Instant::now());
     }
 
     fn hide(&mut self) {
@@ -3313,6 +3316,15 @@ fn wndproc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
                             SetTimer(Some(hwnd), TIMER_DROP_WAIT, 300, None);
                         }
                     } else {
+                        // 出して10秒以内に, ほかの窓が前に出て隠れたときは, その窓を書く(確認18のA6: 貼ったら消えた. 再現しない)
+                        if app.stats.shown_at.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(10)) {
+                            let to = HWND(lparam.0 as *mut _);
+                            let to = if to.is_invalid() { unsafe { GetForegroundWindow() } } else { to };
+                            let mut buf = [0u16; 256];
+                            let n = unsafe { GetWindowTextW(to, &mut buf) }.max(0) as usize;
+                            let title: String = String::from_utf16_lossy(&buf[..n]).chars().take(60).collect();
+                            storage::log(&format!("hide: another window came to the front {} ms after showing ('{title}', class {})", app.stats.shown_at.map_or(0, |t| t.elapsed().as_millis()), dark::class_name(to)));
+                        }
                         app.hide();
                     }
                 }
