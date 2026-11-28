@@ -33,7 +33,7 @@ pub fn is_image_path(p: &str) -> bool {
     }
 }
 
-/// 書く窓での貼り付け(`Ctrl+V`, `Shift+Insert`)で何をするか
+/// 貼り付けで何をするか
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Paste {
     /// 画像のファイルを添付する(画像でないファイルは除いたもの)
@@ -54,6 +54,55 @@ pub fn paste_kind(has_text: bool, has_image: bool, files: &[String]) -> Paste {
         Paste::Image
     } else {
         Paste::Text
+    }
+}
+
+/// 検索の入力欄に画像を貼ったとき, 書く窓に引き継ぐ文
+pub fn paste_to_compose(kind: &Paste, typed: &str) -> Option<String> {
+    has_image(kind).then(|| typed.trim().to_string())
+}
+
+/// 検索の入力欄では, 画像の貼り付けだけキーの繰り返しを止める(K73)
+pub fn suppress_search_paste_repeat(kind: &Paste, repeat: bool) -> bool {
+    repeat && has_image(kind)
+}
+
+fn has_image(kind: &Paste) -> bool {
+    match kind {
+        Paste::Image => true,
+        Paste::Files(paths) => paths.iter().any(|p| is_image_path(p)),
+        Paste::Text => false,
+    }
+}
+
+/// 検索から貼る画像を先に読む. 1枚も読めなければ知らせだけを返す
+pub fn load_search_images(
+    kind: &Paste,
+    read_clipboard: impl FnOnce() -> Result<Image, String>,
+    mut load_file: impl FnMut(&str) -> Result<Image, String>,
+) -> Result<(Vec<Image>, Option<String>), String> {
+    match kind {
+        Paste::Image => read_clipboard().map(|img| (vec![img], None)),
+        Paste::Files(paths) => {
+            let mut images = Vec::new();
+            let mut message = None;
+            for path in paths.iter().filter(|p| is_image_path(p)) {
+                if room(images.len()) == 0 {
+                    message = Some(format!("Up to {MAX_IMAGES} images"));
+                    break;
+                }
+                match load_file(path) {
+                    Ok(img) => images.push(img),
+                    Err(e) => message = Some(e),
+                }
+            }
+            if images.is_empty() {
+                Err(message.unwrap_or_else(|| "Couldn't read any image to attach".into()))
+            } else {
+                Ok((images, message))
+            }
+        }
+        Paste::Text => Err("Couldn't read any image to attach".into()),
     }
 }
 
@@ -217,6 +266,64 @@ mod tests {
         assert_eq!(paste_kind(false, true, &[]), Paste::Image);
         assert_eq!(paste_kind(true, false, &[]), Paste::Text);
         assert_eq!(paste_kind(false, false, &[]), Paste::Text);
+    }
+
+    #[test]
+    fn image_paste_carries_trimmed_search_text() {
+        assert_eq!(paste_to_compose(&Paste::Image, "　この画像を  説明して 🐈 \t").as_deref(), Some("この画像を  説明して 🐈"));
+        assert_eq!(paste_to_compose(&Paste::Image, "").as_deref(), Some(""));
+        assert_eq!(paste_to_compose(&Paste::Image, " \t　").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn image_files_among_other_files_open_compose() {
+        let files = Paste::Files(vec![r"C:\a.txt".into(), r"C:\b.PNG".into()]);
+        assert_eq!(paste_to_compose(&files, " 写真 ").as_deref(), Some("写真"));
+    }
+
+    #[test]
+    fn text_and_non_image_files_do_not_open_compose() {
+        assert_eq!(paste_to_compose(&Paste::Text, "検索語"), None);
+        assert_eq!(paste_to_compose(&Paste::Files(vec![r"C:\a.txt".into()]), "検索語"), None);
+        assert_eq!(paste_to_compose(&Paste::Files(vec![]), "検索語"), None);
+    }
+
+    #[test]
+    fn search_paste_repeat_is_suppressed_only_for_images() {
+        let mixed_files = Paste::Files(vec!["notes.txt".into(), "photo.PNG".into()]);
+        let other_files = Paste::Files(vec!["notes.txt".into()]);
+        assert!(suppress_search_paste_repeat(&Paste::Image, true));
+        assert!(suppress_search_paste_repeat(&mixed_files, true));
+        assert!(!suppress_search_paste_repeat(&Paste::Image, false));
+        assert!(!suppress_search_paste_repeat(&mixed_files, false));
+        assert!(!suppress_search_paste_repeat(&Paste::Text, true));
+        assert!(!suppress_search_paste_repeat(&other_files, true));
+    }
+
+    #[test]
+    fn unreadable_clipboard_image_cannot_replace_the_draft() {
+        let message = "Couldn't read the image on the clipboard";
+        let result = load_search_images(&Paste::Image, || Err(message.into()), |_| unreachable!());
+        assert_eq!(result, Err(message.into()));
+    }
+
+    #[test]
+    fn unreadable_image_files_cannot_replace_the_draft() {
+        let files = Paste::Files(vec!["too-large.png".into(), "broken.jpg".into()]);
+        let result = load_search_images(&files, || unreachable!(), |path| Err(format!("Couldn't read {path}")));
+        assert_eq!(result, Err("Couldn't read broken.jpg".into()));
+    }
+
+    #[test]
+    fn readable_image_file_can_replace_the_draft_even_if_another_file_fails() {
+        let files = Paste::Files(vec!["notes.txt".into(), "too-large.png".into(), "photo.png".into()]);
+        let photo = Image { width: 32, height: 16, ..Image::default() };
+        let result = load_search_images(&files, || unreachable!(), |path| match path {
+            "too-large.png" => Err("too-large.png is too large to attach".into()),
+            "photo.png" => Ok(photo.clone()),
+            _ => panic!("unexpected image path: {path}"),
+        });
+        assert_eq!(result, Ok((vec![photo], Some("too-large.png is too large to attach".into()))));
     }
 
     #[test]

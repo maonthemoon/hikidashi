@@ -1283,7 +1283,7 @@ impl App {
     }
 
     /// キーの処理. 処理したらtrue(入力欄には渡さない)
-    fn on_key(&mut self, vk: u16, sys: bool) -> bool {
+    fn on_key(&mut self, vk: u16, sys: bool, repeat: bool) -> bool {
         let down = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetKeyState(k.0 as i32) < 0 };
         let ctrl = down(VK_CONTROL);
         let shift = down(VK_SHIFT);
@@ -1407,7 +1407,7 @@ impl App {
                             self.set_edit_text(&p);
                             self.refresh();
                             // 続いて届くBackspaceの文字で, 入れた`\`が消えないようにする
-                            EAT_BACK_CHAR.set(true);
+                            EAT_EDIT_CHAR.set(Some(0x08));
                             return true;
                         }
                     }
@@ -1425,8 +1425,14 @@ impl App {
                 }
                 true
             }
-            // 2行以上の文を貼ったら書く窓にする(K22)
-            v if (ctrl && !shift && v == b'V' as u16) || (shift && !ctrl && v == VK_INSERT.0) => self.paste_multiline(),
+            // 画像や2行以上の文を貼ったら書く窓にする
+            v if (ctrl && !shift && v == b'V' as u16) || (shift && !ctrl && v == VK_INSERT.0) => {
+                let handled = self.paste_search_compose(repeat);
+                if handled && ctrl {
+                    EAT_EDIT_CHAR.set(Some(0x16));
+                }
+                handled
+            }
             _ => false,
         }
     }
@@ -1534,17 +1540,43 @@ impl App {
         }
     }
 
-    /// 検索の入力欄に2行以上の文を貼ったら, 書く窓にして続きを書けるようにする. 処理したらtrue
-    fn paste_multiline(&mut self) -> bool {
+    /// 検索の入力欄に画像や2行以上の文を貼ったら, 書く窓にする. 処理したらtrue
+    fn paste_search_compose(&mut self, repeat: bool) -> bool {
         if self.compose.is_none() || self.capture {
             return false;
         }
+        let kind = clipboard::paste_kind(self.hwnd);
+        if cattach::suppress_search_paste_repeat(&kind, repeat) {
+            return true;
+        }
+        let text = self.edit_text();
+        let Some(body) = cattach::paste_to_compose(&kind, &text) else {
+            return self.paste_multiline(&text);
+        };
+        let (images, message) = match cattach::load_search_images(&kind, || self.read_clipboard_attachment(), Self::load_attachment_file) {
+            Ok(loaded) => loaded,
+            Err(e) => {
+                self.attached(Some(e));
+                return true;
+            }
+        };
+        self.keep_old_draft();
+        self.images = images;
+        self.enter_compose(body, None);
+        storage::log("compose: image pasted in the search box");
+        if message.is_some() {
+            self.attached(message);
+        }
+        true
+    }
+
+    /// 検索の入力欄に2行以上の文を貼ったら, 書く窓にして続きを書けるようにする. 処理したらtrue
+    fn paste_multiline(&mut self, text: &str) -> bool {
         let Some(t) = actions::clipboard_text(self.hwnd) else { return false };
         let body = t.trim_end_matches(['\r', '\n']);
         if !body.contains(['\r', '\n']) {
             return false;
         }
-        let text = self.edit_text();
         let (mut s, mut e) = (0u32, 0u32);
         unsafe {
             SendMessageW(self.edit, EM_GETSEL, Some(WPARAM(&mut s as *mut _ as usize)), Some(LPARAM(&mut e as *mut _ as isize)));
@@ -1880,7 +1912,7 @@ impl App {
         self.compose_text_replaced();
     }
 
-    /// 添付を足したあと, 知らせと下の帯を直す
+    /// 添付の結果を下の帯に出す
     fn attached(&mut self, msg: Option<String>) {
         self.message = msg.map(|m| (m, true));
         self.layout();
@@ -1891,15 +1923,29 @@ impl App {
         if !self.draft_selection.is_all() && cattach::room(self.images.len()) == 0 {
             return self.attached(Some(format!("Up to {} images", cattach::MAX_IMAGES)));
         }
-        match clipboard::read_image(self.hwnd) {
-            Some(img) => {
-                storage::log(&format!("compose: attached an image from the clipboard ({}x{})", img.width, img.height));
+        match self.read_clipboard_attachment() {
+            Ok(img) => {
                 self.replace_selected_draft(ReplaceAll::ImagePasted);
                 self.images.push(img);
                 self.attached(None);
             }
-            None => self.attached(Some("Couldn't read the image on the clipboard".into())),
+            Err(e) => self.attached(Some(e)),
         }
+    }
+
+    fn read_clipboard_attachment(&self) -> Result<Image, String> {
+        let img = clipboard::read_image(self.hwnd).ok_or_else(|| "Couldn't read the image on the clipboard".to_string())?;
+        storage::log(&format!("compose: attached an image from the clipboard ({}x{})", img.width, img.height));
+        Ok(img)
+    }
+
+    fn load_attachment_file(path: &str) -> Result<Image, String> {
+        let image = attach::load_file(path);
+        match &image {
+            Ok(img) => storage::log(&format!("compose: attached {path} ({}x{})", img.width, img.height)),
+            Err(e) => storage::log(&format!("compose: {e}")),
+        }
+        image
     }
 
     /// 画像のファイルを添付する(貼り付けと, 落としたファイル). 画像でないものは除く
@@ -1914,18 +1960,14 @@ impl App {
                 msg = Some(format!("Up to {} images", cattach::MAX_IMAGES));
                 break;
             }
-            match attach::load_file(p) {
+            match Self::load_attachment_file(p) {
                 Ok(img) => {
-                    storage::log(&format!("compose: attached {p} ({}x{})", img.width, img.height));
                     if pasted {
                         self.replace_selected_draft(ReplaceAll::ImagePasted);
                     }
                     self.images.push(img);
                 }
-                Err(e) => {
-                    storage::log(&format!("compose: {e}"));
-                    msg = Some(e);
-                }
+                Err(e) => msg = Some(e),
             }
         }
         self.attached(msg);
@@ -3628,8 +3670,8 @@ thread_local! {
     static CUE: std::cell::Cell<&'static str> = const { std::cell::Cell::new(CUE_SEARCH) };
     /// 前に描いたときに案内を出していたか
     static CUE_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// 次に届くBackspaceの文字(0x08)を捨てる. キーを自分で処理して入力欄の文字を変えたとき(K62)
-    static EAT_BACK_CHAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// キーの処理に続いて届く制御文字を捨てる(Backspaceや, 繰り返しのCtrl+V)
+    static EAT_EDIT_CHAR: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
     /// 日本語入力で変換している間は案内を出さない
     static EDIT_IME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -3693,9 +3735,10 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
         WM_IME_ENDCOMPOSITION => EDIT_IME.set(false),
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let sys = msg == WM_SYSKEYDOWN;
-            // 前のキーの文字が届かなかったときに, 次のBackspaceを捨てないように
-            EAT_BACK_CHAR.set(false);
-            if let Some(true) = with_app(|app| app.on_key(wparam.0 as u16, sys)) {
+            let repeat = (lparam.0 >> 30) & 1 == 1;
+            // 前のキーの文字が届かなかったときに, 次のキーの文字を捨てないように
+            EAT_EDIT_CHAR.set(None);
+            if let Some(true) = with_app(|app| app.on_key(wparam.0 as u16, sys, repeat)) {
                 return LRESULT(0);
             }
         }
@@ -3707,7 +3750,7 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
             }
         }
         WM_PASTE => {
-            if let Some(true) = with_app(|app| app.paste_multiline()) {
+            if let Some(true) = with_app(|app| app.paste_search_compose(false)) {
                 return LRESULT(0);
             }
             // 標準の貼り付けは, クリップボードを開いたままEN_CHANGEを送る. その中で拡張に渡す文字を読むと
@@ -3722,7 +3765,8 @@ fn edit_proc_inner(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: us
         WM_IME_STARTCOMPOSITION => EDIT_IME.set(true),
         WM_CHAR | WM_SYSCHAR => {
             let c = wparam.0 as u32;
-            if c == 0x08 && EAT_BACK_CHAR.replace(false) {
+            if EAT_EDIT_CHAR.get() == Some(c) {
+                EAT_EDIT_CHAR.set(None);
                 return LRESULT(0);
             }
             // 書く窓にしたあとに届いた文字(Ctrl+Vなど)は入れない
