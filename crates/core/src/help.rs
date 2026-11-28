@@ -191,7 +191,8 @@ pub fn rows(cfg: &Config, system: &Catalog, plugins: Vec<Entry>, words: &str) ->
             crate::config::CommandKind::Url => Icon::Symbol(Sym::Globe),
             crate::config::CommandKind::Run => COMMAND_ICON,
             crate::config::CommandKind::File => Icon::Kind(Kind::File),
-            crate::config::CommandKind::Folder => Icon::Kind(Kind::Folder),
+            // `Icon::Kind(Kind::Folder)`はWindowsの色付きのフォルダーになるので, 線のアイコンにそろえる(確認18のH2)
+            crate::config::CommandKind::Folder => Icon::Symbol(Sym::Files),
         };
         entries.push(entry);
     }

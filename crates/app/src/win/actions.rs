@@ -20,7 +20,7 @@ use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 use windows::Win32::UI::Shell::{AssocQueryStringW, SHEmptyRecycleBinW, ShellExecuteW, ASSOCF_IS_PROTOCOL, ASSOCF_NOTRUNCATE, ASSOCSTR_EXECUTABLE, SHERB_NOCONFIRMATION, SHERB_NOSOUND};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL, VK_MENU, VK_BACK, VK_END, VK_ESCAPE, VK_RETURN, VK_SHIFT, VK_V,
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL, VK_MENU, VK_BACK, VK_END, VK_RETURN, VK_SHIFT, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowTextW, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL,
@@ -426,7 +426,8 @@ fn wait_chatgpt(tries: u32) -> Result<(), String> {
 /// 入力欄に移って(`Shift+Esc`)文字を貼り, 1枚ずつクリップボードに画像を入れて`Ctrl+V`を送る. 最後の1枚のあと`image_wait_ms`×枚数だけ待って
 /// Enterを押す(`send_enter`がオフなら押さない). 終わったらクリップボードを元に戻す. ChatGPTの窓にならなければ貼らず, 最後の画像をクリップボードに残す.
 /// - `?q=`で開くと, ChatGPTによっては開いたとたんに文字だけを送ってしまう(確認17のI2. 個人のアカウント). `?q=.`も`.`が送られるので使わない.
-/// - `?q=`なしで開くと入力欄にカーソルがないことがある(2026-11-24の会社PC)ので, ChatGPTの「入力欄に移る」キー(`Shift+Esc`)を押してから貼る.
+/// - `?q=`なしで開くと入力欄にカーソルがないことがある(2026-11-24の会社PC)ので, UI Automationで入力欄(`#prompt-textarea`)を探して選んでから貼る(K76).
+///   ChatGPTの「入力欄に移る」キー(`Shift+Esc`)は, Edgeでは「ブラウザー タスク マネージャー」が開いて使えなかった(確認18のI2).
 /// - 貼るたびに少し待つ. ブラウザーがクリップボードを読む前に次の画像に入れ替えると, 同じ画像が2回入ったり抜けたりするため.
 /// - `mode = "clipboard"`なら, 文字(なければ最後の画像)をコピーして開くだけ.
 pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::attach::Image], cfg: &Config) -> Result<(), String> {
@@ -468,9 +469,12 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
         }
         // 貼ったChatGPTのウィンドウ. 待つ間にほかへ移っても, Enterの前にここへ戻す
         let gpt = unsafe { GetForegroundWindow() }.0 as isize;
-        // タイトルが出てから入力欄ができるまでの間を少し待ち, 入力欄に移る
+        // タイトルが出てから入力欄ができるまでの間を少し待ち, 入力欄を選ぶ. 見つからなければ, ページが入力欄を選んでいることに任せて貼る
         sleep(1000);
-        press(&[VK_SHIFT, VK_ESCAPE]);
+        match focus_chatgpt_input(HWND(gpt as *mut _)) {
+            Ok(()) => super::storage::log("chatgpt: focused the input box"),
+            Err(e) => super::storage::log(&format!("chatgpt: input box not focused ({e})")),
+        }
         sleep(300);
         if !text.trim().is_empty() {
             if let Err(e) = copy_text(hwnd, &text.replace('\n', "\r\n")) {
@@ -560,6 +564,31 @@ fn bring_chatgpt_back(gpt: HWND) -> Result<(), String> {
     super::storage::log("chatgpt: brought ChatGPT back to the front");
     std::thread::sleep(std::time::Duration::from_millis(400));
     wait_chatgpt(8)
+}
+
+/// ChatGPTの入力欄(`id="prompt-textarea"`. UI AutomationではAutomationId)を探して選ぶ(K76).
+/// ブラウザーが読み上げ用の木を作るまで時間がかかることがあるので, 10秒まで探し直す. 裏のスレッドで呼ぶ
+fn focus_chatgpt_input(gpt: HWND) -> Result<(), String> {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
+    use windows::Win32::System::Variant::VARIANT;
+    use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation, TreeScope_Descendants, UIA_AutomationIdPropertyId};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
+        let cond = uia.CreatePropertyCondition(UIA_AutomationIdPropertyId, &VARIANT::from("prompt-textarea")).map_err(|e| e.to_string())?;
+        let mut last = String::from("not found");
+        for _ in 0..20 {
+            match uia.ElementFromHandle(gpt).and_then(|root| root.FindFirst(TreeScope_Descendants, &cond)) {
+                Ok(el) => match el.SetFocus() {
+                    Ok(()) => return Ok(()),
+                    Err(e) => last = e.to_string(),
+                },
+                Err(e) => last = e.to_string(),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        Err(last)
+    }
 }
 
 /// 修飾キーと一緒にキーを押して離す(例: Ctrl+V)
