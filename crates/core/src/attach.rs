@@ -71,9 +71,59 @@ pub fn label(sizes: &[(u32, u32)]) -> Option<String> {
     }
 }
 
-/// 画像を貼ったあと, Enterを押すまで待つ時間(1枚ごとに`per_ms`を足す)
+/// 画像を貼ったあと, 送信ボタンが見つからないときに待つ時間(1枚ごとに`per_ms`を足す)
 pub fn wait_ms(images: usize, per_ms: u32) -> u64 {
     images as u64 * per_ms as u64
+}
+
+/// 同じ窓でもタイトルが変われば新しいページとみなす. 待っても区別できなければ, 最後は今の前面のChatGPTを使う.
+pub fn chatgpt_page_ready(previous_pages: &[(isize, String)], hwnd: isize, title: &str, elapsed_ms: u64, delay_ms: u64) -> bool {
+    elapsed_ms >= delay_ms || !previous_pages.iter().any(|(old_hwnd, old_title)| *old_hwnd == hwnd && old_title == title)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SendWaitStep {
+    Wait { until_ms: u64 },
+    Ready,
+    Fallback,
+    TimedOut,
+}
+
+pub struct SendWait {
+    found: bool,
+    ready_streak: u8,
+    ready_checks: u8,
+    waiting_for_paste: bool,
+}
+
+impl Default for SendWait {
+    fn default() -> Self {
+        Self { found: false, ready_streak: 0, ready_checks: 1, waiting_for_paste: false }
+    }
+}
+
+impl SendWait {
+    pub fn after_paste() -> Self {
+        Self { ready_checks: 2, waiting_for_paste: true, ..Self::default() }
+    }
+
+    /// ボタンが見つかったら上限まで有効になるのを待つ. 一度も見つからなければ決め打ちの待ちへ切り替える.
+    pub fn step(&mut self, elapsed_ms: u64, enabled: Option<bool>, limit_ms: u64, missing_ms: u64) -> SendWaitStep {
+        self.found |= enabled.is_some();
+        // 貼り付け前から有効だった状態を数えない. 無効を見たか, 貼り付けから1秒たったら数え始める.
+        self.waiting_for_paste &= elapsed_ms < 1000 && enabled != Some(false);
+        self.ready_streak = if !self.waiting_for_paste && enabled == Some(true) { self.ready_streak.saturating_add(1) } else { 0 };
+        if self.ready_streak >= self.ready_checks {
+            SendWaitStep::Ready
+        } else if elapsed_ms >= limit_ms {
+            SendWaitStep::TimedOut
+        } else if !self.found && elapsed_ms >= missing_ms {
+            SendWaitStep::Fallback
+        } else {
+            let until_ms = if self.found { limit_ms } else { limit_ms.min(missing_ms) };
+            SendWaitStep::Wait { until_ms }
+        }
+    }
 }
 
 /// 画像つきで送るときに開くURL. 文字は`?q=`に入れず, 開いてから画像と一緒に貼る(K73).
@@ -180,6 +230,65 @@ mod tests {
         assert_eq!(wait_ms(0, 3000), 0);
         assert_eq!(wait_ms(3, 3000), 9000);
         assert_eq!(wait_ms(4, u32::MAX), 4 * u32::MAX as u64);
+    }
+
+    #[test]
+    fn chatgpt_page_waits_for_a_new_window_or_title_until_delay() {
+        let pages = [(1, "First - ChatGPT".into()), (2, "Second - ChatGPT".into())];
+        assert!(!chatgpt_page_ready(&pages, 1, "First - ChatGPT", 0, 5000));
+        assert!(!chatgpt_page_ready(&pages, 2, "Second - ChatGPT", 4999, 5000));
+        assert!(chatgpt_page_ready(&pages, 1, "Second - ChatGPT", 0, 5000));
+        assert!(chatgpt_page_ready(&pages, 3, "First - ChatGPT", 0, 5000));
+        assert!(chatgpt_page_ready(&pages, 2, "Second - ChatGPT", 5000, 5000));
+    }
+
+    #[test]
+    fn send_wait_requires_consecutive_enabled_checks() {
+        use SendWaitStep::*;
+        let mut wait = SendWait::after_paste();
+        let waiting = Wait { until_ms: 8000 };
+        assert_eq!(wait.step(0, Some(true), 8000, 2000), waiting);
+        assert_eq!(wait.step(250, Some(true), 8000, 2000), waiting);
+        assert_eq!(wait.step(500, Some(false), 8000, 2000), waiting);
+        assert_eq!(wait.step(550, Some(true), 8000, 2000), waiting);
+        assert_eq!(wait.step(600, None, 8000, 2000), waiting);
+        assert_eq!(wait.step(650, Some(true), 8000, 2000), waiting);
+        assert_eq!(wait.step(900, Some(true), 8000, 2000), Ready);
+    }
+
+    #[test]
+    fn send_wait_ignores_enabled_checks_for_one_second_if_never_disabled() {
+        use SendWaitStep::*;
+        let mut wait = SendWait::after_paste();
+        let waiting = Wait { until_ms: 5000 };
+        assert_eq!(wait.step(0, Some(true), 5000, 800), waiting);
+        assert_eq!(wait.step(250, None, 5000, 800), waiting);
+        assert_eq!(wait.step(500, Some(true), 5000, 800), waiting);
+        assert_eq!(wait.step(750, Some(true), 5000, 800), waiting);
+        assert_eq!(wait.step(1000, Some(true), 5000, 800), waiting);
+        assert_eq!(wait.step(1250, Some(true), 5000, 800), Ready);
+    }
+
+    #[test]
+    fn send_wait_falls_back_only_if_button_was_never_found() {
+        use SendWaitStep::*;
+        let mut missing = SendWait::after_paste();
+        assert_eq!(missing.step(800, None, 5000, 800), Fallback);
+        let mut missing = SendWait::after_paste();
+        assert_eq!(missing.step(1999, None, 8000, 2000), Wait { until_ms: 2000 });
+        assert_eq!(missing.step(2000, None, 8000, 2000), Fallback);
+
+        let mut found = SendWait::after_paste();
+        assert_eq!(found.step(1750, Some(false), 8000, 2000), Wait { until_ms: 8000 });
+        assert_eq!(found.step(2000, None, 8000, 2000), Wait { until_ms: 8000 });
+        assert_eq!(found.step(7999, Some(false), 8000, 2000), Wait { until_ms: 8000 });
+        assert_eq!(found.step(8000, Some(false), 8000, 2000), TimedOut);
+    }
+
+    #[test]
+    fn send_wait_url_can_use_one_enabled_check() {
+        assert_eq!(SendWait::default().step(250, Some(true), 15000, 5000), SendWaitStep::Ready);
+        assert_eq!(SendWait::default().step(5000, None, 15000, 5000), SendWaitStep::Fallback);
     }
 
     #[test]

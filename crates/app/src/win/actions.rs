@@ -1,7 +1,8 @@
 //! 開く, コピー, kill などの実際の操作.
 
-use super::storage::{env, expand};
+use super::storage::{env, expand, log};
 use super::util::{wide, WStr};
+use hikidashi_core::attach::{self, SendWait, SendWaitStep};
 use hikidashi_core::builtin::SysAction;
 use hikidashi_core::config::{Config, OpenWith};
 use hikidashi_core::manual;
@@ -10,7 +11,8 @@ use hikidashi_core::router::url_encode;
 use std::ffi::OsString;
 use std::os::windows::{ffi::OsStringExt, process::CommandExt};
 use std::path::{Path, PathBuf};
-use windows::core::{w, PCWSTR, PWSTR};
+use std::time::{Duration, Instant};
+use windows::core::{w, BOOL, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, GlobalFree, HANDLE, HWND, LPARAM, WPARAM, S_FALSE, S_OK};
 use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, SetClipboardData};
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
@@ -19,11 +21,15 @@ use windows::Win32::System::Power::SetSuspendState;
 use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 use windows::Win32::UI::Shell::{AssocQueryStringW, SHEmptyRecycleBinW, ShellExecuteW, ASSOCF_IS_PROTOCOL, ASSOCF_NOTRUNCATE, ASSOCSTR_EXECUTABLE, SHERB_NOCONFIRMATION, SHERB_NOSOUND};
+use windows::Win32::UI::Accessibility::{
+    IUIAutomation, IUIAutomationElement, IUIAutomationElementArray, TreeScope_Descendants, UIA_CONTROLTYPE_ID, UIA_ButtonControlTypeId, UIA_ControlTypePropertyId,
+    UIA_DocumentControlTypeId, UIA_EditControlTypeId,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL, VK_MENU, VK_BACK, VK_END, VK_RETURN, VK_SHIFT, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowTextW, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL,
+    EnumWindows, GetForegroundWindow, GetWindowTextW, IsIconic, PostMessageW, SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE, SW_SHOWNORMAL,
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -287,9 +293,11 @@ pub fn ask_chatgpt(hwnd: HWND, q: &str, cfg: &Config) -> Result<(), String> {
         copy_text(hwnd, q)?;
         open_url(&cfg.chatgpt.home, cfg)
     } else {
+        let previous_pages = cfg.chatgpt.send_enter.then(chatgpt_pages);
+        let started = Instant::now();
         open_url(&cfg.chatgpt.url.replace("{q}", &url_encode(q)), cfg)?;
-        if cfg.chatgpt.send_enter {
-            send_enter_to_chatgpt(cfg.chatgpt.send_delay_ms);
+        if let Some(previous_pages) = previous_pages {
+            send_enter_to_chatgpt(started, cfg.chatgpt.send_delay_ms, previous_pages);
         }
         Ok(())
     }
@@ -346,53 +354,57 @@ pub fn ask_chatgpt_long(hwnd: HWND, text: &str, cfg: &Config) -> Result<(), Stri
     }
     let enc = url_encode(&text);
     if enc.len() <= URL_Q_MAX {
+        let previous_pages = cfg.chatgpt.send_enter.then(chatgpt_pages);
+        let started = Instant::now();
         open_url(&cfg.chatgpt.url.replace("{q}", &enc), cfg)?;
         super::storage::log(&format!("chatgpt: long question by URL ({} chars)", text.chars().count()));
-        if cfg.chatgpt.send_enter {
-            send_enter_to_chatgpt(cfg.chatgpt.send_delay_ms);
+        if let Some(previous_pages) = previous_pages {
+            send_enter_to_chatgpt(started, cfg.chatgpt.send_delay_ms, previous_pages);
         }
         return Ok(());
     }
     let prev = clipboard_text(hwnd);
     let ours = text.replace('\n', "\r\n");
     copy_text(hwnd, &ours)?;
+    let previous_pages = chatgpt_pages();
+    let started = Instant::now();
     open_url(&cfg.chatgpt.url.replace("{q}", "."), cfg)?;
     let (h, delay, enter) = (hwnd.0 as isize, cfg.chatgpt.send_delay_ms, cfg.chatgpt.send_enter);
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(delay as u64));
-        let mut last = String::new();
-        for _ in 0..40 {
-            last = window_text(unsafe { GetForegroundWindow() });
-            let held = [VK_SHIFT, VK_CONTROL, VK_MENU].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } < 0);
-            if last.contains("ChatGPT") && !held {
-                // `.`を消して, 全体を貼る
-                press(&[VK_CONTROL, VK_END]);
-                std::thread::sleep(std::time::Duration::from_millis(150));
-                press(&[VK_BACK]);
-                std::thread::sleep(std::time::Duration::from_millis(150));
-                press(&[VK_CONTROL, VK_V]);
-                super::storage::log(&format!("chatgpt: pasted a long question ({} chars)", ours.chars().count()));
-                std::thread::sleep(std::time::Duration::from_millis(800));
-                if enter {
-                    press_enter();
-                    super::storage::log("chatgpt: sent Enter");
-                    enter_again();
-                }
-                // 貼り付けが終わってから戻す
-                std::thread::sleep(std::time::Duration::from_millis(1500));
-                if let Some(prev) = prev {
-                    let b = Box::new(ClipRestore { ours, prev });
-                    unsafe {
-                        // 届かなければ捨てる(戻さない)
-                        let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_CLIP_RESTORE, WPARAM(0), LPARAM(Box::into_raw(b) as isize));
-                    }
-                }
+        let not_pasted = |front| {
+            log(&format!("chatgpt: not pasted (window in front: {front}). The question is left on the clipboard"));
+        };
+        let gpt = match wait_chatgpt_open(started, delay, &previous_pages) {
+            Ok(gpt) => gpt,
+            Err(front) => return not_pasted(front),
+        };
+        focus_chatgpt_input(gpt);
+        // `.`を消して, 全体を貼る
+        for (keys, pause_ms) in [(&[VK_CONTROL, VK_END][..], 0), (&[VK_BACK][..], 150), (&[VK_CONTROL, VK_V][..], 150)] {
+            if pause_ms > 0 {
+                sleep_ms(pause_ms);
+            }
+            if let Err(front) = chatgpt_in_front(Some(gpt)) {
+                not_pasted(front);
                 return;
             }
-            std::thread::sleep(std::time::Duration::from_millis(250));
+            press(keys);
         }
-        // ChatGPTが前に出なかった. 質問はクリップボードに残す(自分で貼れるように)
-        super::storage::log(&format!("chatgpt: not pasted (window in front: {last}). The question is left on the clipboard"));
+        let pasted = Instant::now();
+        log(&format!("chatgpt: pasted a long question ({} chars) after {} ms", ours.chars().count(), elapsed_ms(started)));
+        if enter {
+            wait_send_button(gpt, pasted, SendWait::after_paste(), 5000, 800, 800);
+            send_chatgpt_enter(gpt, started);
+        }
+        // 貼り付けが終わってから戻す
+        sleep_ms(1500);
+        if let Some(prev) = prev {
+            let b = Box::new(ClipRestore { ours, prev });
+            unsafe {
+                // 届かなければ捨てる(戻さない)
+                let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_CLIP_RESTORE, WPARAM(0), LPARAM(Box::into_raw(b) as isize));
+            }
+        }
     });
     Ok(())
 }
@@ -408,30 +420,91 @@ pub struct ImagesDone {
     pub failed: bool,
 }
 
-/// 前の窓がChatGPTで, 修飾キーが離れるまで待つ(250ミリ秒ごとに`tries`回). だめなら前の窓のタイトルを返す
-fn wait_chatgpt(tries: u32) -> Result<(), String> {
-    let mut last = String::new();
-    for _ in 0..tries {
-        last = window_text(unsafe { GetForegroundWindow() });
-        let held = [VK_SHIFT, VK_CONTROL, VK_MENU].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } < 0);
-        if last.contains("ChatGPT") && !held {
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250));
-    }
-    Err(last)
+const CHATGPT_POLL_MS: u64 = 250;
+
+fn sleep_ms(ms: u64) {
+    std::thread::sleep(Duration::from_millis(ms));
 }
 
-/// 画像を添付した長い質問(K22)を送る. 文字は`?q=`に入れずにChatGPTを開き(K73), `send_delay_ms`待って前の窓がChatGPTなら,
-/// 入力欄に移って(`Shift+Esc`)文字を貼り, 1枚ずつクリップボードに画像を入れて`Ctrl+V`を送る. 最後の1枚のあと`image_wait_ms`×枚数だけ待って
-/// Enterを押す(`send_enter`がオフなら押さない). 終わったらクリップボードを元に戻す. ChatGPTの窓にならなければ貼らず, 最後の画像をクリップボードに残す.
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis() as u64
+}
+
+fn chatgpt_in_front(expected: Option<HWND>) -> Result<(HWND, String), String> {
+    let hwnd = unsafe { GetForegroundWindow() };
+    let title = window_text(hwnd);
+    let held = [VK_SHIFT, VK_CONTROL, VK_MENU].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } < 0);
+    if title.contains("ChatGPT") && !held && expected.is_none_or(|gpt| gpt == hwnd) {
+        Ok((hwnd, title))
+    } else {
+        Err(title)
+    }
+}
+
+/// 前の窓がChatGPTで, 修飾キーが離れるまで250ミリ秒ごとに確かめる. だめなら前の窓のタイトルを返す
+fn wait_chatgpt(limit_ms: u64, expected: Option<HWND>) -> Result<HWND, String> {
+    let started = Instant::now();
+    loop {
+        let front = match chatgpt_in_front(expected) {
+            Ok((hwnd, _)) => return Ok(hwnd),
+            Err(title) => title,
+        };
+        let remaining = limit_ms.saturating_sub(elapsed_ms(started));
+        if remaining == 0 {
+            return Err(front);
+        }
+        sleep_ms(CHATGPT_POLL_MS.min(remaining));
+    }
+}
+
+/// URLを開く前に, ChatGPTの最上位の窓とその時点のページのタイトルを記録する
+fn chatgpt_pages() -> Vec<(isize, String)> {
+    unsafe extern "system" fn record(hwnd: HWND, param: LPARAM) -> BOOL {
+        let pages = unsafe { &mut *(param.0 as *mut Vec<(isize, String)>) };
+        let title = window_text(hwnd);
+        if title.contains("ChatGPT") {
+            pages.push((hwnd.0 as isize, title));
+        }
+        true.into()
+    }
+
+    let mut pages = Vec::new();
+    unsafe {
+        let _ = EnumWindows(Some(record), LPARAM(&mut pages as *mut Vec<(isize, String)> as isize));
+    }
+    pages
+}
+
+fn wait_chatgpt_open(started: Instant, delay_ms: u32, previous_pages: &[(isize, String)]) -> Result<HWND, String> {
+    let delay_ms = u64::from(delay_ms);
+    let limit_ms = delay_ms + 10_000;
+    loop {
+        let front = chatgpt_in_front(None);
+        let elapsed = elapsed_ms(started);
+        let title = match front {
+            Ok((hwnd, title)) if attach::chatgpt_page_ready(previous_pages, hwnd.0 as isize, &title, elapsed, delay_ms) => {
+                log(&format!("chatgpt: ChatGPT in front after {elapsed} ms"));
+                return Ok(hwnd);
+            }
+            Ok((_, title)) | Err(title) => title,
+        };
+        let remaining = limit_ms.saturating_sub(elapsed);
+        if remaining == 0 {
+            return Err(title);
+        }
+        sleep_ms(CHATGPT_POLL_MS.min(remaining));
+    }
+}
+
+/// 画像を添付した長い質問(K22)を送る. 文字は`?q=`に入れずにChatGPTを開き(K73), 入力欄を選んで文字と画像を貼る.
+/// 最後の画像のあと, 送信ボタンが押せるようになったらEnterを押す(`send_enter`がオフなら押さない).
+/// 終わったらクリップボードを元に戻す. ChatGPTの窓にならなければ貼らず, 最後の画像をクリップボードに残す.
 /// - `?q=`で開くと, ChatGPTによっては開いたとたんに文字だけを送ってしまう(確認17のI2. 個人のアカウント). `?q=.`も`.`が送られるので使わない.
 /// - `?q=`なしで開くと入力欄にカーソルがないことがある(2026-11-24の会社PC)ので, UI Automationで入力欄(`#prompt-textarea`)を探して選んでから貼る(K76).
 ///   ChatGPTの「入力欄に移る」キー(`Shift+Esc`)は, Edgeでは「ブラウザー タスク マネージャー」が開いて使えなかった(確認18のI2).
 /// - 貼るたびに少し待つ. ブラウザーがクリップボードを読む前に次の画像に入れ替えると, 同じ画像が2回入ったり抜けたりするため.
 /// - `mode = "clipboard"`なら, 文字(なければ最後の画像)をコピーして開くだけ.
-pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::attach::Image], cfg: &Config) -> Result<(), String> {
-    use hikidashi_core::attach;
+pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[attach::Image], cfg: &Config) -> Result<(), String> {
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     let Some(last_img) = images.last() else { return ask_chatgpt_long(hwnd, &text, cfg) };
     if cfg.chatgpt.mode == "clipboard" {
@@ -444,13 +517,14 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
     }
     // 送る前のクリップボード(画像のことも多い)を写しておく
     let saved = super::clipboard::save(hwnd);
+    let previous_pages = chatgpt_pages();
+    let started = Instant::now();
     open_url(&attach::url_without_q(&cfg.chatgpt.url), cfg)?;
     super::storage::log(&format!("chatgpt: question with {} image(s) ({} chars)", images.len(), text.chars().count()));
     let images = images.to_vec();
     let (h, delay, enter, per) = (hwnd.0 as isize, cfg.chatgpt.send_delay_ms, cfg.chatgpt.send_enter, cfg.chatgpt.image_wait_ms);
     std::thread::spawn(move || {
         let hwnd = HWND(h as *mut _);
-        let sleep = |ms: u64| std::thread::sleep(std::time::Duration::from_millis(ms));
         let done = |d: ImagesDone| unsafe {
             // 届かなければ捨てる(戻さない)
             let _ = PostMessageW(Some(HWND(h as *mut _)), WM_APP_IMAGES_DONE, WPARAM(0), LPARAM(Box::into_raw(Box::new(d)) as isize));
@@ -461,34 +535,31 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
             let ours = super::clipboard::set_image(hwnd, images.last().unwrap()).unwrap_or(0);
             done(ImagesDone { saved, ours, failed: true });
         };
-        sleep(delay as u64);
-        // ページが遅いときのため, あと10秒まで待つ
-        if let Err(front) = wait_chatgpt(40) {
-            fail(format!("window in front: {front}"), saved);
-            return;
-        }
         // 貼ったChatGPTのウィンドウ. 待つ間にほかへ移っても, Enterの前にここへ戻す
-        let gpt = unsafe { GetForegroundWindow() }.0 as isize;
-        // タイトルが出てから入力欄ができるまでの間を少し待ち, 入力欄を選ぶ. 見つからなければ, ページが入力欄を選んでいることに任せて貼る
-        sleep(1000);
-        match focus_chatgpt_input(HWND(gpt as *mut _)) {
-            Ok(what) => super::storage::log(&format!("chatgpt: focused the input box ({what})")),
-            Err(e) => super::storage::log(&format!("chatgpt: input box not focused ({e})")),
-        }
-        sleep(300);
+        let gpt = match wait_chatgpt_open(started, delay, &previous_pages) {
+            Ok(gpt) => gpt,
+            Err(front) => return fail(format!("window in front: {front}"), saved),
+        };
+        focus_chatgpt_input(gpt);
         if !text.trim().is_empty() {
             if let Err(e) = copy_text(hwnd, &text.replace('\n', "\r\n")) {
                 fail(e, saved);
                 return;
             }
-            sleep(150);
+            sleep_ms(150);
+            if let Err(front) = chatgpt_in_front(Some(gpt)) {
+                return fail(format!("before text, window in front: {front}"), saved);
+            }
             press(&[VK_CONTROL, VK_V]);
-            super::storage::log(&format!("chatgpt: pasted a long question ({} chars)", text.chars().count()));
-            sleep(800);
+            log(&format!("chatgpt: pasted a long question ({} chars) after {} ms", text.chars().count(), elapsed_ms(started)));
+            sleep_ms(800);
         }
         let mut ours = 0;
         for (i, img) in images.iter().enumerate() {
-            if let Err(front) = wait_chatgpt(20) {
+            if i > 0 {
+                sleep_ms(1000);
+            }
+            if let Err(front) = wait_chatgpt(5000, Some(gpt)) {
                 fail(format!("before image {}, window in front: {front}", i + 1), saved);
                 return;
             }
@@ -497,26 +568,25 @@ pub fn ask_chatgpt_images(hwnd: HWND, text: &str, images: &[hikidashi_core::atta
                 return;
             };
             ours = seq;
-            sleep(150);
+            sleep_ms(150);
+            if let Err(front) = chatgpt_in_front(Some(gpt)) {
+                return fail(format!("before image {}, window in front: {front}", i + 1), saved);
+            }
             press(&[VK_CONTROL, VK_V]);
-            sleep(1000);
         }
-        super::storage::log(&format!("chatgpt: pasted {} image(s)", images.len()));
-        // アップロードが終わるまで待つ
-        sleep(attach::wait_ms(images.len(), per));
+        let pasted = Instant::now();
+        log(&format!("chatgpt: pasted {} image(s) after {} ms", images.len(), elapsed_ms(started)));
         if enter {
+            let fallback_ms = attach::wait_ms(images.len(), per);
+            wait_send_button(gpt, pasted, SendWait::after_paste(), fallback_ms + 5000, 2000, fallback_ms);
             // 待つ間にほかのウィンドウに移っていたら, ChatGPTを前に戻してからEnterを押す(確認16のI4のB)
-            match bring_chatgpt_back(HWND(gpt as *mut _)) {
-                Ok(()) => {
-                    press_enter();
-                    super::storage::log("chatgpt: sent Enter");
-                    enter_again();
-                }
-                Err(front) => super::storage::log(&format!("chatgpt: Enter not sent (window in front: {front})")),
+            match bring_chatgpt_back(gpt) {
+                Ok(()) => send_chatgpt_enter(gpt, started),
+                Err(front) => log(&format!("chatgpt: Enter not sent (window in front: {front})")),
             }
         }
         // 貼り付けが終わってから戻す
-        sleep(1500);
+        sleep_ms(1500);
         done(ImagesDone { saved, ours, failed: false });
     });
     Ok(())
@@ -530,7 +600,7 @@ fn bring_chatgpt_back(gpt: HWND) -> Result<(), String> {
     use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
     use windows::Win32::UI::WindowsAndMessaging::{BringWindowToTop, GetWindowThreadProcessId, IsWindow};
-    if wait_chatgpt(1).is_ok() {
+    if chatgpt_in_front(Some(gpt)).is_ok() {
         return Ok(());
     }
     if !unsafe { IsWindow(Some(gpt)) }.as_bool() {
@@ -563,36 +633,57 @@ fn bring_chatgpt_back(gpt: HWND) -> Result<(), String> {
     }
     super::storage::log("chatgpt: brought ChatGPT back to the front");
     std::thread::sleep(std::time::Duration::from_millis(400));
-    wait_chatgpt(8)
+    wait_chatgpt(2000, Some(gpt)).map(|_| ())
 }
 
-/// ChatGPTの入力欄を探して選ぶ(K76). ページ(Document)の中の入力欄(Edit)のうち, 知っているID(HTMLの`id`. UI AutomationではAutomationId)のもの,
-/// なければページの入力欄が1つだけならそれを選ぶ. 2つ以上で知らないIDなら選ばない(貼る先を間違えないように).
-/// 2026-11-28のEdge(ログインなし)は`mobile-composer-prompt`(名前`Chat with ChatGPT`)だった. 前は`prompt-textarea`.
-/// 選べたら何を選んだかを, 選べなければ今の焦点とページの入力欄の一覧を返す(ログで探し方を直すため).
-/// ブラウザーが読み上げ用の木を作るまで時間がかかることがあるので, 3秒まで探し直す. 裏のスレッドで呼ぶ
-fn focus_chatgpt_input(gpt: HWND) -> Result<String, String> {
-    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
-    use windows::Win32::System::Variant::VARIANT;
-    use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
-    };
-    const IDS: [&str; 2] = ["prompt-textarea", "mobile-composer-prompt"];
-    let err = |e: windows::core::Error| e.to_string();
+/// UI Automationは裏のスレッドで使い, 探し直す間は同じインスタンスを使う
+fn with_chatgpt_automation<T>(run: impl FnOnce(windows::core::Result<IUIAutomation>) -> T) -> T {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
+    use windows::Win32::UI::Accessibility::CUIAutomation;
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).map_err(err)?;
+        if let Err(e) = CoInitializeEx(None, COINIT_MULTITHREADED).ok() {
+            return run(Err(e));
+        }
+        let result = run(CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER));
+        CoUninitialize();
+        result
+    }
+}
+
+fn chatgpt_page_controls(uia: &IUIAutomation, gpt: HWND, kind: UIA_CONTROLTYPE_ID) -> windows::core::Result<Option<IUIAutomationElementArray>> {
+    use windows::Win32::System::Variant::VARIANT;
+    unsafe {
+        let root = uia.ElementFromHandle(gpt)?;
+        let doc = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_DocumentControlTypeId.0))?;
+        let page = match root.FindFirst(TreeScope_Descendants, &doc) {
+            Ok(page) => page,
+            // FindFirstが見つからなかったときのNULLは, windowsクレートでは空のエラーになる
+            Err(e) if e.code() == windows::core::Error::empty().code() => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let control = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(kind.0))?;
+        page.FindAll(TreeScope_Descendants, &control).map(Some)
+    }
+}
+
+/// ChatGPTの入力欄を探して選ぶ(K76). ページの中で知っているIDの入力欄を選び, なければ入力欄が1つのときだけ選ぶ.
+/// 2026-11-28のEdge(ログインなし)は`mobile-composer-prompt`(名前`Chat with ChatGPT`)だった. 前は`prompt-textarea`.
+/// ブラウザーが読み上げ用の木を作るまで時間がかかることがあるので, 8秒まで探し直す.
+/// 見つからなければ今の焦点と入力欄の一覧をログに残し, ページが入力欄を選んでいることに任せて貼る
+fn focus_chatgpt_input(gpt: HWND) {
+    const IDS: [&str; 2] = ["prompt-textarea", "mobile-composer-prompt"];
+    let started = Instant::now();
+    let result = with_chatgpt_automation(|uia| unsafe {
+        let uia = uia.map_err(|e| e.to_string())?;
         let id_of = |e: &IUIAutomationElement| e.CurrentAutomationId().map(|s| s.to_string()).unwrap_or_default();
         let desc = |e: &IUIAutomationElement| {
             let name: String = e.CurrentName().map(|s| s.to_string()).unwrap_or_default().chars().take(40).collect();
             format!("type {} name '{}' id '{}'", e.CurrentControlType().map(|c| c.0).unwrap_or(0), name, id_of(e))
         };
-        let doc = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_DocumentControlTypeId.0)).map_err(err)?;
-        let edit = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(UIA_EditControlTypeId.0)).map_err(err)?;
         let mut edits: Vec<IUIAutomationElement> = vec![];
-        for _ in 0..6 {
+        loop {
             edits.clear();
-            if let Ok(all) = uia.ElementFromHandle(gpt).and_then(|root| root.FindFirst(TreeScope_Descendants, &doc)).and_then(|d| d.FindAll(TreeScope_Descendants, &edit)) {
+            if let Ok(Some(all)) = chatgpt_page_controls(&uia, gpt, UIA_EditControlTypeId) {
                 for i in 0..all.Length().unwrap_or(0) {
                     if let Ok(e) = all.GetElement(i) {
                         edits.push(e);
@@ -601,15 +692,74 @@ fn focus_chatgpt_input(gpt: HWND) -> Result<String, String> {
             }
             let pick = edits.iter().find(|e| IDS.contains(&id_of(e).as_str())).or(if edits.len() == 1 { edits.first() } else { None });
             if let Some(el) = pick {
-                el.SetFocus().map_err(err)?;
+                chatgpt_in_front(Some(gpt)).map_err(|front| format!("window in front: {front}"))?;
+                el.SetFocus().map_err(|e| e.to_string())?;
                 return Ok(desc(el));
             }
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            let remaining = 8000u64.saturating_sub(elapsed_ms(started));
+            if remaining == 0 {
+                break;
+            }
+            sleep_ms(CHATGPT_POLL_MS.min(remaining));
         }
         let focused = uia.GetFocusedElement().map(|e| desc(&e)).unwrap_or_default();
         let list: Vec<String> = edits.iter().take(5).map(|e| desc(e)).collect();
         Err(format!("not found. focused: {focused}. edits in the page: [{}]", list.join("; ")))
+    });
+    match result {
+        Ok(what) => log(&format!("chatgpt: focused the input box after {} ms ({what})", elapsed_ms(started))),
+        Err(e) => log(&format!("chatgpt: input box not focused after {} ms ({e})", elapsed_ms(started))),
     }
+}
+
+/// ページ内の送信ボタンをIDで探し, なければ名前で探す
+fn find_send_button(uia: &IUIAutomation, gpt: HWND) -> windows::core::Result<Option<bool>> {
+    const ID: &str = "composer-submit-button";
+    const NAMES: [&str; 4] = ["Send prompt", "Send message", "プロンプトを送信する", "送信"];
+    let Some(buttons) = chatgpt_page_controls(uia, gpt, UIA_ButtonControlTypeId)? else { return Ok(None) };
+    unsafe {
+        let mut by_name = None;
+        for i in 0..buttons.Length()? {
+            let button = buttons.GetElement(i)?;
+            if button.CurrentAutomationId().is_ok_and(|id| id.to_string() == ID) {
+                return Ok(Some(button.CurrentIsEnabled()?.as_bool()));
+            }
+            if by_name.is_none() && button.CurrentName().is_ok_and(|name| {
+                let name = name.to_string();
+                NAMES.iter().any(|prefix| name.starts_with(prefix))
+            }) {
+                by_name = Some(button);
+            }
+        }
+        by_name.map(|button| button.CurrentIsEnabled().map(|enabled| enabled.as_bool())).transpose()
+    }
+}
+
+fn wait_send_button(gpt: HWND, started: Instant, mut wait: SendWait, limit_ms: u64, missing_ms: u64, fallback_ms: u64) -> SendWaitStep {
+    with_chatgpt_automation(|uia| loop {
+        let enabled = uia.as_ref().ok().and_then(|uia| find_send_button(uia, gpt).ok().flatten());
+        let elapsed = elapsed_ms(started);
+        let step = wait.step(elapsed, enabled, limit_ms, missing_ms);
+        match step {
+            SendWaitStep::Wait { until_ms } => sleep_ms(CHATGPT_POLL_MS.min(until_ms - elapsed)),
+            SendWaitStep::Ready => {
+                log(&format!("chatgpt: send button ready after {elapsed} ms"));
+                return step;
+            }
+            SendWaitStep::Fallback => {
+                let remaining = fallback_ms.saturating_sub(elapsed);
+                if remaining > 0 {
+                    sleep_ms(remaining);
+                }
+                log(&format!("chatgpt: send button not found, waited {} ms", elapsed_ms(started)));
+                return step;
+            }
+            SendWaitStep::TimedOut => {
+                log(&format!("chatgpt: send button wait timed out after {elapsed} ms"));
+                return step;
+            }
+        }
+    })
 }
 
 /// 修飾キーと一緒にキーを押して離す(例: Ctrl+V)
@@ -625,27 +775,27 @@ fn press(keys: &[VIRTUAL_KEY]) {
     }
 }
 
-/// `?q=`で入力欄に入った質問を送る(Q4). 待ってから, 前の窓のタイトルにChatGPTが入っているときだけEnterを押す.
-/// ほかの窓にEnterが行かないよう, ChatGPTでなければ何もしない
-fn send_enter_to_chatgpt(delay_ms: u32) {
+/// `?q=`で入力欄に入った質問を送る(Q4). ボタンが押せるか, 見つからないまま`delay_ms`たったらEnterを押す
+fn send_enter_to_chatgpt(started: Instant, delay_ms: u32, previous_pages: Vec<(isize, String)>) {
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(delay_ms as u64));
-        let mut last = String::new();
-        // ページが遅いときのため, あと10秒まで待つ
-        for _ in 0..40 {
-            let h = unsafe { GetForegroundWindow() };
-            last = window_text(h);
-            // Shift+Enterのあとなどで修飾キーが押されたままなら, 離すまで待つ(Shift+Enterは改行になる)
-            let held = [VK_SHIFT, VK_CONTROL, VK_MENU].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } < 0);
-            if last.contains("ChatGPT") && !held {
-                press_enter();
-                super::storage::log("chatgpt: sent Enter");
-                enter_again();
+        let gpt = match wait_chatgpt_open(started, delay_ms, &previous_pages) {
+            Ok(gpt) => gpt,
+            Err(front) => {
+                log(&format!("chatgpt: Enter not sent (window in front: {front})"));
                 return;
             }
-            std::thread::sleep(std::time::Duration::from_millis(250));
+        };
+        let in_front = Instant::now();
+        let delay_ms = u64::from(delay_ms);
+        let limit_ms = delay_ms + 10_000;
+        if wait_send_button(gpt, in_front, SendWait::default(), limit_ms, delay_ms, delay_ms) == SendWaitStep::TimedOut {
+            return;
         }
-        super::storage::log(&format!("chatgpt: Enter not sent (window in front: {last})"));
+        // Shift+Enterのあとなどで修飾キーが押されたままなら, 離すまで待つ
+        match wait_chatgpt(limit_ms.saturating_sub(elapsed_ms(in_front)), Some(gpt)) {
+            Ok(_) => send_chatgpt_enter(gpt, started),
+            Err(front) => log(&format!("chatgpt: Enter not sent (window in front: {front})")),
+        }
     });
 }
 
@@ -658,18 +808,26 @@ fn window_text(h: HWND) -> String {
 /// 念のため, 間を空けてEnterを2回押し直す(K27). ChatGPTがページを用意する前に押したEnterは効かず,
 /// 質問が入力欄に入ったまま止まった(2026-11-24の会社PC. ログは`sent Enter`). 送れたあとの入力欄は空なので,
 /// 押し直しても何も起きない. ChatGPTが前にないときや修飾キーが押されているときは押さない
-fn enter_again() {
+fn enter_again(gpt: HWND) {
     for wait in [1500u64, 2500] {
-        std::thread::sleep(std::time::Duration::from_millis(wait));
-        let front = window_text(unsafe { GetForegroundWindow() });
-        let held = [VK_SHIFT, VK_CONTROL, VK_MENU].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } < 0);
-        if !front.contains("ChatGPT") || held {
-            super::storage::log(&format!("chatgpt: Enter not repeated (window in front: {front})"));
+        sleep_ms(wait);
+        if let Err(front) = chatgpt_in_front(Some(gpt)) {
+            log(&format!("chatgpt: Enter not repeated (window in front: {front})"));
             return;
         }
         press_enter();
     }
     super::storage::log("chatgpt: sent Enter again twice");
+}
+
+fn send_chatgpt_enter(gpt: HWND, started: Instant) {
+    if let Err(front) = chatgpt_in_front(Some(gpt)) {
+        log(&format!("chatgpt: Enter not sent (window in front: {front})"));
+        return;
+    }
+    press_enter();
+    log(&format!("chatgpt: sent Enter after {} ms", elapsed_ms(started)));
+    enter_again(gpt);
 }
 
 fn press_enter() {

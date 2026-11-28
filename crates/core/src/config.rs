@@ -391,9 +391,9 @@ pub struct ChatGpt {
     pub home: String,
     /// `?q=`で開いたあと, 前の窓のタイトルにChatGPTが入っていればEnterを送る(Q4)
     pub send_enter: bool,
-    /// Enterを送るまで待つ時間(ミリ秒. ページが読み込めたころ)
+    /// `?q=`の送信ボタンが見つからないとき, ChatGPTが前に出てからEnterまで待つ時間(ミリ秒). 前に出るまでの上限はこれに10秒を足す
     pub send_delay_ms: u32,
-    /// 長い質問に添付した画像を貼ったあと, Enterを押すまで待つ時間(ミリ秒. 1枚ごとに足す. アップロードが終わるころ)
+    /// 画像を貼ったあと, 送信ボタンが見つからないときの待ち(1枚あたりのミリ秒). ボタンの上限は枚数分に5秒を足す
     pub image_wait_ms: u32,
     /// 長い質問を書く窓(K22)で, カーソルのない行のMarkdownの記号を隠す. falseなら薄く見せる
     pub hide_marks: bool,
@@ -751,8 +751,11 @@ pub fn to_toml(c: &Config) -> String {
     line(&format!("home = {}", q(&c.chatgpt.home)));
     line("# With \"url\", press Enter in ChatGPT after it opens (only when the window in front is ChatGPT).");
     line(&format!("send_enter = {}", c.chatgpt.send_enter));
+    line("# With ?q=, wait this many milliseconds after ChatGPT comes to the front if the send button cannot be found.");
+    line("# The limit for waiting for ChatGPT to come to the front is this value plus 10 seconds.");
     line(&format!("send_delay_ms = {}", c.chatgpt.send_delay_ms));
-    line("# Long questions with images: wait this long for each image before pressing Enter (while it uploads).");
+    line("# After pasting images, wait this many milliseconds per image if the send button cannot be found.");
+    line("# The limit for waiting for the send button to become enabled is the per-image wait times the image count plus 5 seconds.");
     line(&format!("image_wait_ms = {}", c.chatgpt.image_wait_ms));
     line("# Long questions (Shift+Enter): hide Markdown marks such as ** and # except on the line you are editing. false shows them faintly.");
     line(&format!("hide_marks = {}", c.chatgpt.hide_marks));
