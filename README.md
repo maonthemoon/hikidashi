@@ -45,12 +45,12 @@
 動作環境はWindows 10とWindows 11(64ビット)です. 追加で入れるものはありません. Chrome, Edge, VS Code, WezTerm, Windows Terminal, WSL, Box Driveは, あれば使います.
 
 1. [Releases](https://github.com/maonthemoon/hikidashi/releases/latest)から`Hikidashi-x.y.z.zip`をダウンロードし, 好きな場所(例: `ドキュメント\Hikidashi`)に展開します.
-2. `Hikidashi.exe`を起動します. 署名していないので, 「WindowsによってPCが保護されました」と出たら「詳細情報」→「実行」を押します.
+2. 展開した中の`bin\Hikidashi.exe`を起動します. 署名していないので, 「WindowsによってPCが保護されました」と出たら「詳細情報」→「実行」を押します.
 3. ホットキーを聞かれたら, 使うキー(例: `Alt+Space`)を押します. Hikidashiはタスクトレイに常駐します.
 
 Windowsと一緒に起動するかは, 初めて起動したときに聞かれます. あとからでも, トレイのメニューで切り替えられます.
 
-ZIPの`docs`(マニュアル), `data`(ローマ字で探すための辞書), `licenses`は, `Hikidashi.exe`と一緒に置いてください. スマート アプリ コントロールがオンのPCでは起動できません([マニュアル](https://maonthemoon.github.io/hikidashi/manual.html#smart-app-control)).
+ZIPの中はgitで入れた場合と同じ置き方です. `bin`(exeと, ローマ字で探すための辞書)と`docs`(マニュアル)は, フォルダーごと置いてください. スマート アプリ コントロールがオンのPCでは起動できません([マニュアル](https://maonthemoon.github.io/hikidashi/manual.html#smart-app-control)).
 
 ### gitを使う場合
 
@@ -62,7 +62,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 
 ### 更新
 
-トレイのメニューの`Quit`で終了し, 新しいZIPで置き換えて(gitなら`git pull`して), もう一度起動します. 動いている間はexeを上書きできません. 設定と学習は残ります.
+トレイのメニューの`Quit`で終了し, 新しいZIPで置き換えて(gitなら`git pull`して), もう一度起動します. 動いている間はexeを上書きできません. 設定と学習は残ります. v0.2.14までのZIPはexeが一番上にあったので, そこから更新するときは古いフォルダーの中身を消してから展開してください.
 
 ### アンインストール
 

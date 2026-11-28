@@ -1,6 +1,6 @@
 Third-party notices for Hikidashi
 
-Hikidashi itself is under the MIT License (see LICENSE, or licenses/Hikidashi.txt in the ZIP).
+Hikidashi itself is under the MIT License (see LICENSE).
 Hikidashi.exe contains the following software. Each is listed with the license
 under which it is used here. Where a crate offers a choice, the MIT License is used.
 
@@ -598,10 +598,10 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ========================================================================
-SKK-JISYO.L (a separate file in the ZIP and in bin/, not inside the exe)  https://github.com/skk-dev/dict
+SKK-JISYO.L (a separate file in bin/, not inside the exe)  https://github.com/skk-dev/dict
 ========================================================================
 
-The ZIP and bin/ contain SKK-JISYO.L from the repository above as a separate file, with
+bin/ (in the ZIP and in the repository) contains SKK-JISYO.L from the repository above as a separate file, with
 SKK-JISYO.L-COPYING.txt. Hikidashi.exe does not contain it; it reads the file at run
 time (and downloads it from the repository above if the file is missing). The
 dictionary is under the GNU General Public License version 2 or later; its copyright

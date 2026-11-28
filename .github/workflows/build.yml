@@ -47,16 +47,14 @@ jobs:
       - name: Package
         id: package
         run: |
-          # ZIPは1重で, 上にはexeだけが見えるようにする(K50)
-          mkdir -p dist/docs dist/data dist/licenses
-          cp target/x86_64-pc-windows-gnu/release/hikidashi.exe dist/Hikidashi.exe
-          # トレイのManualはexeの隣のdocs/manual.htmlを開く(K46)
+          # ZIPの中はリポジトリと同じ置き方にする(K81. wakudoriと同じ). ZIPは1重
+          mkdir -p dist/bin dist/docs
+          cp target/x86_64-pc-windows-gnu/release/hikidashi.exe dist/bin/Hikidashi.exe
+          # トレイのManualはexeの1つ上のdocs/manual.htmlを開く(K46)
           cp docs/manual.html dist/docs/manual.html
-          # 辞書(GPL)はexeとは別のファイルとして同梱する(K35). bin/に置いたものを使う(tools/update-dict.sh)
-          cp bin/SKK-JISYO.L dist/data/
-          cp LICENSE dist/licenses/Hikidashi.txt
-          cp THIRD-PARTY-NOTICES.txt dist/licenses/
-          cp bin/SKK-JISYO.L-COPYING.txt dist/licenses/
+          # 辞書(GPL)はexeとは別のファイルとしてexeの隣に置く(K35, K36). bin/に置いたものを使う(tools/update-dict.sh)
+          cp bin/SKK-JISYO.L bin/SKK-JISYO.L-COPYING.txt dist/bin/
+          cp LICENSE THIRD-PARTY-NOTICES.txt dist/
           echo "name=Hikidashi-${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
@@ -97,7 +95,7 @@ jobs:
         if: ${{ !contains(github.ref_name, '-') }}
         run: |
           mkdir -p repo/bin
-          cp dist/Hikidashi.exe repo/bin/Hikidashi.exe
+          cp dist/bin/Hikidashi.exe repo/bin/Hikidashi.exe
           cd repo
           if git diff --quiet -- bin/Hikidashi.exe && git ls-files --error-unmatch bin/Hikidashi.exe >/dev/null 2>&1; then
             echo "bin/Hikidashi.exe is up to date"

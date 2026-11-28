@@ -1250,10 +1250,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
         <p>インストーラーはありません. ZIPを展開して, <code>Hikidashi.exe</code>を起動するだけです. 管理者権限も要りません.</p>
         <ol class="steps" style="--min: 220px" aria-label="インストールの手順">
           <li class="card card--subtle"><span class="card__title">ダウンロード</span><span class="card__body"><a href="https://github.com/maonthemoon/hikidashi/releases/latest" target="_blank" rel="noopener">Releases</a>から<code>Hikidashi-x.y.z.zip</code>をダウンロードします.</span></li>
-          <li class="card card--subtle"><span class="card__title">展開と起動</span><span class="card__body">好きな場所に展開して, <code>Hikidashi.exe</code>をダブルクリックします.</span></li>
+          <li class="card card--subtle"><span class="card__title">展開と起動</span><span class="card__body">好きな場所に展開して, 中の<code>bin\Hikidashi.exe</code>をダブルクリックします.</span></li>
           <li class="card card--subtle"><span class="card__title">ホットキー</span><span class="card__body">使いたいキー(例: <code>Alt+Space</code>)を押して登録します.</span></li>
         </ol>
-        <p>ZIPの中は, <code>Hikidashi.exe</code>と3つのフォルダーです: <code>docs</code>(マニュアル), <code>data</code>(ローマ字で日本語の名前を探すための辞書), <code>licenses</code>(ライセンス). フォルダーごと置いてください.</p>
+        <p>ZIPの中は, gitで入れた場合と同じ置き方です: <code>bin</code>(<code>Hikidashi.exe</code>と, ローマ字で日本語の名前を探すための辞書), <code>docs</code>(マニュアル), ライセンスの2つのファイル. フォルダーごと置いてください.</p>
         <p>置いた場所の<code>Hikidashi.exe</code>がそのまま動きます. 展開したフォルダーは消さずに残してください. 別の場所へ移すときは, フォルダーごと移して, もう一度起動します(自動起動の登録先も直ります).</p>
         <p>動作環境はWindows 10とWindows 11(64ビット)です. 必要なものはWindowsに入っているものだけで, 追加のインストールは要りません.</p>
 
@@ -1296,9 +1296,9 @@ git clone https://github.com/maonthemoon/hikidashi.git</code></pre>
         <ol>
           <li>タスクトレイのメニューの<code>Quit</code>で終了します(動いている間はexeを上書きできません).</li>
           <li><a href="https://github.com/maonthemoon/hikidashi/releases/latest" target="_blank" rel="noopener">Releases</a>から新しいZIPをダウンロードして展開し, 古いものと置き換えます.</li>
-          <li>新しい<code>Hikidashi.exe</code>をダブルクリックします.</li>
+          <li>新しい<code>bin\Hikidashi.exe</code>をダブルクリックします.</li>
         </ol>
-        <p>設定, 学習, 入力の履歴はそのまま残ります. 終了せずに別のフォルダーの新しいexeを起動したときは, 動いている古いものが終わって入れ替わり, ウィンドウの一番下に<code>Hikidashi was updated</code>と出ます.</p>
+        <p>設定, 学習, 入力の履歴はそのまま残ります. 終了せずに別のフォルダーの新しいexeを起動したときは, 動いている古いものが終わって入れ替わり, ウィンドウの一番下に<code>Hikidashi was updated</code>と出ます. v0.2.14までのZIPは<code>Hikidashi.exe</code>が一番上にあったので, そこから更新するときは古いフォルダーの中身を消してから展開してください(自動起動の登録先は, 新しいexeを起動すると直ります).</p>
         <p>gitで入れた場合は, <code>Quit</code>で終了し, <code>git pull</code>してから<code>bin\Hikidashi.exe</code>をダブルクリックします. 前の版が<code>%LOCALAPPDATA%\Hikidashi</code>に写したexeは, 新しい版を起動すると終わって消えます.</p>
 
         <h2 id="search">探して開く</h2>
@@ -1781,7 +1781,7 @@ export function search(query) {
               <tr><td><code>%APPDATA%\Hikidashi\hikidashi.log</code></td><td>索引の件数と時間, エラーの記録. 512KBを超えたら作り直す</td></tr>
               <tr><td><code>%APPDATA%\Hikidashi\scripts</code>, <code>extensions</code></td><td><a href="#scripts">スクリプトと拡張</a>(自分で作る)</td></tr>
               <tr><td><code>%LOCALAPPDATA%\Hikidashi\extensions</code></td><td>同梱の拡張(MIPI RFFE)の写し</td></tr>
-              <tr><td><code>%LOCALAPPDATA%\Hikidashi\SKK-JISYO.L</code></td><td>ネットから取ってきた辞書. exeの隣(ZIPでは<code>data</code>)に辞書がないときだけ(<a href="#faq-romaji">ローマ字で日本語の名前が出ない</a>)</td></tr>
+              <tr><td><code>%LOCALAPPDATA%\Hikidashi\SKK-JISYO.L</code></td><td>ネットから取ってきた辞書. exeの隣(<code>bin</code>)に辞書がないときだけ(<a href="#faq-romaji">ローマ字で日本語の名前が出ない</a>)</td></tr>
             </tbody>
           </table>
         </div>
@@ -1816,9 +1816,9 @@ export function search(query) {
 
         <h3 id="faq-romaji">ローマ字で日本語の名前が出ない</h3>
         <p>ローマ字で日本語を探すのは, 英字を3文字以上打ったときです. 起動した直後は辞書を読んでいるので, 漢字に広げて探すのはそのあとになります.</p>
-        <p>漢字に広げるための辞書(<code>SKK-JISYO.L</code>)は, ライセンス(GPL)の都合でexeには入れず, 別のファイルとしてZIPに入れています(gitで入れた場合は<code>bin\</code>にあります). <code>Hikidashi.exe</code>と同じフォルダーに置いたまま使います. exeを別の場所に移すときは, 辞書も同じフォルダーに置いてください.</p>
+        <p>漢字に広げるための辞書(<code>SKK-JISYO.L</code>)は, ライセンス(GPL)の都合でexeには入れず, 別のファイルとしてZIPとgitの<code>bin\</code>に入れています. <code>Hikidashi.exe</code>と同じフォルダーに置いたまま使います. exeを別の場所に移すときは, 辞書も同じフォルダーに置いてください.</p>
         <p>exeの隣に辞書がないとき(exeだけを移した場合など)は, 初めて起動したときに<a href="https://github.com/skk-dev/dict">SKKの辞書の公開場所</a>から取ってきます(約5MB. 取ってくる間はウィンドウの一番下に<code>Downloading the dictionary…</code>と出ます). 取れるまでは, ローマ字はひらがなとカタカナにだけ広げます(<code>pawa-</code>→パワーは出ますが, <code>kaigi</code>→会議は出ません).</p>
-        <p>会社のネットワークなどで取れないときは, ウィンドウの一番下に<code>Couldn't download the dictionary…</code>と出ます. 次に起動したときにもう一度試します. 取れない場合は, ZIPの<code>SKK-JISYO.L</code>を使うか, 取れるPCで<a href="https://raw.githubusercontent.com/skk-dev/dict/master/SKK-JISYO.L"><code>SKK-JISYO.L</code></a>を保存し, <code>Hikidashi.exe</code>と同じフォルダーに置いてからHikidashiを起動し直します(タスクトレイの<code>Quit</code>で止めて, もう一度起動します).</p>
+        <p>会社のネットワークなどで取れないときは, ウィンドウの一番下に<code>Couldn't download the dictionary…</code>と出ます. 次に起動したときにもう一度試します. 取れない場合は, ZIPの<code>bin\SKK-JISYO.L</code>を使うか, 取れるPCで<a href="https://raw.githubusercontent.com/skk-dev/dict/master/SKK-JISYO.L"><code>SKK-JISYO.L</code></a>を保存し, <code>Hikidashi.exe</code>と同じフォルダーに置いてからHikidashiを起動し直します(タスクトレイの<code>Quit</code>で止めて, もう一度起動します).</p>
 
         <h3 id="faq-log">動きがおかしいとき</h3>
         <p><code>%APPDATA%\Hikidashi\hikidashi.log</code>に, 索引の件数とかかった時間, エラーが残っています. ウィンドウの一番下に赤い文字が出たときも, ここに詳しく書いてあります.</p>
