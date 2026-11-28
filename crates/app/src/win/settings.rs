@@ -1273,8 +1273,8 @@ fn build(hwnd: HWND, hinst: windows::Win32::Foundation::HINSTANCE, a: OpenArgs, 
         p.card();
         p.select(ID_GPT_MODE, "How to send a question", "If it fails, use \"Copy, then open\"", key_items(&GPT_MODES, &c.chatgpt.mode));
         p.check(ID_GPT_SEND, "Press Enter automatically", "Only when ChatGPT is in front", c.chatgpt.send_enter);
-        p.number(ID_GPT_DELAY, "Wait before Enter", "Milliseconds", &c.chatgpt.send_delay_ms.to_string());
-        p.number(ID_GPT_IMAGE_WAIT, "Wait per image", "Milliseconds, added before Enter for each attached image", &c.chatgpt.image_wait_ms.to_string());
+        p.number(ID_GPT_DELAY, "Wait before Enter", "Milliseconds, used when the Send button is not found", &c.chatgpt.send_delay_ms.to_string());
+        p.number(ID_GPT_IMAGE_WAIT, "Wait per image", "Milliseconds per image, used when the Send button is not found", &c.chatgpt.image_wait_ms.to_string());
         p.check(ID_GPT_HIDE, "Hide Markdown marks", "In long questions, except on the line you edit", c.chatgpt.hide_marks);
         p.end_card();
         sections.push(p.finish());

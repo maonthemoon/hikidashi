@@ -81,11 +81,12 @@ git clone https://github.com/maonthemoon/hikidashi.git
 | `Enter` | 選んだ行を開く. 一致がなければChatGPTに聞く |
 | `Ctrl+Enter` / `Ctrl+Alt+Enter` | 打った文字をChatGPTに聞く / Googleで検索する |
 | `Shift+Enter` | 長い質問を書くウィンドウにする(続けて`Enter`で送る) |
+| `Ctrl+V`(画像) | 画像を付けた書くウィンドウにして, ChatGPTに画像つきで聞く |
 | `Alt+Enter` | そのフォルダーにターミナルで入る |
 | `Ctrl+Shift+Enter` | 管理者として実行する |
 | `Tab` | 選んだ行を入力欄に入れて, 続きを打つ |
 | `→`(入力欄の終わりで) | 操作を選ぶ(フォルダーを開く, パスをコピーなど) |
-| `Esc` | 隠す |
+| `Esc` | 隠す. 書くウィンドウは`Esc`まで閉じず, 次に出すと書きかけを全部選んだ形で出す |
 
 先頭に次の文字と空白を打つと, その種類だけになります.
 
