@@ -48,12 +48,12 @@ jobs:
         id: package
         run: |
           # ZIPの中はリポジトリと同じ置き方にする(K81. wakudoriと同じ). ZIPは1重
-          mkdir -p dist/bin dist/docs
+          mkdir -p dist/bin dist/data dist/docs
           cp target/x86_64-pc-windows-gnu/release/hikidashi.exe dist/bin/Hikidashi.exe
           # トレイのManualはexeの1つ上のdocs/manual.htmlを開く(K46)
           cp docs/manual.html dist/docs/manual.html
-          # 辞書(GPL)はexeとは別のファイルとしてexeの隣に置く(K35, K36). bin/に置いたものを使う(tools/update-dict.sh)
-          cp bin/SKK-JISYO.L bin/SKK-JISYO.L-COPYING.txt dist/bin/
+          # 辞書(GPL)はexeとは別のファイルとしてdata/に置く(K35, K82). リポジトリのdata/のものを使う(tools/update-dict.sh)
+          cp data/SKK-JISYO.L data/SKK-JISYO.L-COPYING.txt dist/data/
           cp LICENSE THIRD-PARTY-NOTICES.txt dist/
           echo "name=Hikidashi-${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7

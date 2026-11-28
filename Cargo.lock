@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "hikidashi"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "hikidashi-core",
  "hikidashi-ext",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "hikidashi-core"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "rusqlite",
  "serde",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "hikidashi-ext"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "rquickjs",
  "serde_json",

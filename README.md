@@ -50,11 +50,11 @@
 
 Windowsと一緒に起動するかは, 初めて起動したときに聞かれます. あとからでも, トレイのメニューで切り替えられます.
 
-ZIPの中はgitで入れた場合と同じ置き方です. `bin`(exeと, ローマ字で探すための辞書)と`docs`(マニュアル)は, フォルダーごと置いてください. スマート アプリ コントロールがオンのPCでは起動できません([マニュアル](https://maonthemoon.github.io/hikidashi/manual.html#smart-app-control)).
+ZIPの中はgitで入れた場合と同じ置き方です. `bin`(exe), `data`(ローマ字で探すための辞書), `docs`(マニュアル)は, フォルダーごと置いてください. スマート アプリ コントロールがオンのPCでは起動できません([マニュアル](https://maonthemoon.github.io/hikidashi/manual.html#smart-app-control)).
 
 ### gitを使う場合
 
-cloneして, `bin\Hikidashi.exe`を起動します(最新のリリースと同じexeで, 隣に辞書もあります).
+cloneして, `bin\Hikidashi.exe`を起動します(最新のリリースと同じexeで, 辞書は`data`にあります).
 
 ```sh
 git clone https://github.com/maonthemoon/hikidashi.git
@@ -62,7 +62,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 
 ### 更新
 
-トレイのメニューの`Quit`で終了し, 新しいZIPで置き換えて(gitなら`git pull`して), もう一度起動します. 動いている間はexeを上書きできません. 設定と学習は残ります. v0.2.14までのZIPはexeが一番上にあったので, そこから更新するときは古いフォルダーの中身を消してから展開してください.
+トレイのメニューの`Quit`で終了し, 新しいZIPで置き換えて(gitなら`git pull`して), もう一度起動します. 動いている間はexeを上書きできません. 設定と学習は残ります. v0.2.15までのZIPは置き方が違うので(辞書が`bin`か`data`の中), そこから更新するときは古いフォルダーの中身を消してから展開してください.
 
 ### アンインストール
 
@@ -113,7 +113,7 @@ git clone https://github.com/maonthemoon/hikidashi.git
 | `%APPDATA%\Hikidashi\learn.tsv`, `history.txt`, `compose.json` | 学習, 入力の履歴, 長い質問の書きかけと送った文 |
 | `%APPDATA%\Hikidashi\snapshots.json` | `Ctrl+S`で保存した結果 |
 | `%APPDATA%\Hikidashi\state.txt`, `apps.txt`, `hikidashi.log` | ホットキー, アプリの一覧, 件数と時間とエラーの記録 |
-| `%LOCALAPPDATA%\Hikidashi` | 同梱の拡張の写しと, 取ってきた辞書(exeの隣に辞書がないときだけ) |
+| `%LOCALAPPDATA%\Hikidashi` | 同梱の拡張の写しと, 取ってきた辞書(`data`に辞書がないときだけ) |
 
 どれもこのPCに残すだけで, どこにも送りません. Hikidashiが自分から通信するのは, 辞書が見つからず, [取ってくる](https://maonthemoon.github.io/hikidashi/manual.html#faq-romaji)ときだけです.
 
@@ -148,7 +148,7 @@ cargo test
 
 ### そのほかの作り直し
 
-- 辞書: [`tools/update-dict.sh`](tools/update-dict.sh)で, [skk-dev/dict](https://github.com/skk-dev/dict)から`bin/`に取ってきます. GPLなのでexeには入れず, 別のファイルとして配ります.
+- 辞書: [`tools/update-dict.sh`](tools/update-dict.sh)で, [skk-dev/dict](https://github.com/skk-dev/dict)から`data/`に取ってきます. GPLなのでexeには入れず, 別のファイルとして配ります.
 - ライセンス表記: 依存を変えたら, `uv run tools/make-notices.py`で[`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt)を作り直します.
 - アイコン: `uv run tools/make-icon.py`で[`assets/hikidashi.ico`](assets/hikidashi.ico)を作ります.
 - READMEの動く画像: `uv run tools/make-demo.py`で, 紹介のページのデモを`docs/images/`に書き出します.
@@ -158,4 +158,4 @@ cargo test
 
 [MIT](LICENSE) © 2026 maonthemoon
 
-exeに入るものなどの表記は[`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt)にあります. 同梱の辞書(SKK-JISYO.L)は[GPL](bin/SKK-JISYO.L-COPYING.txt)です.
+exeに入るものなどの表記は[`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt)にあります. 同梱の辞書(SKK-JISYO.L)は[GPL](data/SKK-JISYO.L-COPYING.txt)です.

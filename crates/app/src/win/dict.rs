@@ -1,6 +1,6 @@
 //! ローマ字で日本語を探す辞書(SKK-JISYO.L. GPL)を用意する(K5, K31).
-//! exeには入れない(GPLのため). ZIPにはexeとは別のファイルとして同梱し(K35), 起動したときにexeと一緒に
-//! `%LOCALAPPDATA%\Hikidashi\SKK-JISYO.L`へ写す. そこを読み, なければexeの隣, それもなければネットから取ってくる.
+//! exeには入れない(GPLのため). リポジトリとZIPの`data`に別のファイルとして置き(K35, K82), そこを読む.
+//! なければ前に取ってきた`%LOCALAPPDATA%\Hikidashi\SKK-JISYO.L`, それもなければネットから取ってくる.
 //! 取ってくる間と取れなかったときは, ローマ字→ひらがな・カタカナだけで探す(辞書なしでも動く).
 
 use super::indexer::{post_to, Shared, STATUS_DICT, WM_APP_INDEX};
@@ -37,10 +37,9 @@ pub fn start(hwnd: HWND, shared: Arc<Shared>, dict: Arc<OnceLock<Dict>>) {
 
 fn prepare(shared: &Shared) -> Option<Dict> {
     let p = path();
-    // exeの隣(同梱したもの), 前に取ってきたものの順に読む
-    // ZIPでは`data`の中, リポジトリの`bin`ではexeの隣(K50)
+    // 同梱したもの(exeの1つ上の`data`など. K82), 前に取ってきたものの順に読む
     let dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf()));
-    let beside = dir.into_iter().flat_map(|d| [d.join("data").join(FILE_NAME), d.join(FILE_NAME)]);
+    let beside = dir.into_iter().flat_map(|d| hikidashi_core::migemo::bundled_paths(&d, FILE_NAME));
     for cand in beside.chain(std::iter::once(p.clone())) {
         let Ok(bytes) = std::fs::read(&cand) else { continue };
         match load(&bytes) {

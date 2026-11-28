@@ -165,8 +165,30 @@ fn push(words: &mut Vec<String>, w: String) {
     }
 }
 
+/// exeが`dir`にあるときの, 同梱の辞書の場所の候補(読む順). リポジトリとZIPではexe(`bin`)の1つ上の`data`(K82).
+/// 前の置き方(v0.2.14までのZIPはexeの隣の`data`, v0.2.15はexeの隣)と, 手元のビルド(`out`の隣)も読む
+pub fn bundled_paths(dir: &std::path::Path, file: &str) -> Vec<std::path::PathBuf> {
+    let mut v = Vec::new();
+    if let Some(up) = dir.parent() {
+        v.push(up.join("data").join(file));
+    }
+    v.push(dir.join("data").join(file));
+    v.push(dir.join(file));
+    v
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bundled_paths_order() {
+        let p = super::bundled_paths(std::path::Path::new("/x/hikidashi/bin"), "SKK-JISYO.L");
+        let want: Vec<std::path::PathBuf> = ["/x/hikidashi/data/SKK-JISYO.L", "/x/hikidashi/bin/data/SKK-JISYO.L", "/x/hikidashi/bin/SKK-JISYO.L"]
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+        assert_eq!(p, want);
+    }
+
     use super::*;
 
     const SAMPLE: &str = ";; okuri-ari entries.\nかえr /帰/返/\n;; okuri-nasi entries.\nかいぎ /会議/回議;注釈/\nかいぎしつ /会議室/\nかいしゃ /会社/\nしりょう /資料/試料/\nてい /低/\nていれい /定例/\nいんたーねっと /(concat \"x\")/インターネット/\n";

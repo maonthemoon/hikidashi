@@ -62,11 +62,12 @@ pub fn remove_old_copy() {
     }
     // 空のときだけ消える
     let _ = std::fs::remove_dir(dir.join("docs"));
-    // 写した辞書は, exeの隣に同じ大きさのものがあるときだけ
+    // 写した辞書は, 同梱の辞書(K82)に同じ大きさのものがあるときだけ
     let dict = dir.join("SKK-JISYO.L");
     let size = |p: &std::path::Path| std::fs::metadata(p).map(|m| m.len()).ok();
-    if let (Some(a), Some(b)) = (size(&dict), exe.parent().and_then(|d| size(&d.join("SKK-JISYO.L")))) {
-        if a == b {
+    let bundled = exe.parent().map(|d| hikidashi_core::migemo::bundled_paths(d, "SKK-JISYO.L")).unwrap_or_default();
+    if let Some(a) = size(&dict) {
+        if bundled.iter().any(|p| size(p) == Some(a)) {
             let _ = std::fs::remove_file(&dict);
         }
     }
