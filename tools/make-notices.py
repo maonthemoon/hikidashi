@@ -3,7 +3,7 @@
 # dependencies = []
 # ///
 """THIRD-PARTY-NOTICES.txt を作る. exeに入るクレート(Windows向けの通常の依存. マクロのクレートは除く)の
-ライセンス本文と, マニュアルに埋め込んだフォント, SQLite, 取ってくる辞書の表記をまとめる.
+ライセンス本文と, マニュアルと紹介のページに埋め込んだフォント, SQLite, 取ってくる辞書の表記をまとめる.
 
 使い方: uv run tools/make-notices.py  (リポジトリの直下で. cargoが要る)
 """
@@ -85,7 +85,7 @@ def main():
     out = [
         "Third-party notices for Hikidashi",
         "",
-        "Hikidashi itself is under the MIT License (see LICENSE.txt).",
+        "Hikidashi itself is under the MIT License (see LICENSE, or licenses/Hikidashi.txt in the ZIP).",
         "Hikidashi.exe contains the following software. Each is listed with the license",
         "under which it is used here. Where a crate offers a choice, the MIT License is used.",
         "",
@@ -110,10 +110,17 @@ def main():
         "SQLite is in the public domain. See https://sqlite.org/copyright.html",
         "",
         bar,
-        "Noto Serif JP (a subset is embedded in the manual)  https://github.com/notofonts/noto-cjk",
+        "Fonts embedded in the manual (docs/manual.html, also in the ZIP) and the introduction page (docs/index.html), as subsets",
+        "Noto Serif JP  https://github.com/notofonts/noto-cjk",
+        "Noto Sans JP  https://github.com/notofonts/noto-cjk",
+        "Noto Sans Mono  https://github.com/notofonts/latin-greek-cyrillic",
         bar,
         "",
-        "Copyright 2017-2024 Adobe (http://www.adobe.com/).",
+        "Noto Serif JP: Copyright 2017-2024 Adobe (http://www.adobe.com/).",
+        "Noto Sans JP: (c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.",
+        "Noto Sans Mono: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).",
+        "",
+        "All three are licensed under the SIL Open Font License, Version 1.1:",
         "",
         OFL.read_text(encoding="utf-8").strip(),
         "",
